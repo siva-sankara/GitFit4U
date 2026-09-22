@@ -1,0 +1,27 @@
+import { Router } from "express";
+import { authRoutes } from "./authRoutes.js";
+import { publicRoutes } from "./publicRoutes.js";
+import { userRoutes } from "./userRoutes.js";
+import { checkoutRoutes } from "./checkoutRoutes.js";
+import { ownerRoutes } from "./ownerRoutes.js";
+import { adminRoutes } from "./adminRoutes.js";
+import { trainerRoutes } from "./trainerRoutes.js";
+import { messagingRoutes } from "./messagingRoutes.js";
+import { locationRoutes } from "./locationRoutes.js";
+import { deviceRoutes } from "./deviceRoutes.js";
+import { uploadRoutes } from "./uploadRoutes.js";
+import { workspaceRoutes } from "./workspaceRoutes.js";
+
+export const apiRoutes = Router();
+apiRoutes.use("/workspace", workspaceRoutes);
+apiRoutes.use("/auth", authRoutes);
+apiRoutes.use("/public", publicRoutes);
+apiRoutes.use("/users", userRoutes);
+apiRoutes.use("/checkout", checkoutRoutes);
+apiRoutes.use("/owner", ownerRoutes);
+apiRoutes.use("/admin", adminRoutes);
+apiRoutes.use("/trainer", trainerRoutes);
+apiRoutes.use("/conversations", messagingRoutes);
+apiRoutes.use("/locations", locationRoutes);
+apiRoutes.use("/devices", deviceRoutes);
+apiRoutes.use("/uploads", uploadRoutes);

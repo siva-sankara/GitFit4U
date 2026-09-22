@@ -1,0 +1,1 @@
+import { LiveWorkspace } from "../live/LiveWorkspace"; export function AdminDataPage(_props: { type: string }) { return <LiveWorkspace />; }

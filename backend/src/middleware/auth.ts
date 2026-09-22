@@ -1,0 +1,73 @@
+import type { RequestHandler } from "express";
+import { Session, RoleAssignment } from "../models/Auth.js";
+import { User } from "../models/User.js";
+import { verifyAccessToken } from "../services/tokenService.js";
+import { AppError } from "../utils/AppError.js";
+import type { Permission, Role } from "../constants/domain.js";
+
+export const requireAuth: RequestHandler = async (req, _res, next) => {
+  try {
+    const header = req.header("authorization");
+    if (!header?.startsWith("Bearer ")) {
+      throw new AppError(401, "AUTH_REQUIRED", "Please sign in to continue.");
+    }
+    const claims = verifyAccessToken(header.slice(7));
+    const [session, user] = await Promise.all([
+      Session.findOne({ publicId: claims.sid, userId: claims.sub, revokedAt: null }),
+      User.findById(claims.sub)
+    ]);
+    if (!session || session.expiresAt <= new Date() || !user || user.status !== "ACTIVE" || !user.roles.includes(session.activeRole)) {
+      throw new AppError(401, "SESSION_EXPIRED", "Your session is no longer active.");
+    }
+
+    let permissions: Permission[] = [];
+    if (session.activeRole === "ADMIN") {
+      permissions = ["admin:platform"];
+    } else if (["GYM_OWNER", "GYM_STAFF", "TRAINER"].includes(session.activeRole)) {
+      const assignment = await RoleAssignment.findOne({
+        userId: user._id,
+        role: session.activeRole,
+        gymId: session.activeGymId,
+        status: "ACTIVE"
+      });
+      if (!assignment) throw new AppError(403, "ROLE_REVOKED", "Your gym access has been removed.");
+      permissions = assignment.permissions as Permission[];
+    }
+
+    req.auth = {
+      userId: String(user._id),
+      role: session.activeRole as Role,
+      gymId: session.activeGymId ? String(session.activeGymId) : undefined,
+      permissions,
+      sessionId: session.publicId
+    };
+    next();
+  } catch (error) {
+    next(error);
+  }
+};
+
+export function requireRole(...roles: Role[]): RequestHandler {
+  return (req, _res, next) => {
+    if (!req.auth || !roles.includes(req.auth.role)) {
+      return next(new AppError(403, "ROLE_FORBIDDEN", "You do not have access to this area."));
+    }
+    next();
+  };
+}
+
+export function requirePermission(permission: Permission): RequestHandler {
+  return (req, _res, next) => {
+    if (!req.auth?.permissions.includes(permission) && !req.auth?.permissions.includes("admin:platform")) {
+      return next(new AppError(403, "PERMISSION_DENIED", "You do not have permission for this action."));
+    }
+    next();
+  };
+}
+
+export const requireGymContext: RequestHandler = (req, _res, next) => {
+  if (!req.auth?.gymId) {
+    return next(new AppError(400, "GYM_CONTEXT_REQUIRED", "Select a gym to continue."));
+  }
+  next();
+};

@@ -1,0 +1,315 @@
+import { loginDestination, workspacePrefix } from "../services/authRedirect";
+import "../styles/workspace-navigation.css";
+import {
+  Bell,
+  Menu,
+  Moon,
+  Sun,
+  X,
+  LayoutDashboard,
+  Users,
+  Dumbbell,
+  Activity,
+  CalendarDays,
+  Settings,
+  MessageCircle,
+  ShieldCheck,
+  Building2,
+  LogOut,
+} from "lucide-react";
+import { useEffect, useState } from "react";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { Brand } from "../components/Brand";
+import { useApp } from "../context/AppContext";
+import { useCurrentUser, useNotifications } from "../api/hooks";
+import { apiRequest, setAccessToken } from "../services/apiClient";
+import type { Role } from "../types";
+const navigation: Record<string, Array<[string, string, string?]>> = {
+  USER: [
+    ["Home", "home"],
+    ["Explore gyms", "explore"],
+    ["Subscriptions", "subscriptions"],
+    ["Attendance", "attendance"],
+    ["Classes", "classes"],
+    ["Workouts", "workouts"],
+    ["Favorites", "favorites"],
+    ["Payments", "payments"],
+    ["Invoices", "invoices"],
+    ["Referrals", "referrals"],
+    ["Notifications", "notifications"],
+    ["Messages", "messages"],
+    ["Support", "support"],
+  ],
+  GYM_OWNER: [
+    ["Dashboard", "dashboard", "gym:read"],
+    ["Gym profile", "gym-profile", "gym:update"],
+    ["Members", "members", "member:read"],
+    ["Plans", "plans", "gym:read"],
+    ["Subscriptions", "subscriptions", "member:read"],
+    ["Attendance", "attendance", "member:read"],
+    ["Scanner", "scanner", "attendance:scan"],
+    ["Classes", "classes", "gym:read"],
+    ["Trainers", "trainers", "gym:read"],
+    ["Payments", "payments", "finance:read"],
+    ["Revenue", "revenue", "finance:read"],
+    // Temporarily hidden; their existing routes remain available by permission.
+    // ["Invoices", "invoices", "finance:read"],
+    // ["Campaigns", "campaigns", "campaign:write"],
+    ["Offers", "offers", "campaign:write"],
+    ["Advertisements", "ads", "campaign:write"],
+    ["Messages", "messages"],
+    ["Notifications", "notifications"],
+    ["Settings", "settings", "gym:update"],
+    ["Support", "support"],
+  ],
+  TRAINER: [
+    ["Dashboard", "dashboard"],
+    ["Clients", "clients"],
+    ["Schedule", "schedule"],
+    ["Workout plans", "workout-plans"],
+    ["Progress", "progress"],
+    ["Attendance", "attendance"],
+    ["Messages", "messages"],
+    ["Notifications", "notifications"],
+    ["Support", "support"],
+  ],
+  ADMIN: [
+    ["Dashboard", "dashboard"],
+    ["Registrations", "registrations"],
+    ["Gyms", "gyms"],
+    ["Owners", "owners"],
+    ["Users", "users"],
+    ["Platform plans", "platform-plans"],
+    ["Subscriptions", "subscriptions"],
+    ["Payments", "payments"],
+    ["Invoices", "invoices"],
+    ["Refunds", "refunds"],
+    ["Campaigns", "whatsapp"],
+    ["Advertisements", "ads"],
+    ["Reviews", "reviews"],
+    ["Monitoring", "monitoring"],
+    ["Audit logs", "audit"],
+    ["Support", "support"],
+    ["Notifications", "notifications"],
+  ],
+};
+export function WorkspaceLayout() {
+  const [drawer, setDrawer] = useState(false),
+    { theme, toggleTheme, toast } = useApp(),
+    me = useCurrentUser(),
+    notifications = useNotifications(),
+    client = useQueryClient(),
+    navigate = useNavigate(),
+    location = useLocation();
+  const user = me.data?.data.user,
+    context = me.data?.data.context,
+    assignments = me.data?.data.assignments || [];
+  const activeRole = context?.role || "USER";
+  const role: Role = activeRole === "GYM_STAFF" ? "GYM_OWNER" : activeRole;
+  const prefix = workspacePrefix(activeRole);
+  const rows = navigation[role].filter(
+    ([, , permission]) =>
+      !permission || context?.permissions.includes(permission),
+  );
+  const title =
+    rows.find(([, page]) => location.pathname === `${prefix}/${page}`)?.[0] ||
+    (location.pathname === "/profile" ||
+    location.pathname === `${prefix}/profile`
+      ? "My profile"
+      : "GETFIT4U");
+  const gym = assignments.find((a) => a.gymId?._id === context?.gymId)?.gymId;
+  const roleLabel =
+    activeRole === "USER"
+      ? "Member"
+      : activeRole === "GYM_STAFF"
+        ? "Gym staff"
+        : activeRole === "GYM_OWNER"
+          ? "Gym owner"
+          : activeRole === "ADMIN"
+            ? "Administrator"
+            : "Trainer";
+  const initials = (user?.name || "Member")
+    .split(" ")
+    .map((part) => part[0])
+    .slice(0, 2)
+    .join("");
+  const unread =
+    notifications.data?.data.filter((notification) => !notification.readAt)
+      .length || 0;
+  useEffect(() => {
+    setDrawer(false);
+  }, [location.pathname]);
+  useEffect(() => {
+    if (!drawer) return;
+    const close = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setDrawer(false);
+    };
+    window.addEventListener("keydown", close);
+    return () => window.removeEventListener("keydown", close);
+  }, [drawer]);
+  const logout = useMutation({
+    mutationFn: () => apiRequest("/api/v1/auth/logout", { method: "POST" }),
+    onSuccess: () => {
+      setAccessToken(null);
+      client.clear();
+      navigate("/login", { replace: true });
+    },
+  });
+  return (
+    <div className="workspace">
+      <a href="#workspace-content" className="skip-link">
+        Skip to content
+      </a>
+      {drawer && (
+        <button
+          className="drawer-scrim"
+          aria-label="Close navigation"
+          onClick={() => setDrawer(false)}
+        />
+      )}
+      <aside className={drawer ? "sidebar drawer-open" : "sidebar"}>
+        <div className="sidebar-head">
+          <Brand to={loginDestination(role)} />
+          <button
+            className="icon-btn drawer-close"
+            aria-label="Close menu"
+            onClick={() => setDrawer(false)}
+          >
+            <X />
+          </button>
+        </div>
+        <div className="sidebar-access">
+          <span>{roleLabel}</span>
+          <strong>{gym?.name || "GETFIT4U"}</strong>
+        </div>
+        <nav className="sidebar-nav" aria-label="Workspace navigation">
+          {rows.map(([text, page], i) => (
+            <NavLink
+              key={page}
+              title={text}
+              aria-label={text}
+              to={`${prefix}/${page}`}
+              onClick={() => setDrawer(false)}
+            >
+              {i === 0 ? (
+                <LayoutDashboard size={19} />
+              ) : page === "members" || page === "clients" ? (
+                <Users size={19} />
+              ) : page === "classes" ? (
+                <CalendarDays size={19} />
+              ) : page === "attendance" ? (
+                <Activity size={19} />
+              ) : page === "messages" ? (
+                <MessageCircle size={19} />
+              ) : page === "settings" ? (
+                <Settings size={19} />
+              ) : (
+                <Dumbbell size={19} />
+              )}
+              <span>{text}</span>
+            </NavLink>
+          ))}
+        </nav>
+        <div className="sidebar-foot">
+          <NavLink
+            to="/register-gym"
+            title="Register a gym"
+            aria-label="Register a gym"
+          >
+            <Building2 size={20} />
+            <span>Register a gym</span>
+          </NavLink>
+          <NavLink
+            to="/profile"
+            className="sidebar-profile"
+            aria-label={`Open profile for ${user?.name || "Member"}`}
+            title={user?.name || "My profile"}
+          >
+            <span className="avatar">{initials}</span>
+            <span className="profile-name">
+              <strong>{user?.name || "Member"}</strong>
+              <small>My profile</small>
+            </span>
+          </NavLink>
+          <button
+            className="btn btn-secondary sidebar-logout"
+            aria-label="Log out"
+            title="Log out"
+            disabled={logout.isPending}
+            onClick={() => logout.mutate()}
+          >
+            <LogOut size={18} />
+            <span>{logout.isPending ? "Logging out..." : "Log out"}</span>
+          </button>
+          {logout.isError && <p role="alert">{logout.error.message}</p>}
+        </div>
+      </aside>
+      <div className="workspace-main">
+        <header className="workspace-topbar">
+          <button
+            className="icon-btn drawer-toggle"
+            aria-label="Open menu"
+            aria-expanded={drawer}
+            onClick={() => setDrawer(true)}
+          >
+            <Menu />
+          </button>
+          <div className="topbar-title">
+            <span className="subtle">{gym?.name || "GETFIT4U"}</span>
+            <strong>{title}</strong>
+          </div>
+          <div className="topbar-actions">
+            <button
+              className="icon-btn"
+              aria-label="Toggle theme"
+              onClick={toggleTheme}
+            >
+              {theme === "dark" ? <Sun /> : <Moon />}
+            </button>
+            <button
+              className="icon-btn workspace-notification-button"
+              aria-label="Notifications"
+              onClick={() => navigate(`${prefix}/notifications`)}
+            >
+              <Bell />
+              {unread > 0 && (
+                <span
+                  className="workspace-unread-count"
+                  aria-label={`${unread} unread notifications`}
+                >
+                  {unread > 99 ? "99+" : unread}
+                </span>
+              )}
+            </button>
+            <NavLink
+              to="/profile"
+              className="topbar-profile"
+              aria-label={`Open profile for ${user?.name || "Member"}`}
+              title="My profile"
+            >
+              <span className="avatar">{initials}</span>
+              <strong>{user?.name || "Member"}</strong>
+            </NavLink>
+          </div>
+        </header>
+        <main id="workspace-content" className="workspace-content">
+          <Outlet />
+        </main>
+      </div>
+      <nav className="mobile-bottom-nav" aria-label="Mobile navigation">
+        {rows.slice(0, 5).map(([text, page]) => (
+          <NavLink key={page} to={`${prefix}/${page}`}>
+            <span>{text}</span>
+          </NavLink>
+        ))}
+      </nav>
+      {toast && (
+        <div className="toast" role="status">
+          <ShieldCheck />
+          {toast}
+        </div>
+      )}
+    </div>
+  );
+}

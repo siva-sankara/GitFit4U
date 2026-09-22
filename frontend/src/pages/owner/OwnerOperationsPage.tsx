@@ -1,0 +1,1 @@
+import { LiveWorkspace } from "../live/LiveWorkspace"; export function OwnerOperationsPage(_props: { type: string }) { return <LiveWorkspace />; }

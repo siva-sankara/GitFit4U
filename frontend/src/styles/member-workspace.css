@@ -1,0 +1,216 @@
+.dashboard-gym-status {
+  padding: 20px 24px;
+}
+.dashboard-gym-status > header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.dashboard-gym-status h2 {
+  margin: 0;
+  font-size: var(--text-size-body);
+  line-height: 1.5;
+}
+.dashboard-gym-status p {
+  margin: 10px 0 0;
+  color: var(--text-secondary);
+  font-size: var(--text-size-small);
+}
+.dashboard-gym-status > a {
+  display: inline-block;
+  margin-top: 12px;
+}
+.subscriptions-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 18px;
+}
+.subscriptions-toolbar .search-field {
+  flex: 1 1 220px;
+  width: auto;
+  box-shadow: none;
+}
+.subscriptions-toolbar .field {
+  margin: 0;
+}
+.member-subscription-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+}
+.live-subscription-card {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  padding: 24px;
+  min-width: 0;
+}
+.live-subscription-card > header {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.live-subscription-card > header > div:nth-child(2) {
+  flex: 1;
+  min-width: 130px;
+}
+.live-subscription-card h2 {
+  margin: 0;
+  font-size: 1.35rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.live-subscription-card header p {
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+  font-size: var(--text-size-small);
+  overflow-wrap: anywhere;
+}
+.subscription-gym-icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  background: #ecfccb;
+  color: #365314;
+}
+.live-subscription-details {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin: 0;
+  padding-block: 18px;
+  border-block: 1px solid var(--border);
+}
+.live-subscription-details dt {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-muted);
+  font-size: var(--text-size-caption);
+}
+.live-subscription-details dd {
+  margin: 5px 0 0;
+  font-size: var(--text-size-small);
+  font-weight: 700;
+}
+.live-subscription-card .subscription-actions {
+  margin-top: auto;
+}
+.subscription-payment-note {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--surface-muted);
+  color: var(--text-secondary);
+  font-size: var(--text-size-small);
+}
+.subscription-notice {
+  margin: 0;
+  padding: 18px 22px;
+  border: 1px solid #bbf7d0;
+  border-radius: 18px;
+  background: #f0fdf4;
+  color: #166534;
+}
+.subscription-notice p {
+  margin: 5px 0 0;
+  font-size: var(--text-size-small);
+}
+.subscription-empty {
+  display: grid;
+  justify-items: center;
+  text-align: center;
+  gap: 14px;
+  padding: 48px 24px;
+}
+.subscription-empty h2,
+.subscription-empty p {
+  margin: 0;
+}
+.subscription-empty h2 {
+  font-size: 1.5rem;
+}
+.subscription-empty p {
+  max-width: 520px;
+  color: var(--text-secondary);
+}
+.subscription-loading-card {
+  display: grid;
+  gap: 20px;
+  padding: 26px;
+}
+.subscription-skeleton {
+  display: block;
+  width: 65%;
+  height: 20px;
+  border-radius: 8px;
+  background: var(--border);
+  animation: subscription-pulse 1.5s ease-in-out infinite;
+}
+.subscription-skeleton--title {
+  width: 85%;
+  height: 32px;
+}
+.subscription-skeleton--details {
+  width: 100%;
+  height: 68px;
+}
+.subscription-skeleton--button {
+  width: 55%;
+  height: 44px;
+}
+.subscription-spinner {
+  animation: subscription-spin 1s linear infinite;
+  flex-shrink: 0;
+}
+@keyframes subscription-pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+@keyframes subscription-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (max-width: 1100px) {
+  .member-subscription-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 600px) {
+  .live-subscription-card {
+    padding: 20px;
+  }
+  .live-subscription-details {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+  .live-subscription-details > div {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .live-subscription-details dd {
+    margin: 0;
+    text-align: right;
+  }
+  .subscriptions-toolbar > .field {
+    flex: 1 1 100%;
+  }
+  .subscriptions-toolbar > .field .select {
+    width: 100%;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .subscription-skeleton,
+  .subscription-spinner {
+    animation: none;
+  }
+}

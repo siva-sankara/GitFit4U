@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 92">
+  <rect x="4" y="4" width="84" height="84" rx="26" fill="currentColor"/>
+  <path d="M22 32h10v28H22a9 9 0 0 1-9-9V41a9 9 0 0 1 9-9Zm48 0H60v28h10a9 9 0 0 0 9-9V41a9 9 0 0 0-9-9ZM32 40h28v12H32z" fill="#fff"/>
+  <text x="108" y="60" fill="currentColor" font-family="Inter,Arial,sans-serif" font-size="42" font-weight="850" letter-spacing="1">GETFIT4U</text>
+</svg>

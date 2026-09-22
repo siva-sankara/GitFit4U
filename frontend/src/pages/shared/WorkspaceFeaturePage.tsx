@@ -1,0 +1,1 @@
+import { LiveWorkspace } from "../live/LiveWorkspace"; export function WorkspaceFeaturePage(_props: { eyebrow: string; title: string; description: string; items?: string[] }) { return <LiveWorkspace />; }

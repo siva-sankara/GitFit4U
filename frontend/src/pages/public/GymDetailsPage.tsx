@@ -1,0 +1,1 @@
+export { LiveGymDetails as GymDetailsPage } from "../live/LivePublic";

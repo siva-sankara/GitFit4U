@@ -1,0 +1,1 @@
+export { NotificationsApiPage as NotificationsPage } from "./NotificationsApiPage";

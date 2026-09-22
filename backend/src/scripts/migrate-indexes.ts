@@ -1,0 +1,61 @@
+import "dotenv/config";
+import mongoose from "mongoose";
+import { connectDatabase, disconnectDatabase } from "../config/db.js";
+
+// Run during a maintenance window before starting upgraded API instances.
+// This changes index definitions only; it never removes notification records.
+try {
+  await connectDatabase();
+  const collection = mongoose.connection.collection("notifications");
+  const indexes = await collection
+    .listIndexes()
+    .toArray()
+    .catch((error) => {
+      if (error.code === 26) return [];
+      throw error;
+    });
+  const old = indexes.find(
+    (index) =>
+      index.key.userId === 1 &&
+      index.key.dedupeKey === 1 &&
+      !index.partialFilterExpression,
+  );
+  const duplicates = await collection
+    .aggregate([
+      { $match: { dedupeKey: { $type: "string" } } },
+      {
+        $group: {
+          _id: { userId: "$userId", dedupeKey: "$dedupeKey" },
+          count: { $sum: 1 },
+        },
+      },
+      { $match: { count: { $gt: 1 } } },
+      { $limit: 1 },
+    ])
+    .toArray();
+  if (duplicates.length)
+    throw new Error(
+      "Resolve duplicate notification dedupe keys before migrating.",
+    );
+  if (old?.name) await collection.dropIndex(old.name);
+  await collection.createIndex(
+    { userId: 1, dedupeKey: 1 },
+    {
+      unique: true,
+      partialFilterExpression: { dedupeKey: { $type: "string" } },
+    },
+  );
+  await import("../app.js");
+  for (const model of Object.values(mongoose.models))
+    await model.createIndexes();
+  console.log(
+    "Database indexes created; notification migration completed; records preserved.",
+  );
+} catch (error) {
+  console.error(
+    error instanceof Error ? error.message : "Index migration failed",
+  );
+  process.exitCode = 1;
+} finally {
+  await disconnectDatabase();
+}

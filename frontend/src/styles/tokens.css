@@ -1,0 +1,70 @@
+:root {
+  /* Relative units respect the reader's browser font-size preference. */
+  --text-size-caption: 0.875rem;
+  --text-size-small: 1rem;
+  --text-size-body: 1.125rem;
+  color-scheme: light;
+  --font-display: "Plus Jakarta Sans", "Inter", "Segoe UI", Arial, sans-serif;
+  --font-body: "Plus Jakarta Sans", "Inter", "Segoe UI", Arial, sans-serif;
+  --brand: #84cc16;
+  --brand-strong: #65a30d;
+  --brand-ink: #07111f;
+  --secondary: #52e5c4;
+  --accent: #ffb866;
+  --success: #51d88a;
+  --warning: #ffc95c;
+  --error: #ff6b75;
+  --info: #72b7ff;
+  --bg: #f8fafc;
+  --bg-soft: #f1f5f9;
+  --surface: rgba(255, 255, 255, 0.92);
+  --surface-solid: #ffffff;
+  --surface-elevated: #f8fafc;
+  --surface-muted: rgba(7, 17, 31, 0.045);
+  --glass: rgba(255, 255, 255, 0.78);
+  --text: #07111f;
+  --text-secondary: #475569;
+  --text-muted: #64748b;
+  --border: #e2e8f0;
+  --border-strong: #cbd5e1;
+  --shadow-sm: 0 10px 28px rgba(8, 18, 31, 0.08);
+  --shadow-lg: 0 30px 80px rgba(8, 18, 31, 0.16);
+  --glow: 0 0 40px rgba(185, 255, 102, 0.12);
+  --radius-xs: 8px;
+  --radius-sm: 12px;
+  --radius-md: 18px;
+  --radius-lg: 26px;
+  --radius-xl: 36px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+  --content: 1280px;
+  --sidebar: 272px;
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #06100d;
+  --bg-soft: #0b1713;
+  --surface: rgba(18, 34, 28, 0.92);
+  --surface-solid: #11221c;
+  --surface-elevated: #172a23;
+  --surface-muted: rgba(255, 255, 255, 0.045);
+  --glass: rgba(16, 31, 25, 0.74);
+  --text: #f7fbf8;
+  --text-secondary: #b9c8c0;
+  --text-muted: #7f9389;
+  --border: rgba(218, 255, 234, 0.12);
+  --border-strong: rgba(218, 255, 234, 0.24);
+  --shadow-sm: 0 10px 25px rgba(0, 0, 0, 0.18);
+  --shadow-lg: 0 30px 80px rgba(0, 0, 0, 0.34);
+  --glow: 0 0 40px rgba(118, 191, 46, 0.13);
+}
