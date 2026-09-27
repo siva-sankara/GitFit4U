@@ -1,4 +1,5 @@
 import type { Request, Response } from "express";
+import { emitDomainEvent } from "../services/domainEventService.js";
 import { nanoid } from "nanoid";
 import { Trainer, ClassSession } from "../models/Engagement.js";
 import { MemberProfile } from "../models/Member.js";
@@ -173,15 +174,12 @@ export async function assignWorkout(req: Request, res: Response) {
     status: "SCHEDULED",
     notes: req.body.notes,
   });
-  await Notification.create({
+  await emitDomainEvent({
+    event: "workout.assigned",
     userId: member.userId,
     gymId: trainer.gymId,
-    category: "TRAINER",
-    title: "New workout plan",
-    message: `${plan.name} was assigned to you.`,
-    entityType: "MEMBER",
-    entityId: member.publicId,
-    actionUrl: "/app/profile",
+    entityId: data.publicId,
+    actionUrl: "/app/workouts",
   });
   res.status(201).json({ success: true, data });
 }

@@ -19,6 +19,7 @@ import {
 } from "../../services/apiClient";
 import { QueryState, useData, money, EditForm, type Row } from "./LiveData";
 import { Modal } from "../../components/Modal";
+import { GymIdentity } from "../../components/GymIdentity";
 export function DatabaseGymCard({ gym }: { gym: Row }) {
   const { favorites, toggleFavorite } = useApp();
   const navigate = useNavigate();
@@ -59,7 +60,9 @@ export function DatabaseGymCard({ gym }: { gym: Row }) {
         </button>
       </div>
       <div className="gym-card-content">
-        <h3>{gym.name}</h3>
+        <h3>
+          <GymIdentity name={gym.name} logoUrl={gym.logoUrl} />
+        </h3>
         <p>
           {[gym.address?.locality, gym.address?.city]
             .filter(Boolean)
@@ -227,20 +230,22 @@ export function LiveExplore() {
         </div>
       </header>
       <form
-        className="table-toolbar"
+        className="table-toolbar explore-filter-toolbar"
         onSubmit={(e) => {
           e.preventDefault();
           filter("q", q);
         }}
       >
-        <input
-          className="input"
-          aria-label="Search gyms"
-          placeholder="Gym, locality or city"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-        />
-        <button className="btn btn-primary">Search</button>
+        <div className="explore-search">
+          <input
+            className="input"
+            aria-label="Search gyms"
+            placeholder="Gym, locality or city"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+          />
+          <button className="btn btn-primary">Search</button>
+        </div>
         <label className="field">
           <span>Minimum rating</span>
           <select
@@ -710,12 +715,32 @@ export function LiveGymDetails() {
   const [params, setParams] = useSearchParams();
   const data = query.data?.data,
     gym = data?.gym;
+  const [reviewPage, setReviewPage] = useState(1);
+  const reviewsQuery = useData<Row[]>(
+    `/api/v1/public/gyms/${encodeURIComponent(slug || "")}/reviews?page=${reviewPage}&limit=10`,
+    !!gym,
+  );
+  const ownReview = useData<Row | null>(
+    `/api/v1/users/me/reviews?gymId=${encodeURIComponent(gym?.publicId || "")}`,
+    !!gym && !!getAccessToken(),
+  );
+  const client = useQueryClient();
+  const join = useMutation({
+    mutationFn: () =>
+      apiRequest("/api/v1/users/me/gym-join-requests", {
+        method: "POST",
+        body: JSON.stringify({ gymId: gym.publicId }),
+      }),
+    onSuccess: () => client.invalidateQueries({ queryKey: ["api"] }),
+  });
   const requestedPlan = params.get("plan");
   const [planNotice, setPlanNotice] = useState("");
   useEffect(() => {
     setPlan(null);
     setReview(false);
     setPlanNotice("");
+    setReviewPage(1);
+    join.reset();
   }, [slug]);
   useEffect(() => {
     if (!data || !requestedPlan || !getAccessToken()) return;
@@ -736,14 +761,29 @@ export function LiveGymDetails() {
       <QueryState query={query}>
         {gym && (
           <>
-            {planNotice && (
+            {(planNotice || ownReview.isError) && (
               <p className="container form-alert" role="status">
-                {planNotice}
+                {planNotice ||
+                  "Your review could not be loaded. Refresh this page before submitting a new review."}
+                {ownReview.isError && (
+                  <button
+                    className="btn btn-secondary"
+                    onClick={() => ownReview.refetch()}
+                  >
+                    Retry loading your review
+                  </button>
+                )}
               </p>
             )}
             <GymDetailsView
               key={gym.publicId}
-              data={data!}
+              data={{
+                ...data,
+                reviews: reviewsQuery.data?.data || data?.reviews,
+                ownReview: ownReview.data?.data,
+                reviewDistribution: (reviewsQuery.data?.meta as any)
+                  ?.distribution,
+              }}
               saved={favorites.includes(gym.publicId)}
               onFavorite={() =>
                 getAccessToken()
@@ -767,7 +807,30 @@ export function LiveGymDetails() {
                   navigate(authPath("/auth/login", `/gyms/${slug}`));
                   return;
                 }
-                setReview(true);
+                if (!ownReview.isFetching && !ownReview.isError)
+                  setReview(true);
+              }}
+              onJoin={() => {
+                if (!getAccessToken())
+                  navigate(authPath("/auth/login", `/gyms/${slug}#gym-plans`));
+                else join.mutate();
+              }}
+              joinPending={join.isPending}
+              joinStatus={
+                join.isSuccess
+                  ? "Your join request has been sent. The gym will contact you about access and membership options."
+                  : undefined
+              }
+              joinError={join.isError ? join.error.message : undefined}
+              reviewDisabled={ownReview.isFetching || ownReview.isError}
+              reviewsState={{
+                page: reviewPage,
+                pages: reviewsQuery.data?.meta?.pages || 1,
+                loading: reviewsQuery.isFetching,
+                error: reviewsQuery.isError
+                  ? reviewsQuery.error.message
+                  : undefined,
+                onPage: setReviewPage,
               }}
             />
             <Modal
@@ -789,12 +852,20 @@ export function LiveGymDetails() {
             </Modal>
             <Modal
               open={review}
-              title="Review this gym"
+              title={
+                ownReview.data?.data ? "Edit your review" : "Review this gym"
+              }
               onClose={() => setReview(false)}
             >
               {review && (
                 <EditForm
-                  endpoint="/api/v1/users/me/reviews"
+                  endpoint={
+                    ownReview.data?.data
+                      ? `/api/v1/users/me/reviews/${ownReview.data.data.publicId}`
+                      : "/api/v1/users/me/reviews"
+                  }
+                  method={ownReview.data?.data ? "PATCH" : "POST"}
+                  initial={ownReview.data?.data || {}}
                   fields={[
                     {
                       key: "rating",
@@ -813,7 +884,11 @@ export function LiveGymDetails() {
                     },
                   ]}
                   transform={(body) => ({ ...body, gymId: gym.publicId })}
-                  onSaved={() => setReview(false)}
+                  onSaved={() => {
+                    setReview(false);
+                    void ownReview.refetch();
+                    void reviewsQuery.refetch();
+                  }}
                 />
               )}
             </Modal>

@@ -131,7 +131,15 @@ const subscriptionSchema = new Schema(
     renewalAt: Date,
     cancelledAt: Date,
     cancellationReason: String,
-    freezePeriods: [{ startsAt: Date, endsAt: Date, reason: String }],
+    freezePeriods: [
+      {
+        startsAt: Date,
+        endsAt: Date,
+        reason: String,
+        extendedDays: Number,
+        resumedAt: Date,
+      },
+    ],
     latestPaymentId: { type: Schema.Types.ObjectId, ref: "Payment" },
   },
   { timestamps: true, versionKey: "version", optimisticConcurrency: true },
@@ -175,7 +183,11 @@ const paymentSchema = new Schema(
     subscriptionId: { type: Schema.Types.ObjectId, ref: "Subscription" },
     amountMinor: { type: Number, required: true, min: 0 },
     currency: { type: String, default: "INR" },
-    provider: { type: String, enum: ["RAZORPAY"], default: "RAZORPAY" },
+    provider: {
+      type: String,
+      enum: ["RAZORPAY", "OFFLINE"],
+      default: "RAZORPAY",
+    },
     providerOrderId: { type: String, unique: true, sparse: true },
     providerPaymentId: { type: String, unique: true, sparse: true },
     status: {

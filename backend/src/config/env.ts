@@ -45,6 +45,26 @@ const schema = z
     OBJECT_STORAGE_ACCESS_KEY: z.string().optional(),
     OBJECT_STORAGE_SECRET_KEY: z.string().optional(),
     OBJECT_STORAGE_REGION: z.string().default("ap-south-1"),
+    MEDIA_STORAGE_PROVIDER: z.preprocess(
+      (v) => v || undefined,
+      z.enum(["s3", "cloudinary"]).optional(),
+    ),
+    CLOUDINARY_CLOUD_NAME: z.preprocess(
+      (v) => v || undefined,
+      z
+        .string()
+        .regex(/^[a-zA-Z0-9_-]+$/)
+        .optional(),
+    ),
+    CLOUDINARY_API_KEY: z.string().optional(),
+    CLOUDINARY_API_SECRET: z.string().optional(),
+    CLOUDINARY_FOLDER: z.preprocess(
+      (v) => v || undefined,
+      z
+        .string()
+        .regex(/^[a-zA-Z0-9/_-]+$/)
+        .default("getfit4u"),
+    ),
     LOG_LEVEL: z.string().default("info"),
   })
   .superRefine((value, context) => {

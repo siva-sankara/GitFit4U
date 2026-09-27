@@ -35,6 +35,7 @@ export const gymInput = z.object({
     .refine((v) => new Set(v).size === v.length, "Duplicate media files")
     .optional(),
   coverAttachmentId: id.nullable().optional(),
+  logoAttachmentId: id.nullable().optional(),
   benefits: z.array(text).max(30).optional(),
   facilities: z.array(text).max(30).optional(),
   amenities: z.array(text).max(30).optional(),

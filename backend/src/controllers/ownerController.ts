@@ -1,8 +1,15 @@
 import type { Request, Response } from "express";
+import { z } from "zod";
+import { transitionMembership } from "../services/membershipLifecycleService.js";
 import mongoose from "mongoose";
 import { nanoid } from "nanoid";
 import { Gym } from "../models/Gym.js";
-import { validateGymMedia, withGymMedia } from "../services/gymMediaService.js";
+import { gymRevenue } from "../services/revenueService.js";
+import {
+  validateGymLogo,
+  validateGymMedia,
+  withGymMedia,
+} from "../services/gymMediaService.js";
 import { GymRegistration } from "../models/GymRegistration.js";
 import { User } from "../models/User.js";
 import { RoleAssignment } from "../models/Auth.js";
@@ -64,16 +71,7 @@ export async function dashboard(req: Request, res: Response) {
       occurredAt: { $gte: startOfDay },
     }),
     canReadFinance
-      ? Payment.aggregate([
-          {
-            $match: {
-              gymId: new mongoose.Types.ObjectId(gymId),
-              status: "CAPTURED",
-              capturedAt: { $gte: monthStart },
-            },
-          },
-          { $group: { _id: null, total: { $sum: "$amountMinor" } } },
-        ])
+      ? gymRevenue(gymId).then((report) => [{ total: report.monthMinor }])
       : Promise.resolve([]),
     ClassSession.countDocuments({
       gymId,
@@ -122,6 +120,10 @@ export async function updateGym(req: Request, res: Response) {
     else update[key] = value;
   }
   const before = await Gym.findById(req.auth!.gymId).lean();
+  if (req.body.logoAttachmentId !== undefined) {
+    await validateGymLogo(req.auth!.gymId!, req.body.logoAttachmentId);
+    if (req.body.logoAttachmentId === null) update.logoUrl = null;
+  }
   if (
     req.body.mediaAttachmentIds !== undefined ||
     req.body.coverAttachmentId !== undefined
@@ -154,59 +156,100 @@ export async function updateGym(req: Request, res: Response) {
 
 export async function listMembers(req: Request, res: Response) {
   const { page, limit, skip } = paginationFromQuery(req.query);
+  const canReadFinance =
+    req.auth!.permissions.includes("finance:read") ||
+    req.auth!.role === "ADMIN";
   const filter: Record<string, unknown> = { gymId: req.auth!.gymId };
   if (req.query.status) filter.status = req.query.status;
+  if (req.query.q) {
+    const query = String(req.query.q)
+      .trim()
+      .slice(0, 120)
+      .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const regex = new RegExp(query, "i");
+    const users = await User.distinct("_id", {
+      $or: [{ name: regex }, { email: regex }, { phone: regex }],
+    });
+    filter.$or = [
+      { userId: { $in: users } },
+      { memberCode: regex },
+      { "contact.name": regex },
+      { "contact.email": regex },
+      { "contact.phone": regex },
+    ];
+  }
   const [members, total] = await Promise.all([
     MemberProfile.find(filter)
       .populate("userId", "publicId name phone email avatarUrl")
-      .populate("currentSubscriptionId")
+      .populate({
+        path: "currentSubscriptionId",
+        select:
+          "publicId status startsAt endsAt " +
+          (canReadFinance
+            ? "planSnapshot latestPaymentId"
+            : "planSnapshot.name planSnapshot.durationDays planSnapshot.freezeDaysAllowed"),
+        ...(canReadFinance
+          ? { populate: { path: "latestPaymentId", select: "publicId status" } }
+          : {}),
+      })
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
       .lean(),
     MemberProfile.countDocuments(filter),
   ]);
+  const visits = members.length
+    ? await AttendanceEvent.aggregate<{
+        _id: mongoose.Types.ObjectId;
+        count: number;
+      }>([
+        {
+          $match: {
+            gymId: new mongoose.Types.ObjectId(req.auth!.gymId),
+            memberProfileId: { $in: members.map((member: any) => member._id) },
+            type: "CHECK_IN",
+            occurredAt: {
+              $gte: new Date(Date.now() - 30 * 86400000),
+              $lte: new Date(),
+            },
+          },
+        },
+        { $group: { _id: "$memberProfileId", count: { $sum: 1 } } },
+      ])
+    : [];
+  const visitCounts = new Map(
+    visits.map((visit) => [String(visit._id), visit.count]),
+  );
   res.json({
     success: true,
-    data: members,
+    data: members.map((member: any) => ({
+      ...member,
+      attendanceVisits30Days: visitCounts.get(String(member._id)) || 0,
+    })),
     meta: pageMeta(page, limit, total),
   });
 }
 
-export async function createMember(req: Request, res: Response) {
-  const phone = req.body.phone ? normalizePhone(req.body.phone) : undefined;
-  const email = req.body.email?.trim().toLowerCase();
-  let user = await User.findOne({
-    $or: [...(phone ? [{ phone }] : []), ...(email ? [{ email }] : [])],
-  });
-  if (!user) {
-    user = await User.create({
-      publicId: nanoid(18),
-      name: req.body.name,
-      phone,
-      email,
-      roles: ["USER"],
-      status: "PENDING_VERIFICATION",
-    });
-  }
-  const member = await MemberProfile.create({
-    publicId: nanoid(18),
-    gymId: req.auth!.gymId,
-    userId: user._id,
-    memberCode: req.body.memberCode || `GFU-${nanoid(8).toUpperCase()}`,
-    fitnessGoal: req.body.fitnessGoal,
-    emergencyContact: req.body.emergencyContact,
-  });
-  res.status(201).json({ success: true, data: member });
-}
+export { createMemberWithMembership as createMember } from "./memberManagementController.js";
 
 export async function getMember(req: Request, res: Response) {
+  const canReadFinance =
+    req.auth!.permissions.includes("finance:read") ||
+    req.auth!.role === "ADMIN";
   const member = await MemberProfile.findOne({
     publicId: req.params.id,
     gymId: req.auth!.gymId,
   })
+    .select("+medicalNotes")
     .populate("userId", "publicId name phone email avatarUrl profile")
-    .populate("currentSubscriptionId")
+    .populate({
+      path: "currentSubscriptionId",
+      select:
+        "publicId status startsAt endsAt freezePeriods " +
+        (canReadFinance
+          ? "planSnapshot latestPaymentId"
+          : "planSnapshot.name planSnapshot.durationDays planSnapshot.freezeDaysAllowed"),
+    })
     .lean();
   if (!member) throw new AppError(404, "MEMBER_NOT_FOUND", "Member not found.");
   const [attendance, payments] = await Promise.all([
@@ -214,12 +257,14 @@ export async function getMember(req: Request, res: Response) {
       .sort({ occurredAt: -1 })
       .limit(90)
       .lean(),
-    Payment.find({
-      payerId: (member.userId as any)._id,
-      gymId: req.auth!.gymId,
-    })
-      .sort({ createdAt: -1 })
-      .lean(),
+    canReadFinance
+      ? Payment.find({
+          payerId: (member.userId as any)._id,
+          gymId: req.auth!.gymId,
+        })
+          .sort({ createdAt: -1 })
+          .lean()
+      : Promise.resolve([]),
   ]);
   res.json({ success: true, data: { member, attendance, payments } });
 }
@@ -256,18 +301,17 @@ export async function updatePlan(req: Request, res: Response) {
 }
 
 export async function scanMember(req: Request, res: Response) {
-  const qr = req.body.qrToken
-    ? verifyAttendanceQr(req.body.qrToken)
-    : undefined;
-  if (qr && qr.gymId !== req.auth!.gymId)
-    throw new AppError(409, "WRONG_GYM_QR", "This QR belongs to another gym.");
+  if (req.body.qrToken || req.body.source === "QR")
+    throw new AppError(
+      410,
+      "ATTENDANCE_FLOW_CHANGED",
+      "Members now scan the gym QR from their own device. Use manual check-in for an authorized exception.",
+    );
   const result = await checkIn({
     gymId: req.auth!.gymId!,
-    memberIdentifier: qr?.memberId || req.body.memberIdentifier,
+    memberIdentifier: req.body.memberIdentifier,
     actorId: req.auth!.userId,
-    source: req.body.source || "QR",
-    scannerId: req.body.scannerId,
-    qrNonce: qr?.nonce || req.body.qrNonce,
+    source: "MANUAL",
     location: req.body.location,
     idempotencyKey: req.idempotencyKey,
   });
@@ -309,41 +353,13 @@ export async function listTrainers(req: Request, res: Response) {
   const data = await Trainer.find({
     gymId: req.auth!.gymId,
     status: { $ne: "ARCHIVED" },
-  }).lean();
+  })
+    .populate("userId", "name email phone avatarUrl")
+    .lean();
   res.json({ success: true, data });
 }
 
-export async function createTrainer(req: Request, res: Response) {
-  const user = await User.findOne({
-    email: req.body.email.toLowerCase(),
-    status: "ACTIVE",
-  });
-  if (!user)
-    throw new AppError(
-      422,
-      "TRAINER_ACCOUNT_REQUIRED",
-      "The trainer must create an account with this email first.",
-    );
-  if (await Trainer.exists({ userId: user._id, gymId: req.auth!.gymId }))
-    throw new AppError(
-      409,
-      "TRAINER_EXISTS",
-      "This trainer already belongs to this gym.",
-    );
-  const trainer = await Trainer.create({
-    ...req.body,
-    publicId: nanoid(18),
-    gymId: req.auth!.gymId,
-    userId: user._id,
-  });
-  await RoleAssignment.findOneAndUpdate(
-    { userId: user._id, gymId: req.auth!.gymId, role: "TRAINER" },
-    { $set: { permissions: TRAINER_DEFAULT_PERMISSIONS, status: "ACTIVE" } },
-    { upsert: true },
-  );
-  await User.updateOne({ _id: user._id }, { $addToSet: { roles: "TRAINER" } });
-  res.status(201).json({ success: true, data: trainer });
-}
+export { saveTrainer as createTrainer } from "./memberManagementController.js";
 
 export async function listCampaigns(req: Request, res: Response) {
   const data = await Campaign.find({ gymId: req.auth!.gymId })
@@ -380,44 +396,29 @@ export async function listSubscriptions(req: Request, res: Response) {
   res.json({ success: true, data, meta: pageMeta(page, limit, total) });
 }
 export async function subscriptionAction(req: Request, res: Response) {
-  const subscription = await Subscription.findOne({
-    publicId: req.params.id,
+  const body = z
+    .object({
+      reason: z.string().max(1000).optional(),
+      endsAt: z.coerce.date().optional(),
+    })
+    .parse(req.body);
+  const action = z
+    .enum(["activate", "freeze", "reactivate", "cancel", "deactivate"])
+    .parse(req.params.action);
+  const data = await transitionMembership({
+    publicId: String(req.params.id),
     gymId: req.auth!.gymId,
+    actorId: req.auth!.userId,
+    action,
+    ...body,
   });
-  if (!subscription)
-    throw new AppError(
-      404,
-      "SUBSCRIPTION_NOT_FOUND",
-      "Subscription not found.",
-    );
-  const action = req.params.action;
-  if (
-    action === "activate" &&
-    ["GRACE", "FROZEN"].includes(subscription.status) &&
-    subscription.endsAt > new Date()
-  )
-    subscription.status = "ACTIVE";
-  else if (
-    action === "cancel" &&
-    ["ACTIVE", "FROZEN", "GRACE"].includes(subscription.status)
-  ) {
-    subscription.status = "CANCELLED";
-    subscription.cancelledAt = new Date();
-    subscription.cancellationReason = req.body.reason;
-  } else
-    throw new AppError(
-      409,
-      "INVALID_SUBSCRIPTION_TRANSITION",
-      "This subscription action is not allowed.",
-    );
-  await subscription.save();
   await writeAudit(req, {
-    action: `subscription.${action}`,
+    action: "subscription." + action,
     entityType: "Subscription",
-    entityId: subscription.publicId,
-    after: { status: subscription.status },
+    entityId: data.publicId,
+    after: { status: data.status, endsAt: data.endsAt },
   });
-  res.json({ success: true, data: subscription });
+  res.json({ success: true, data });
 }
 export async function listOffers(req: Request, res: Response) {
   res.json({
@@ -469,50 +470,8 @@ export async function createAd(req: Request, res: Response) {
   res.status(201).json({ success: true, data });
 }
 export async function revenue(req: Request, res: Response) {
-  const [captured, refunds, settlements, bank] = await Promise.all([
-    Payment.aggregate([
-      {
-        $match: {
-          gymId: new mongoose.Types.ObjectId(req.auth!.gymId),
-          status: { $in: ["CAPTURED", "PARTIALLY_REFUNDED"] },
-        },
-      },
-      { $group: { _id: null, grossMinor: { $sum: "$amountMinor" } } },
-    ]),
-    (await import("../models/Business.js")).Refund.aggregate([
-      {
-        $lookup: {
-          from: "payments",
-          localField: "paymentId",
-          foreignField: "_id",
-          as: "payment",
-        },
-      },
-      { $unwind: "$payment" },
-      {
-        $match: {
-          "payment.gymId": new mongoose.Types.ObjectId(req.auth!.gymId),
-          status: "PROCESSED",
-        },
-      },
-      { $group: { _id: null, total: { $sum: "$amountMinor" } } },
-    ]),
-    Settlement.find({ gymId: req.auth!.gymId })
-      .sort({ createdAt: -1 })
-      .limit(50)
-      .lean(),
-    BankAccount.findOne({ gymId: req.auth!.gymId }).lean(),
-  ]);
-  const gross = captured[0]?.grossMinor || 0,
-    refunded = refunds[0]?.total || 0;
   res.json({
     success: true,
-    data: {
-      grossMinor: gross,
-      refundMinor: refunded,
-      netMinor: gross - refunded,
-      bankAccount: bank,
-      settlements,
-    },
+    data: await gymRevenue(req.auth!.gymId!, req.query.from, req.query.to),
   });
 }

@@ -41,7 +41,7 @@ beforeEach(() => {
       data:
         path === "/api/v1/owner/dashboard"
           ? { gymStatus: "ACTIVE", totalMembers: 1 }
-          : path.includes("/records/members")
+          : path.startsWith("/api/v1/owner/members?")
             ? [
                 {
                   _id: "member-id",

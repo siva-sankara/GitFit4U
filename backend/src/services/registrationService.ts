@@ -3,6 +3,7 @@ import { z } from "zod";
 import { Payment, Subscription } from "../models/Commerce.js";
 import { AppError } from "../utils/AppError.js";
 import { Gym } from "../models/Gym.js";
+import { emitDomainEvent } from "./domainEventService.js";
 
 // Legacy states remain readable during migration; none grant activation.
 export const legacyRegistrationStates = [
@@ -92,6 +93,24 @@ export async function activatePaidRegistration(
   gym.platformSubscriptionStatus = "ACTIVE";
   await registration.save({ session });
   await gym.save({ session });
+  await emitDomainEvent({
+    event: "payment.successful",
+    userId: payment.payerId,
+    gymId: gym._id,
+    entityId: payment.publicId,
+    actionUrl: "/owner/subscriptions",
+    session,
+  });
+  if (gym.status === "ACTIVE")
+    await emitDomainEvent({
+      event: "gym.activated",
+      userId: gym.ownerId,
+      gymId: gym._id,
+      entityId: gym.publicId,
+      occurrenceId: payment.publicId,
+      actionUrl: "/owner/dashboard",
+      session,
+    });
 }
 export const coordinatesInput = z.tuple([
   z.number().min(-180).max(180),

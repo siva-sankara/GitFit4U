@@ -1,5 +1,7 @@
 import { DeviceToken } from "../models/Collaboration.js";
 import type { Request, Response } from "express";
+import { emitDomainEvent } from "../services/domainEventService.js";
+import mongoose from "mongoose";
 import { OAuth2Client } from "google-auth-library";
 import bcrypt from "bcrypt";
 import crypto from "node:crypto";
@@ -102,22 +104,43 @@ export async function register(req: Request, res: Response) {
       "An account already exists for these details.",
     );
   const passwordHash = await bcrypt.hash(req.body.password, 12);
-  const user = await User.create({
-    publicId: nanoid(18),
-    name: req.body.name.trim(),
-    email,
-    phone,
-    roles: ["USER"],
-    activeRole: "USER",
-    status: "ACTIVE",
+  const user = await mongoose.connection.transaction(async (session) => {
+    const [created] = await User.create(
+      [
+        {
+          publicId: nanoid(18),
+          name: req.body.name.trim(),
+          email,
+          phone,
+          roles: ["USER"],
+          activeRole: "USER",
+          status: "ACTIVE",
+        },
+      ],
+      { session },
+    );
+    await AuthIdentity.create(
+      [
+        {
+          userId: created._id,
+          provider: "PASSWORD",
+          providerSubject: email,
+          verifiedAt: new Date(),
+          passwordHash,
+        },
+      ],
+      { session },
+    );
+    await emitDomainEvent({
+      event: "account.registered",
+      userId: created._id,
+      entityId: created.publicId,
+      session,
+    });
+    return created;
   });
-  await AuthIdentity.create({
-    userId: user._id,
-    provider: "PASSWORD",
-    providerSubject: email || req.body.phone,
-    verifiedAt: new Date(),
-    passwordHash,
-  });
+  // Creation has committed. Subsequent sign-in writes must not reuse its closed session.
+  user.$session(null);
   await loginResponse(req, res, user);
 }
 
@@ -172,21 +195,34 @@ export async function verifyRecoveryOtp(req: Request, res: Response) {
       "RECOVERY_CHALLENGE_REQUIRED",
       "Use an account recovery code.",
     );
-  const user = await User.findOne({ phone: verified.phone });
-  if (!user)
-    throw new AppError(
-      400,
-      "RECOVERY_FAILED",
-      "Account recovery could not be completed.",
-    );
   const secret = crypto.randomBytes(48).toString("base64url");
   const publicId = nanoid(20);
   const token = `${publicId}.${secret}`;
-  await PasswordResetGrant.create({
-    publicId,
-    userId: user._id,
-    tokenHash: sha256(token),
-    expiresAt: new Date(Date.now() + 10 * 60_000),
+  await mongoose.connection.transaction(async (session) => {
+    // Recheck the verified phone while taking the same account write lock as
+    // contact edits. An old phone cannot mint a grant after it was replaced.
+    const user = await User.findOneAndUpdate(
+      { phone: verified.phone, status: "ACTIVE" },
+      { $inc: { version: 1 } },
+      { session, new: true },
+    );
+    if (!user)
+      throw new AppError(
+        400,
+        "RECOVERY_FAILED",
+        "Account recovery could not be completed.",
+      );
+    await PasswordResetGrant.create(
+      [
+        {
+          publicId,
+          userId: user._id,
+          tokenHash: sha256(token),
+          expiresAt: new Date(Date.now() + 10 * 60_000),
+        },
+      ],
+      { session },
+    );
   });
   res.json({
     success: true,
@@ -196,39 +232,61 @@ export async function verifyRecoveryOtp(req: Request, res: Response) {
 
 export async function resetPassword(req: Request, res: Response) {
   const [publicId] = req.body.resetToken.split(".");
-  const grant = await PasswordResetGrant.findOne({
-    publicId,
-    consumedAt: null,
-    expiresAt: { $gt: new Date() },
-  }).select("+tokenHash");
-  if (!grant || grant.tokenHash !== sha256(req.body.resetToken))
-    throw new AppError(
+  const tokenHash = sha256(req.body.resetToken);
+  const invalidGrant = () =>
+    new AppError(
       400,
       "RESET_TOKEN_INVALID",
       "This password reset link is invalid or expired.",
     );
+  if (
+    !(await PasswordResetGrant.exists({
+      publicId,
+      tokenHash,
+      consumedAt: null,
+      expiresAt: { $gt: new Date() },
+    }))
+  )
+    throw invalidGrant();
+  // Do the expensive hash once, outside the retryable database transaction.
   const passwordHash = await bcrypt.hash(req.body.password, 12);
-  const user = await User.findById(grant.userId);
-  if (!user)
-    throw new AppError(
-      400,
-      "RESET_TOKEN_INVALID",
-      "This password reset link is invalid or expired.",
+  await mongoose.connection.transaction(async (session) => {
+    const grant = await PasswordResetGrant.findOneAndUpdate(
+      { publicId, tokenHash, consumedAt: null, expiresAt: { $gt: new Date() } },
+      { $set: { consumedAt: new Date() } },
+      { session, new: true },
     );
-  const subject = user.email || user.phone;
-  await AuthIdentity.findOneAndUpdate(
-    { userId: user._id, provider: "PASSWORD" },
-    {
-      $set: { providerSubject: subject, passwordHash, verifiedAt: new Date() },
-    },
-    { upsert: true, new: true },
-  );
-  grant.consumedAt = new Date();
-  await grant.save();
-  await Session.updateMany(
-    { userId: user._id, revokedAt: null },
-    { revokedAt: new Date(), revokeReason: "PASSWORD_RESET" },
-  );
+    if (!grant) throw invalidGrant();
+    // The common User write serializes resets with administrative identity,
+    // account-status and role changes, including resets already in flight.
+    const user = await User.findOneAndUpdate(
+      { _id: grant.userId, status: "ACTIVE" },
+      { $inc: { version: 1 } },
+      { session, new: true },
+    );
+    if (!user || !(user.email || user.phone)) throw invalidGrant();
+    await AuthIdentity.findOneAndUpdate(
+      { userId: user._id, provider: "PASSWORD" },
+      {
+        $set: {
+          providerSubject: user.email || user.phone,
+          passwordHash,
+          verifiedAt: new Date(),
+        },
+      },
+      { session, upsert: true, new: true, runValidators: true },
+    );
+    await PasswordResetGrant.updateMany(
+      { userId: user._id, consumedAt: null },
+      { $set: { consumedAt: new Date() } },
+      { session },
+    );
+    await Session.updateMany(
+      { userId: user._id, revokedAt: null },
+      { $set: { revokedAt: new Date(), revokeReason: "PASSWORD_RESET" } },
+      { session },
+    );
+  });
   clearRefreshCookie(res);
   res.json({
     success: true,
@@ -277,6 +335,11 @@ export async function otpVerify(req: Request, res: Response) {
   }
   if (user.status !== "ACTIVE")
     throw new AppError(403, "ACCOUNT_DISABLED", "This account is not active.");
+  await emitDomainEvent({
+    event: "account.verified",
+    userId: user._id,
+    entityId: user.publicId,
+  });
   await loginResponse(req, res, user);
 }
 
@@ -333,6 +396,11 @@ export async function googleLogin(req: Request, res: Response) {
   }
   if (user.status !== "ACTIVE")
     throw new AppError(403, "ACCOUNT_DISABLED", "This account is not active.");
+  await emitDomainEvent({
+    event: "account.verified",
+    userId: user._id,
+    entityId: user.publicId,
+  });
   await loginResponse(req, res, user);
 }
 

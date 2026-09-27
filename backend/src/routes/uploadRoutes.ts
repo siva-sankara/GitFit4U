@@ -1,10 +1,24 @@
-import { Router } from "express";
+import { Router, raw } from "express";
 import { z } from "zod";
 import { requireAuth } from "../middleware/auth.js";
 import { validate } from "../middleware/validate.js";
 import * as controller from "../controllers/uploadController.js";
 export const uploadRoutes = Router();
 uploadRoutes.use(requireAuth);
+uploadRoutes.put(
+  "/:id/bytes",
+  raw({
+    type: [
+      "image/jpeg",
+      "image/png",
+      "image/webp",
+      "application/pdf",
+      "video/mp4",
+    ],
+    limit: "50mb",
+  }),
+  controller.bytes,
+);
 uploadRoutes.post(
   "/",
   validate(

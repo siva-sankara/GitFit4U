@@ -1,6 +1,10 @@
 import { Navigate } from "react-router-dom";
 import { useCurrentUser } from "../../api/hooks";
-export function NotificationInboxRedirect() {
+export function NotificationInboxRedirect({
+  destination = "notifications",
+}: {
+  destination?: "notifications" | "messages";
+}) {
   const me = useCurrentUser();
   const role = me.data?.data.context?.role;
   if (!role) return <p className="state-card">Loading notifications?</p>;
@@ -12,5 +16,5 @@ export function NotificationInboxRedirect() {
         : ["GYM_OWNER", "GYM_STAFF"].includes(role)
           ? "owner"
           : "app";
-  return <Navigate to={`/${prefix}/notifications`} replace />;
+  return <Navigate to={`/${prefix}/${destination}`} replace />;
 }

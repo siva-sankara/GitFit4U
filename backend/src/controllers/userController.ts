@@ -8,6 +8,12 @@ import { AppError } from "../utils/AppError.js";
 import { nanoid } from "nanoid";
 import { issueAttendanceQr } from "../services/attendanceQrService.js";
 import { paginationFromQuery, pageMeta } from "../utils/pagination.js";
+import {
+  ensureSupportConversation,
+  notifySupportCreated,
+} from "../services/supportConversationService.js";
+import { sha256 } from "../utils/crypto.js";
+import { withGymMedia } from "../services/gymMediaService.js";
 
 export async function getProfile(req: Request, res: Response) {
   const user = await User.findById(req.auth!.userId).lean();
@@ -16,9 +22,11 @@ export async function getProfile(req: Request, res: Response) {
 
 export async function updateProfile(req: Request, res: Response) {
   const update: Record<string, unknown> = { ...req.body };
-  delete update.profile;
-  for (const [key, value] of Object.entries(req.body.profile || {}))
-    update[`profile.${key}`] = value;
+  for (const group of ["profile", "preferences", "notificationPreferences"]) {
+    delete update[group];
+    for (const [key, value] of Object.entries(req.body[group] || {}))
+      update[`${group}.${key}`] = value;
+  }
   const user = await User.findByIdAndUpdate(
     req.auth!.userId,
     { $set: update },
@@ -32,10 +40,22 @@ export async function subscriptions(req: Request, res: Response) {
     userId: req.auth!.userId,
     type: "GYM_MEMBERSHIP",
   })
-    .populate("gymId", "publicId name slug logoUrl address")
+    .populate("gymId", "publicId name slug logoUrl logoAttachmentId address")
     .sort({ createdAt: -1 })
     .lean();
-  res.json({ success: true, data });
+  const gyms = await withGymMedia(
+    data.map((subscription) => subscription.gymId).filter(Boolean),
+  );
+  res.json({
+    success: true,
+    data: data.map((subscription) => ({
+      ...subscription,
+      gymId:
+        gyms.find(
+          (gym) => String(gym._id) === String(subscription.gymId?._id),
+        ) || subscription.gymId,
+    })),
+  });
 }
 
 export async function subscriptionDetails(req: Request, res: Response) {
@@ -43,7 +63,10 @@ export async function subscriptionDetails(req: Request, res: Response) {
     publicId: req.params.id,
     userId: req.auth!.userId,
   })
-    .populate("gymId", "publicId name slug logoUrl address contact")
+    .populate(
+      "gymId",
+      "publicId name slug logoUrl logoAttachmentId address contact",
+    )
     .lean();
   if (!data)
     throw new AppError(
@@ -51,7 +74,13 @@ export async function subscriptionDetails(req: Request, res: Response) {
       "SUBSCRIPTION_NOT_FOUND",
       "Subscription not found.",
     );
-  res.json({ success: true, data });
+  res.json({
+    success: true,
+    data: {
+      ...data,
+      gymId: data.gymId ? (await withGymMedia([data.gymId]))[0] : null,
+    },
+  });
 }
 
 export async function payments(req: Request, res: Response) {
@@ -133,6 +162,7 @@ export async function notifications(req: Request, res: Response) {
     typeof req.query.category === "string" ? req.query.category : "";
   const filter = {
     userId: req.auth!.userId,
+    archivedAt: null,
     ...(category === "UNREAD"
       ? { readAt: null }
       : category && category !== "ALL"
@@ -167,8 +197,18 @@ export async function markNotificationRead(req: Request, res: Response) {
 }
 
 export async function createSupportTicket(req: Request, res: Response) {
-  const ticket = await SupportTicket.create({
-    publicId: nanoid(18),
+  const requestKey = req.header("idempotency-key");
+  if (requestKey && !/^[a-zA-Z0-9-]{8,120}$/.test(requestKey))
+    throw new AppError(
+      422,
+      "INVALID_SUBMISSION_KEY",
+      "Use a valid support submission identifier.",
+    );
+  const publicId = requestKey
+    ? `support_${sha256(`${req.auth!.userId}:${requestKey}`).slice(0, 32)}`
+    : nanoid(18);
+  const input = {
+    publicId,
     requesterId: req.auth!.userId,
     gymId: req.body.gymId,
     subject: req.body.subject,
@@ -181,6 +221,36 @@ export async function createSupportTicket(req: Request, res: Response) {
         createdAt: new Date(),
       },
     ],
+  };
+  let ticket;
+  try {
+    ticket = await SupportTicket.findOneAndUpdate(
+      { publicId, requesterId: req.auth!.userId },
+      { $setOnInsert: input },
+      { upsert: true, new: true, runValidators: true },
+    );
+  } catch (error: any) {
+    if (error?.code !== 11000) throw error;
+    ticket = await SupportTicket.findOne({
+      publicId,
+      requesterId: req.auth!.userId,
+    });
+    if (!ticket) throw error;
+  }
+  if (
+    ticket.subject !== input.subject ||
+    ticket.messages[0]?.body !== req.body.message ||
+    String(ticket.gymId || "") !== String(req.body.gymId || "")
+  )
+    throw new AppError(
+      409,
+      "SUBMISSION_KEY_REUSED",
+      "This submission identifier belongs to a different support request.",
+    );
+  const conversation = await ensureSupportConversation(ticket);
+  await notifySupportCreated(ticket, conversation.publicId);
+  res.status(201).json({
+    success: true,
+    data: { ...ticket.toObject(), conversationId: conversation.publicId },
   });
-  res.status(201).json({ success: true, data: ticket });
 }

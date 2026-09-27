@@ -87,7 +87,8 @@ it("uses the session role, removes role switching and duplicate/hidden owner ite
   expect(nav.querySelector('[href="/owner/profile"]')).toBeNull();
   expect(nav.textContent).not.toContain("Campaigns");
   expect(nav.textContent).not.toContain("Invoices");
-  expect(host.querySelector("select")).toBeNull();
+  expect(host.querySelector('select[aria-label="Appearance"]')).not.toBeNull();
+  expect(host.querySelector('select[aria-label="Active role"]')).toBeNull();
   expect(host.textContent).toContain("Gym owner");
 });
 it("opens the canonical profile when the user's name is clicked", async () => {

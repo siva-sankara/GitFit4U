@@ -1,3 +1,4 @@
+import { getAccessToken } from "./apiClient";
 export function validateDocument(file: File) {
   if (!["application/pdf", "image/jpeg", "image/png"].includes(file.type))
     throw new Error("Choose a PDF, JPG or PNG file.");
@@ -17,7 +18,18 @@ export function uploadDocumentBytes(
       signal.removeEventListener("abort", abort);
       error ? reject(error) : resolve();
     };
-    xhr.open("PUT", url);
+    const internal = /^\/api\/v1\/uploads\/[A-Za-z0-9_-]+\/bytes$/.test(url);
+    xhr.open(
+      "PUT",
+      internal
+        ? `${(import.meta.env.VITE_API_URL || "").replace(/\/$/, "")}${url}`
+        : url,
+    );
+    if (internal) {
+      xhr.withCredentials = true;
+      const token = getAccessToken();
+      if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+    }
     xhr.timeout = 120000;
     xhr.setRequestHeader("Content-Type", file.type);
     xhr.upload.onprogress = (event) => {
@@ -29,9 +41,20 @@ export function uploadDocumentBytes(
         ? finish()
         : finish(
             new Error(
-              xhr.status === 403
-                ? "Cloud storage rejected the upload. Retry to get a fresh upload link; contact support if this continues."
-                : "The cloud upload failed. Retry your selected file.",
+              internal && xhr.responseText
+                ? (() => {
+                    try {
+                      return (
+                        JSON.parse(xhr.responseText)?.error?.message ||
+                        "Image upload failed. Please retry."
+                      );
+                    } catch {
+                      return "Image upload failed. Please retry.";
+                    }
+                  })()
+                : xhr.status === 403
+                  ? "Cloud storage rejected the upload. Retry to get a fresh upload link; contact support if this continues."
+                  : "The cloud upload failed. Retry your selected file.",
             ),
           );
     xhr.onerror = () =>

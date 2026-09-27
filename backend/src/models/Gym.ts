@@ -35,6 +35,7 @@ const gymSchema = new Schema(
     },
     description: { type: String, maxlength: 4000 },
     logoUrl: String,
+    logoAttachmentId: { type: Schema.Types.ObjectId, ref: "Attachment" },
     coverImageUrl: String,
     gallery: [{ type: String }],
     videos: [{ type: String }],

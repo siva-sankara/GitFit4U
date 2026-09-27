@@ -56,9 +56,12 @@ import {
   progressInput,
 } from "./inputSchemas.js";
 import type { Permission } from "../constants/domain.js";
-import { presignedObjectUrl } from "../integrations/storage/s3ObjectStore.js";
+import { attachmentUrl } from "../integrations/storage/mediaStore.js";
+import { ensureSupportConversation } from "../services/supportConversationService.js";
+import { updateMember } from "../controllers/memberManagementController.js";
 import { allowedContacts } from "../services/contactService.js";
 import { refreshGymRating } from "../services/gymProjectionService.js";
+import { withGymMedia } from "../services/gymMediaService.js";
 import {
   registrationStatus,
   legacyRegistrationStates,
@@ -134,7 +137,7 @@ workspaceRoutes.get("/documents/:id/url", async (req, res) => {
     throw new AppError(404, "DOCUMENT_NOT_FOUND", "Document not found.");
   res.json({
     success: true,
-    data: { url: presignedObjectUrl("GET", attachment.objectKey, 120) },
+    data: { url: attachmentUrl(attachment) },
   });
 });
 const person = "publicId name email phone avatarUrl";
@@ -147,12 +150,20 @@ type Resource = {
   permission?: Permission;
 };
 const resources: Record<string, Resource> = {
+  notifications: {
+    model: Notification,
+    select:
+      "userId title message category readAt archivedAt pushStatus createdAt",
+    search: ["title", "message"],
+    populate: [{ path: "userId", select: "name publicId" }],
+  },
   members: {
     model: MemberProfile,
     select:
-      "publicId gymId userId memberCode status fitnessGoal currentSubscriptionId joinedAt createdAt",
+      "publicId gymId userId contact memberCode status fitnessGoal currentSubscriptionId joinedAt createdAt",
     search: ["memberCode", "fitnessGoal"],
     populate: [
+      { path: "gymId", select: "name publicId" },
       { path: "userId", select: person },
       {
         path: "currentSubscriptionId",
@@ -164,7 +175,8 @@ const resources: Record<string, Resource> = {
   plans: {
     model: MembershipPlan,
     select:
-      "publicId code name description durationDays priceMinor discountMinor taxRateBasisPoints benefits freezeDaysAllowed status version createdAt",
+      "publicId gymId code name description durationDays priceMinor discountMinor taxRateBasisPoints benefits freezeDaysAllowed status version createdAt",
+    populate: [{ path: "gymId", select: "name publicId" }],
     search: ["name", "code"],
     permission: "gym:read",
   },
@@ -174,14 +186,14 @@ const resources: Record<string, Resource> = {
       "publicId type userId gymId planSnapshot status startsAt endsAt renewalAt freezePeriods createdAt",
     populate: [
       { path: "userId", select: person },
-      { path: "gymId", select: "name slug" },
+      { path: "gymId", select: "name slug publicId logoAttachmentId logoUrl" },
     ],
     permission: "member:read",
   },
   payments: {
     model: Payment,
     select:
-      "publicId purpose payerId gymId amountMinor currency status methodCategory capturedAt failureDescription createdAt",
+      "publicId purpose payerId gymId amountMinor currency provider status methodCategory capturedAt failureDescription createdAt",
     populate: [
       { path: "payerId", select: "name publicId" },
       { path: "gymId", select: "name" },
@@ -214,7 +226,9 @@ const resources: Record<string, Resource> = {
   },
   trainers: {
     model: Trainer,
-    select: "publicId name userId qualifications specializations bio status",
+    select:
+      "publicId gymId name userId phone email experienceYears availability photoUrl qualifications specializations bio status",
+    populate: [{ path: "gymId", select: "name publicId" }],
     search: ["name"],
     permission: "gym:read",
   },
@@ -266,7 +280,7 @@ const resources: Record<string, Resource> = {
   gyms: {
     model: Gym,
     select:
-      "publicId name slug ownerId address status verificationStatus platformSubscriptionStatus createdAt",
+      "publicId name slug ownerId address contact description facilities location status verificationStatus platformSubscriptionStatus createdAt",
     search: ["name", "address.city"],
     populate: [{ path: "ownerId", select: person }],
   },
@@ -390,11 +404,7 @@ export async function resourceScope(
   if (key === "support")
     return auth.role === "ADMIN" ? {} : { requesterId: auth.userId };
   if (auth.role === "ADMIN")
-    return key === "owners"
-      ? { roles: "GYM_OWNER" }
-      : key === "users"
-        ? { roles: "USER" }
-        : {};
+    return key === "owners" ? { roles: "GYM_OWNER" } : {};
   if (auth.role === "GYM_OWNER" || auth.role === "GYM_STAFF") {
     if (key === "registrations" && auth.role === "GYM_OWNER")
       return { ownerId: auth.userId };
@@ -572,7 +582,7 @@ workspaceRoutes.get("/records/:resource", async (req, res) => {
         $match: {
           gymId: {
             $in: data.map(
-              (member: { gymId: mongoose.Types.ObjectId }) => member.gymId,
+              (member: { gymId: any }) => member.gymId?._id || member.gymId,
             ),
           },
           memberProfileId: {
@@ -602,7 +612,16 @@ workspaceRoutes.get("/records/:resource", async (req, res) => {
     data:
       key === "registrations"
         ? data.map((r: any) => ({ ...r, status: registrationStatus(r) }))
-        : memberRows,
+        : key === "subscriptions"
+          ? await Promise.all(
+              data.map(async (row: any) => ({
+                ...row,
+                gymId: row.gymId
+                  ? (await withGymMedia([row.gymId]))[0]
+                  : row.gymId,
+              })),
+            )
+          : memberRows,
     meta: pageMeta(page, limit, total),
   });
 });
@@ -615,7 +634,10 @@ workspaceRoutes.get("/summary", async (req, res) => {
   const paymentFilter = admin
     ? {}
     : owner
-      ? { gymId: new mongoose.Types.ObjectId(auth.gymId) }
+      ? {
+          gymId: new mongoose.Types.ObjectId(auth.gymId),
+          purpose: "MEMBERSHIP",
+        }
       : { payerId: new mongoose.Types.ObjectId(auth.userId) };
   const attendanceFilter = admin
     ? {}
@@ -630,7 +652,14 @@ workspaceRoutes.get("/summary", async (req, res) => {
       {
         $match: {
           ...paymentFilter,
-          status: { $in: ["CAPTURED", "PARTIALLY_REFUNDED", "REFUNDED"] },
+          status: {
+            $in: [
+              "CAPTURED",
+              "PARTIALLY_REFUNDED",
+              "REFUNDED",
+              "REFUND_PENDING",
+            ],
+          },
           capturedAt: { $gte: since },
         },
       },
@@ -664,7 +693,11 @@ workspaceRoutes.get("/summary", async (req, res) => {
       status: "ACTIVE",
       endsAt: { $gte: new Date() },
     }),
-    Notification.countDocuments({ userId: auth.userId, readAt: null }),
+    Notification.countDocuments({
+      userId: auth.userId,
+      readAt: null,
+      archivedAt: null,
+    }),
   ]);
   res.json({
     success: true,
@@ -681,33 +714,7 @@ workspaceRoutes.patch(
   requireRole("GYM_OWNER", "GYM_STAFF"),
   requireGymContext,
   requirePermission("member:write"),
-  async (req, res) => {
-    if (
-      req.body.assignedTrainerId &&
-      !(await Trainer.exists({
-        _id: req.body.assignedTrainerId,
-        gymId: req.auth!.gymId,
-        status: "ACTIVE",
-      }))
-    )
-      throw new AppError(
-        422,
-        "TRAINER_INVALID",
-        "Select a trainer at this gym.",
-      );
-    const data = await MemberProfile.findOneAndUpdate(
-      { publicId: req.params.id, gymId: req.auth!.gymId },
-      { $set: memberUpdate.parse(req.body) },
-      { new: true, runValidators: true },
-    );
-    if (!data) throw new AppError(404, "MEMBER_NOT_FOUND", "Member not found.");
-    await writeAudit(req, {
-      action: "member.updated",
-      entityType: "MemberProfile",
-      entityId: data.publicId,
-    });
-    res.json({ success: true, data });
-  },
+  updateMember,
 );
 workspaceRoutes.patch(
   "/classes/:id",
@@ -757,6 +764,19 @@ workspaceRoutes.post("/support/:id/replies", async (req, res) => {
     ...(req.auth!.role === "ADMIN" ? {} : { requesterId: req.auth!.userId }),
   });
   if (!ticket) throw new AppError(404, "TICKET_NOT_FOUND", "Ticket not found.");
+  if (
+    ["RESOLVED", "CLOSED"].includes(ticket.status) &&
+    !(
+      req.auth!.role === "ADMIN" &&
+      body.status &&
+      !["RESOLVED", "CLOSED"].includes(body.status)
+    )
+  )
+    throw new AppError(
+      409,
+      "SUPPORT_CLOSED",
+      "Reopen the support conversation before replying.",
+    );
   ticket.messages.push({
     authorId: req.auth!.userId,
     body: body.message,
@@ -764,7 +784,11 @@ workspaceRoutes.post("/support/:id/replies", async (req, res) => {
   });
   if (req.auth!.role === "ADMIN" && body.status) ticket.status = body.status;
   await ticket.save();
-  res.json({ success: true, data: ticket });
+  const conversation = await ensureSupportConversation(ticket);
+  res.json({
+    success: true,
+    data: { ...ticket.toObject(), conversationId: conversation.publicId },
+  });
 });
 workspaceRoutes.post(
   "/platform-plans",

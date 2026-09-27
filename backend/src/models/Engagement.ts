@@ -82,6 +82,12 @@ const trainerSchema = new Schema(
     userId: { type: Schema.Types.ObjectId, ref: "User" },
     name: { type: String, required: true },
     photoUrl: String,
+    phone: String,
+    email: String,
+    experienceYears: { type: Number, min: 0, max: 70 },
+    availability: [
+      { day: { type: Number, min: 0, max: 6 }, from: String, to: String },
+    ],
     qualifications: [String],
     specializations: [String],
     bio: String,
@@ -153,6 +159,7 @@ const notificationSchema = new Schema(
     pushLeaseId: String,
     pushDeliveredTokens: { type: [String], select: false },
     readAt: Date,
+    archivedAt: Date,
     deliveredAt: Date,
   },
   { timestamps: true },
@@ -187,6 +194,7 @@ const reviewSchema = new Schema(
     title: String,
     body: { type: String, maxlength: 3000 },
     photoUrls: [String],
+    editedAt: Date,
     status: {
       type: String,
       enum: ["PUBLISHED", "PENDING", "HIDDEN", "REMOVED"],
@@ -209,9 +217,15 @@ const campaignSchema = new Schema(
     gymId: {
       type: Schema.Types.ObjectId,
       ref: "Gym",
-      required: true,
+      required: function (this: any) {
+        return this.scope !== "PLATFORM";
+      },
       index: true,
     },
+    scope: { type: String, enum: ["GYM", "PLATFORM"], default: "GYM" },
+    idempotencyKey: { type: String, sparse: true, unique: true },
+    leaseId: String,
+    leaseUntil: Date,
     createdBy: { type: Schema.Types.ObjectId, ref: "User", required: true },
     name: { type: String, required: true },
     channel: {

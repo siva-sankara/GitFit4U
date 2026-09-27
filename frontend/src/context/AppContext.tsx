@@ -12,6 +12,13 @@ import {
   type ApiEnvelope,
 } from "../services/apiClient";
 import type { Role } from "../types";
+import { useSession } from "../services/session";
+import {
+  savedTheme,
+  resolveTheme,
+  themeStorageKey,
+  type ThemePreference,
+} from "../services/theme";
 import {
   createNotificationTracker,
   playNotificationSound,
@@ -21,6 +28,8 @@ interface AppContextValue {
   role: Role;
   setRole: (role: Role) => void;
   theme: "dark" | "light";
+  themePreference: ThemePreference;
+  setThemePreference: (preference: ThemePreference) => void;
   toggleTheme: () => void;
   favorites: string[];
   toggleFavorite: (gymId: string) => void;
@@ -31,9 +40,71 @@ const AppContext = createContext<AppContextValue | null>(null);
 export function AppProvider({ children }: { children: ReactNode }) {
   const client = useQueryClient(),
     [role, setRole] = useState<Role>("USER"),
-    [theme, setTheme] = useState<"dark" | "light">("light"),
+    [themePreference, updateTheme] = useState<ThemePreference>(savedTheme),
+    [systemDark, setSystemDark] = useState(
+      () =>
+        window.matchMedia?.("(prefers-color-scheme: dark)").matches || false,
+    ),
     [toast, setToast] = useState<string | null>(null),
     [authenticated, setAuthenticated] = useState(!!getAccessToken());
+  const session = useSession({ publicPage: true });
+  const theme = resolveTheme(themePreference, systemDark);
+  useEffect(() => {
+    const media = window.matchMedia?.("(prefers-color-scheme: dark)");
+    const change = () => setSystemDark(media?.matches || false);
+    media?.addEventListener?.("change", change);
+    return () => media?.removeEventListener?.("change", change);
+  }, []);
+  useEffect(() => {
+    const preference = session.data?.data.user.preferences?.theme;
+    if (preference) {
+      updateTheme(preference);
+      try {
+        localStorage.setItem(themeStorageKey, preference);
+      } catch {
+        /* Browser storage may be disabled. Account preference remains available. */
+      }
+    }
+  }, [session.data?.data.user._id, session.data?.data.user.preferences?.theme]);
+  const saveTheme = useMutation({
+    mutationFn: (preference: ThemePreference) =>
+      apiRequest("/api/v1/users/me", {
+        method: "PATCH",
+        body: JSON.stringify({ preferences: { theme: preference } }),
+      }),
+    onError: (error) =>
+      setToast(
+        `Theme changed on this device. Account preference could not be saved: ${error.message}`,
+      ),
+  });
+  const setThemePreference = (preference: ThemePreference) => {
+    updateTheme(preference);
+    try {
+      localStorage.setItem(themeStorageKey, preference);
+    } catch {
+      /* The current session still applies the selection. */
+    }
+    if (getAccessToken()) {
+      client.setQueryData(["me"], (old: any) =>
+        old
+          ? {
+              ...old,
+              data: {
+                ...old.data,
+                user: {
+                  ...old.data.user,
+                  preferences: {
+                    ...old.data.user.preferences,
+                    theme: preference,
+                  },
+                },
+              },
+            }
+          : old,
+      );
+      saveTheme.mutate(preference);
+    }
+  };
   const favorites = useQuery({
     queryKey: ["favorites"],
     enabled: authenticated,
@@ -147,7 +218,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         role,
         setRole,
         theme,
-        toggleTheme: () => setTheme((v) => (v === "light" ? "dark" : "light")),
+        themePreference,
+        setThemePreference,
+        toggleTheme: () =>
+          setThemePreference(theme === "light" ? "dark" : "light"),
         favorites: ids,
         toggleFavorite: (gymId) => {
           if (!authenticated) {

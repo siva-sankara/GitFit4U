@@ -1,4 +1,6 @@
 ﻿import { beforeEach, describe, expect, it, vi } from "vitest";
+import mongoose from "mongoose";
+import { afterEach } from "vitest";
 const mocks = vi.hoisted(() => ({
   exists: vi.fn(),
   createUser: vi.fn(),
@@ -12,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   verifyOtp: vi.fn(),
   createSession: vi.fn(),
   setRefreshCookie: vi.fn(),
+  emitEvent: vi.fn(),
 }));
 vi.mock("../models/User.js", () => ({
   User: {
@@ -41,20 +44,34 @@ vi.mock("../services/tokenService.js", () => ({
   rotateRefreshToken: vi.fn(),
   signAccessToken: vi.fn(),
 }));
+vi.mock("../services/domainEventService.js", () => ({
+  emitDomainEvent: mocks.emitEvent,
+}));
 import { register, passwordLogin, otpVerify } from "./authController.js";
 import type { Request, Response } from "express";
 const request = (body: object) =>
   ({ body, header: vi.fn(), ip: "127.0.0.1" }) as unknown as Request;
 const response = () => ({ json: vi.fn() }) as unknown as Response;
-beforeEach(() => vi.resetAllMocks());
+const databaseSession = {} as any;
+beforeEach(() => {
+  vi.resetAllMocks();
+  vi.spyOn(mongoose.connection, "transaction").mockImplementation(
+    async (callback: any) => callback(databaseSession),
+  );
+});
+afterEach(() => vi.restoreAllMocks());
 describe("authentication controller", () => {
   it("registers a normalized member account and returns a session", async () => {
     mocks.hash.mockResolvedValue("hash");
-    mocks.createUser.mockImplementation(async (values) => ({
-      ...values,
-      _id: "user1",
-      save: vi.fn(),
-    }));
+    const detachSession = vi.fn();
+    mocks.createUser.mockImplementation(async (values) => [
+      {
+        ...values[0],
+        _id: "user1",
+        save: vi.fn(),
+        $session: detachSession,
+      },
+    ]);
     mocks.createSession.mockResolvedValue({
       accessToken: "token",
       refreshToken: "refresh",
@@ -71,13 +88,35 @@ describe("authentication controller", () => {
       res,
     );
     expect(mocks.createUser).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({
+          name: "Member",
+          email: "member@example.com",
+          phone: "+919876543210",
+          roles: ["USER"],
+        }),
+      ],
+      { session: databaseSession },
+    );
+    expect(mocks.createIdentity).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({
+          userId: "user1",
+          provider: "PASSWORD",
+          providerSubject: "member@example.com",
+          passwordHash: "hash",
+        }),
+      ],
+      { session: databaseSession },
+    );
+    expect(mocks.emitEvent).toHaveBeenCalledWith(
       expect.objectContaining({
-        name: "Member",
-        email: "member@example.com",
-        phone: "+919876543210",
-        roles: ["USER"],
+        event: "account.registered",
+        userId: "user1",
+        session: databaseSession,
       }),
     );
+    expect(detachSession).toHaveBeenCalledWith(null);
     expect(res.json).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ accessToken: "token" }),
@@ -90,7 +129,42 @@ describe("authentication controller", () => {
       register(request({ email: "member@example.com" }), response()),
     ).rejects.toMatchObject({ code: "ACCOUNT_EXISTS" });
     expect(mocks.createUser).not.toHaveBeenCalled();
+    expect(mongoose.connection.transaction).not.toHaveBeenCalled();
   });
+  it.each(["credentials", "notification"])(
+    "does not issue a session if the registration transaction fails at %s",
+    async (failure) => {
+      mocks.hash.mockResolvedValue("hash");
+      mocks.createUser.mockResolvedValue([
+        {
+          _id: "user1",
+          publicId: "new-account",
+          roles: ["USER"],
+          $session: vi.fn(),
+          save: vi.fn(),
+        },
+      ]);
+      const error = new Error("Database write failed");
+      if (failure === "credentials")
+        mocks.createIdentity.mockRejectedValue(error);
+      else mocks.emitEvent.mockRejectedValue(error);
+      await expect(
+        register(
+          request({
+            name: "Member",
+            email: "member@example.com",
+            password: "StrongPass123",
+          }),
+          response(),
+        ),
+      ).rejects.toBe(error);
+      expect(mocks.createIdentity.mock.calls[0][1]).toEqual({
+        session: databaseSession,
+      });
+      expect(mocks.createSession).not.toHaveBeenCalled();
+      expect(mocks.setRefreshCookie).not.toHaveBeenCalled();
+    },
+  );
   it("resolves phone login to the existing password identity", async () => {
     mocks.findUser.mockResolvedValue({ _id: "user1" });
     mocks.findIdentity.mockReturnValue({

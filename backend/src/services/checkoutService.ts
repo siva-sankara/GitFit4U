@@ -125,7 +125,9 @@ export async function createCheckoutOrder(input: {
       await Payment.exists({
         quoteId: quote._id,
         payerId: input.userId,
-        status: { $in: ["CAPTURED", "REFUNDED", "PARTIALLY_REFUNDED"] },
+        status: {
+          $in: ["CAPTURED", "REFUNDED", "PARTIALLY_REFUNDED", "REFUND_PENDING"],
+        },
       }).session(session)
     )
       throw new AppError(

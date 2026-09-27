@@ -15,7 +15,10 @@ vi.mock("../models/Member.js", () => ({
 vi.mock("../models/Commerce.js", () => ({
   MembershipPlan: {},
   Subscription: { countDocuments: mocks.subscriptions },
-  Payment: { aggregate: mocks.revenue },
+  Payment: {},
+}));
+vi.mock("../services/revenueService.js", () => ({
+  gymRevenue: mocks.revenue,
 }));
 vi.mock("../models/Attendance.js", () => ({
   AttendanceEvent: { countDocuments: mocks.attendance },
@@ -33,14 +36,12 @@ beforeEach(() => {
   mocks.members.mockResolvedValueOnce(10).mockResolvedValueOnce(8);
   mocks.subscriptions.mockResolvedValue(2);
   mocks.attendance.mockResolvedValue(4);
-  mocks.revenue.mockResolvedValue([{ total: 120_000 }]);
+  mocks.revenue.mockResolvedValue({ monthMinor: 120_000 });
   mocks.classes.mockResolvedValue(3);
   mocks.gym.mockReturnValue({
-    select: vi
-      .fn()
-      .mockReturnValue({
-        lean: vi.fn().mockResolvedValue({ status: "ACTIVE" }),
-      }),
+    select: vi.fn().mockReturnValue({
+      lean: vi.fn().mockResolvedValue({ status: "ACTIVE" }),
+    }),
   });
 });
 
@@ -86,9 +87,7 @@ describe("owner dashboard financial permissions", () => {
         }),
       );
       expect(mocks.revenue).toHaveBeenCalledOnce();
-      const filter = mocks.revenue.mock.calls[0][0][0].$match;
-      expect(String(filter.gymId)).toBe(gymId);
-      expect(filter.status).toBe("CAPTURED");
+      expect(mocks.revenue).toHaveBeenCalledWith(gymId);
     },
   );
 });

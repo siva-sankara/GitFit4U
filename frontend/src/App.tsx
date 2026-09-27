@@ -59,6 +59,14 @@ const router = createBrowserRouter([
     ),
   },
   {
+    path: "/messages",
+    element: (
+      <ProtectedRoute>
+        <NotificationInboxRedirect destination="messages" />
+      </ProtectedRoute>
+    ),
+  },
+  {
     path: "/auth/*",
     element: (
       <GuestRoute auth>

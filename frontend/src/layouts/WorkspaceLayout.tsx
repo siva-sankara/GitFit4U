@@ -3,8 +3,6 @@ import "../styles/workspace-navigation.css";
 import {
   Bell,
   Menu,
-  Moon,
-  Sun,
   X,
   LayoutDashboard,
   Users,
@@ -21,6 +19,9 @@ import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Brand } from "../components/Brand";
+import { GymIdentity } from "../components/GymIdentity";
+import { ThemePicker } from "../components/ThemePicker";
+import { useData, type Row } from "../pages/live/LiveData";
 import { useApp } from "../context/AppContext";
 import { useCurrentUser, useNotifications } from "../api/hooks";
 import { apiRequest, setAccessToken } from "../services/apiClient";
@@ -31,6 +32,7 @@ const navigation: Record<string, Array<[string, string, string?]>> = {
     ["Explore gyms", "explore"],
     ["Subscriptions", "subscriptions"],
     ["Attendance", "attendance"],
+    ["Scan gym QR", "attendance/qr"],
     ["Classes", "classes"],
     ["Workouts", "workouts"],
     ["Favorites", "favorites"],
@@ -48,7 +50,7 @@ const navigation: Record<string, Array<[string, string, string?]>> = {
     ["Plans", "plans", "gym:read"],
     ["Subscriptions", "subscriptions", "member:read"],
     ["Attendance", "attendance", "member:read"],
-    ["Scanner", "scanner", "attendance:scan"],
+    ["Gym QR", "scanner", "attendance:scan"],
     ["Classes", "classes", "gym:read"],
     ["Trainers", "trainers", "gym:read"],
     ["Payments", "payments", "finance:read"],
@@ -79,6 +81,10 @@ const navigation: Record<string, Array<[string, string, string?]>> = {
     ["Registrations", "registrations"],
     ["Gyms", "gyms"],
     ["Owners", "owners"],
+    ["Trainers", "trainers"],
+    ["Members", "members"],
+    ["Membership plans", "membership-plans"],
+    ["Memberships", "memberships"],
     ["Users", "users"],
     ["Platform plans", "platform-plans"],
     ["Subscriptions", "subscriptions"],
@@ -92,11 +98,14 @@ const navigation: Record<string, Array<[string, string, string?]>> = {
     ["Audit logs", "audit"],
     ["Support", "support"],
     ["Notifications", "notifications"],
+    ["Broadcasts", "broadcasts"],
+    ["Notification delivery", "notification-delivery"],
+    ["Settings", "settings"],
   ],
 };
 export function WorkspaceLayout() {
   const [drawer, setDrawer] = useState(false),
-    { theme, toggleTheme, toast } = useApp(),
+    { toast } = useApp(),
     me = useCurrentUser(),
     notifications = useNotifications(),
     client = useQueryClient(),
@@ -118,7 +127,16 @@ export function WorkspaceLayout() {
     location.pathname === `${prefix}/profile`
       ? "My profile"
       : "GETFIT4U");
-  const gym = assignments.find((a) => a.gymId?._id === context?.gymId)?.gymId;
+  const ownerGym = useData<Row>(
+    "/api/v1/owner/gym",
+    role === "GYM_OWNER" &&
+      !!context?.gymId &&
+      !!context.permissions.includes("gym:read"),
+  );
+  const gym =
+    role === "GYM_OWNER" && String(ownerGym.data?.data?._id) === context?.gymId
+      ? ownerGym.data?.data
+      : assignments.find((a) => a.gymId?._id === context?.gymId)?.gymId;
   const roleLabel =
     activeRole === "USER"
       ? "Member"
@@ -180,8 +198,18 @@ export function WorkspaceLayout() {
           </button>
         </div>
         <div className="sidebar-access">
-          <span>{roleLabel}</span>
-          <strong>{gym?.name || "GETFIT4U"}</strong>
+          {gym ? (
+            <GymIdentity
+              name={gym.name}
+              logoUrl={gym.logoUrl}
+              subtitle={roleLabel}
+            />
+          ) : (
+            <>
+              <strong>GETFIT4U</strong>
+              <span>{roleLabel}</span>
+            </>
+          )}
         </div>
         <nav className="sidebar-nav" aria-label="Workspace navigation">
           {rows.map(([text, page], i) => (
@@ -260,13 +288,7 @@ export function WorkspaceLayout() {
             <strong>{title}</strong>
           </div>
           <div className="topbar-actions">
-            <button
-              className="icon-btn"
-              aria-label="Toggle theme"
-              onClick={toggleTheme}
-            >
-              {theme === "dark" ? <Sun /> : <Moon />}
-            </button>
+            <ThemePicker />
             <button
               className="icon-btn workspace-notification-button"
               aria-label="Notifications"
@@ -294,6 +316,14 @@ export function WorkspaceLayout() {
           </div>
         </header>
         <main id="workspace-content" className="workspace-content">
+          {role === "GYM_OWNER" && gym?.logoUrl && (
+            <img
+              className="gym-watermark"
+              src={gym.logoUrl}
+              alt=""
+              aria-hidden="true"
+            />
+          )}
           <Outlet />
         </main>
       </div>

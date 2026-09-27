@@ -194,7 +194,7 @@ it("shows honest empty states and avoids a purchase CTA when no plans exist", as
     trainers: [],
   });
   expect(host.textContent).toContain("Gym photos will appear here when added");
-  expect(host.textContent).toContain("Memberships coming soon");
+  expect(host.textContent).toContain("Join this gym");
   expect(host.textContent).toContain("Not provided");
   expect(host.querySelector(".gd-mobile-join")).toBeNull();
   expect(host.querySelector(".gd-gallery-count")).toBeNull();

@@ -1,5 +1,6 @@
 ﻿import { useEffect, useRef, useState } from "react";
 import { Modal } from "../../components/Modal";
+import { GymLogoEditor } from "./GymLogoEditor";
 import { Link } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useCurrentUser } from "../../api/hooks";
@@ -94,6 +95,7 @@ export function GymProfileEditor({
       <nav className="profile-section-nav" aria-label="Gym profile sections">
         {[
           "Details",
+          "Logo",
           "Memberships",
           "Media",
           "Location",
@@ -108,6 +110,11 @@ export function GymProfileEditor({
       <QueryState query={gym}>
         {gym.data?.data && (
           <>
+            <GymLogoEditor
+              key={`logo-${gym.data.data._id}`}
+              gym={gym.data.data}
+              disabled={!canEdit}
+            />
             <section id="gym-details" className="panel form-section page-stack">
               <h2>About your gym</h2>
               <fieldset disabled={!canEdit} className="profile-fieldset">
@@ -157,7 +164,11 @@ export function GymProfileEditor({
                 Add photos of your training areas and an MP4 tour. Choose a
                 photo as the cover for gym listings.
               </p>
-              <GymMediaEditor gym={gym.data.data} disabled={!canEdit} />
+              <GymMediaEditor
+                key={`media-${gym.data.data._id}`}
+                gym={gym.data.data}
+                disabled={!canEdit}
+              />
             </section>
             <section
               id="gym-location"

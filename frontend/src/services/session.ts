@@ -18,6 +18,7 @@ export interface SessionData {
     email?: string;
     phone?: string;
     avatarUrl?: string;
+    preferences?: { theme?: "system" | "light" | "dark" };
     roles: ActiveRole[];
     activeRole: ActiveRole;
   };
@@ -35,6 +36,7 @@ export interface SessionData {
       publicId: string;
       name: string;
       status: string;
+      logoUrl?: string;
     } | null;
     permissions: string[];
   }>;

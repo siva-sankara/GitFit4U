@@ -1,4 +1,5 @@
 import type { Request, Response } from "express";
+import { transitionMembership } from "../services/membershipLifecycleService.js";
 import mongoose from "mongoose";
 import { nanoid } from "nanoid";
 import { Favorite, Referral } from "../models/Business.js";
@@ -18,16 +19,29 @@ import {
 import { AppError } from "../utils/AppError.js";
 import { createMembershipQuote } from "../services/checkoutService.js";
 import { refreshGymRating } from "../services/gymProjectionService.js";
+import { emitDomainEvent } from "../services/domainEventService.js";
+import { withGymMedia } from "../services/gymMediaService.js";
 
 export async function favorites(req: Request, res: Response) {
   const data = await Favorite.find({ userId: req.auth!.userId })
     .populate(
       "gymId",
-      "publicId name slug logoUrl rating address startingPriceMinor",
+      "publicId name slug logoUrl logoAttachmentId rating address startingPriceMinor",
     )
     .sort({ createdAt: -1 })
     .lean();
-  res.json({ success: true, data });
+  const gyms = await withGymMedia(
+    data.map((favorite) => favorite.gymId).filter(Boolean),
+  );
+  res.json({
+    success: true,
+    data: data.map((favorite) => ({
+      ...favorite,
+      gymId:
+        gyms.find((gym) => String(gym._id) === String(favorite.gymId?._id)) ||
+        favorite.gymId,
+    })),
+  });
 }
 export async function addFavorite(req: Request, res: Response) {
   const gym = await Gym.findOne({
@@ -55,6 +69,7 @@ export async function createReview(req: Request, res: Response) {
   const member = await MemberProfile.exists({
     gymId: gym._id,
     userId: req.auth!.userId,
+    status: { $in: ["ACTIVE", "INACTIVE"] },
   });
   if (!member)
     throw new AppError(
@@ -62,31 +77,70 @@ export async function createReview(req: Request, res: Response) {
       "REVIEW_MEMBERSHIP_REQUIRED",
       "Only gym members can review this gym.",
     );
+  if (await Review.exists({ gymId: gym._id, userId: req.auth!.userId }))
+    throw new AppError(
+      409,
+      "REVIEW_EXISTS",
+      "You already reviewed this gym. Edit your existing review.",
+    );
+  const data = await Review.create({
+    publicId: nanoid(20),
+    gymId: gym._id,
+    userId: req.auth!.userId,
+    rating: req.body.rating,
+    title: req.body.title,
+    body: req.body.body,
+    photoUrls: req.body.photoUrls || [],
+    status: "PUBLISHED",
+  });
+  await refreshGymRating(data.gymId);
+  await emitDomainEvent({
+    event: "review.created",
+    userId: gym.ownerId,
+    gymId: gym._id,
+    entityId: data.publicId,
+    actionUrl: `/gyms/${gym.slug}#gym-reviews`,
+  });
+  res.status(201).json({ success: true, data });
+}
+export async function updateReview(req: Request, res: Response) {
   const data = await Review.findOneAndUpdate(
-    { gymId: gym._id, userId: req.auth!.userId },
+    { publicId: req.params.id, userId: req.auth!.userId },
     {
       $set: {
         rating: req.body.rating,
         title: req.body.title,
         body: req.body.body,
         photoUrls: req.body.photoUrls || [],
-        status: "PUBLISHED",
+        editedAt: new Date(),
       },
-      $setOnInsert: { publicId: nanoid(20) },
     },
-    { upsert: true, new: true, runValidators: true },
-  );
-  await refreshGymRating(data.gymId);
-  res.status(201).json({ success: true, data });
-}
-export async function updateReview(req: Request, res: Response) {
-  const data = await Review.findOneAndUpdate(
-    { publicId: req.params.id, userId: req.auth!.userId },
-    { $set: req.body },
     { new: true, runValidators: true },
   );
   if (!data) throw new AppError(404, "REVIEW_NOT_FOUND", "Review not found.");
   await refreshGymRating(data.gymId);
+  const gym = await Gym.findById(data.gymId).select("ownerId slug");
+  if (gym)
+    await emitDomainEvent({
+      event: "review.updated",
+      userId: gym.ownerId,
+      gymId: gym._id,
+      entityId: data.publicId,
+      occurrenceId: data.editedAt.toISOString(),
+      actionUrl: `/gyms/${gym.slug}#gym-reviews`,
+    });
+  res.json({ success: true, data });
+}
+
+export async function ownReview(req: Request, res: Response) {
+  const gym = await Gym.findOne({
+    publicId: String(req.query.gymId || ""),
+  }).select("_id");
+  if (!gym) throw new AppError(404, "GYM_NOT_FOUND", "Gym not found.");
+  const data = await Review.findOne({
+    gymId: gym._id,
+    userId: req.auth!.userId,
+  }).lean();
   res.json({ success: true, data });
 }
 
@@ -231,118 +285,50 @@ export async function cancelBooking(req: Request, res: Response) {
   res.json({ success: true, data });
 }
 export async function subscriptionCommand(req: Request, res: Response) {
+  const command = String(req.params.command);
+  if (["cancel", "freeze", "reactivate"].includes(command)) {
+    const data = await transitionMembership({
+      publicId: String(req.params.id),
+      userId: req.auth!.userId,
+      actorId: req.auth!.userId,
+      action: command as "cancel" | "freeze" | "reactivate",
+      endsAt: req.body.endsAt,
+      reason: req.body.reason,
+    });
+    return res.json({ success: true, data });
+  }
   const subscription = await Subscription.findOne({
     publicId: req.params.id,
     userId: req.auth!.userId,
   });
   if (!subscription)
-    throw new AppError(
-      404,
-      "SUBSCRIPTION_NOT_FOUND",
-      "Subscription not found.",
-    );
-  const command = String(req.params.command);
-  const now = new Date();
-  if (command === "cancel") {
-    if (!["ACTIVE", "FROZEN", "GRACE"].includes(subscription.status))
-      throw new AppError(
-        409,
-        "INVALID_SUBSCRIPTION_STATE",
-        "This subscription cannot be cancelled.",
-      );
-    subscription.status = "CANCELLED";
-    subscription.cancelledAt = now;
-    subscription.cancellationReason = req.body.reason;
-  } else if (command === "freeze") {
-    if (subscription.status !== "ACTIVE")
-      throw new AppError(
-        409,
-        "INVALID_SUBSCRIPTION_STATE",
-        "Only active subscriptions can be frozen.",
-      );
-    const days = Math.ceil(
-      (new Date(req.body.endsAt).getTime() -
-        new Date(req.body.startsAt).getTime()) /
-        86400000,
-    );
-    if (
-      !Number.isFinite(days) ||
-      new Date(req.body.startsAt).getTime() > now.getTime() ||
-      new Date(req.body.startsAt).getTime() < now.getTime() - 86400000 ||
-      new Date(req.body.endsAt) <= now ||
-      subscription.startsAt > now ||
-      subscription.endsAt <= now
-    )
-      throw new AppError(
-        422,
-        "INVALID_FREEZE_DATES",
-        "Freeze requires a current membership, starts today and must end in the future.",
-      );
-    const allowance = Number(
-      (subscription.planSnapshot as any).freezeDaysAllowed || 0,
-    );
-    const used = subscription.freezePeriods.reduce(
-      (sum: number, period: any) =>
-        sum +
-        Math.ceil(
-          (new Date(period.endsAt).getTime() -
-            new Date(period.startsAt).getTime()) /
-            86400000,
-        ),
-      0,
-    );
-    if (days < 1 || days + used > allowance)
-      throw new AppError(
-        422,
-        "FREEZE_ALLOWANCE_EXCEEDED",
-        `This plan allows up to ${allowance} freeze days.`,
-      );
-    subscription.status = "FROZEN";
-    subscription.endsAt = new Date(
-      new Date(subscription.endsAt).getTime() + days * 86400000,
-    );
-    subscription.renewalAt = subscription.endsAt;
-    subscription.freezePeriods.push({
-      startsAt: req.body.startsAt,
-      endsAt: req.body.endsAt,
-      reason: req.body.reason,
-    });
-  } else if (["renew", "change-plan"].includes(command)) {
-    const plan = await MembershipPlan.findOne({
-      publicId: req.body.planId,
-      gymId: subscription.gymId,
-      status: "ACTIVE",
-    });
-    if (!plan)
-      throw new AppError(
-        404,
-        "PLAN_NOT_FOUND",
-        "Selected plan is not available.",
-      );
-    const quote = await createMembershipQuote({
-      userId: req.auth!.userId,
-      gymId: String(subscription.gymId),
-      planId: String(plan._id),
-      couponCode: req.body.couponCode,
-    });
-    return res.status(201).json({
-      success: true,
-      data: { quote, next: "/api/v1/checkout/orders" },
-    });
-  } else
+    throw new AppError(404, "SUBSCRIPTION_NOT_FOUND", "Membership not found.");
+  if (!["renew", "change-plan"].includes(command))
     throw new AppError(
       400,
       "UNKNOWN_SUBSCRIPTION_COMMAND",
-      "Unsupported subscription command.",
+      "Unsupported membership command.",
     );
-  await subscription.save();
-  await SubscriptionEvent.create({
-    subscriptionId: subscription._id,
-    type: command.toUpperCase(),
-    actorId: req.auth!.userId,
-    payload: req.body,
+  const plan = await MembershipPlan.findOne({
+    publicId: req.body.planId,
+    gymId: subscription.gymId,
+    status: "ACTIVE",
   });
-  res.json({ success: true, data: subscription });
+  if (!plan)
+    throw new AppError(
+      404,
+      "PLAN_NOT_FOUND",
+      "Selected plan is not available.",
+    );
+  const quote = await createMembershipQuote({
+    userId: req.auth!.userId,
+    gymId: String(subscription.gymId),
+    planId: String(plan._id),
+    couponCode: req.body.couponCode,
+  });
+  res
+    .status(201)
+    .json({ success: true, data: { quote, next: "/api/v1/checkout/orders" } });
 }
 
 export async function referrals(req: Request, res: Response) {
@@ -363,12 +349,11 @@ export async function inviteReferral(req: Request, res: Response) {
     code: req.body.code,
     status: "INVITED",
   });
-  await Notification.create({
+  await emitDomainEvent({
+    event: "referral.created",
     userId: req.auth!.userId,
-    category: "SYSTEM",
-    title: "Referral invitation ready",
-    message: "Your referral link is ready to share.",
-    entityType: "SYSTEM",
+    entityId: String(data._id),
+    actionUrl: "/app/referrals",
   });
   res.status(201).json({ success: true, data });
 }

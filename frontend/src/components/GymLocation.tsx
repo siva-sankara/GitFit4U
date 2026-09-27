@@ -61,7 +61,7 @@ export function GymLocation({ point }: { point: Coordinates }) {
           {point.latitude.toFixed(6)}, {point.longitude.toFixed(6)}
         </p>
       </details>
-      <div className="heading-actions">
+      <div className="heading-actions gym-map-actions">
         <select
           className="select"
           aria-label="Travel mode"
@@ -83,8 +83,13 @@ export function GymLocation({ point }: { point: Coordinates }) {
             ? "Finding route…"
             : "Get route from my location"}
         </button>
-        <a href={googleMapsPin(point)} target="_blank" rel="noreferrer">
-          View pin in Google Maps
+        <a
+          className="btn btn-secondary"
+          href={googleMapsPin(point)}
+          target="_blank"
+          rel="noreferrer"
+        >
+          Open Google Maps
         </a>
       </div>
       {config.isError && (

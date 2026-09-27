@@ -19,6 +19,8 @@ const conversationSchema = new Schema(
       { type: Schema.Types.ObjectId, ref: "User", required: true },
     ],
     title: { type: String, trim: true, maxlength: 120 },
+    supportTicketId: { type: Schema.Types.ObjectId, ref: "SupportTicket" },
+    directKey: { type: String },
     lastMessageId: { type: Schema.Types.ObjectId, ref: "Message" },
     lastMessageAt: { type: Date, index: true },
     archivedBy: [{ type: Schema.Types.ObjectId, ref: "User" }],
@@ -26,6 +28,17 @@ const conversationSchema = new Schema(
   { timestamps: true },
 );
 conversationSchema.index({ participants: 1, lastMessageAt: -1 });
+conversationSchema.index(
+  { supportTicketId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { supportTicketId: { $type: "objectId" } },
+  },
+);
+conversationSchema.index(
+  { directKey: 1 },
+  { unique: true, partialFilterExpression: { directKey: { $type: "string" } } },
+);
 
 const messageSchema = new Schema(
   {
