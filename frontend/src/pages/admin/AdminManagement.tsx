@@ -128,12 +128,14 @@ export function MembershipActions({
     return <span>Managed by verified platform payments</span>;
   const actions =
     row.status === "FROZEN"
-      ? ["reactivate", "cancel"]
+      ? ["reactivate", "deactivate", "cancel"]
       : row.status === "GRACE"
         ? ["activate", "cancel"]
         : row.status === "ACTIVE"
-          ? ["freeze", "cancel"]
-          : [];
+          ? ["freeze", "deactivate", "cancel"]
+          : ["DEACTIVATED", "CANCELLED"].includes(row.status) && Date.parse(row.endsAt) > Date.now()
+            ? ["reactivate"]
+            : [];
   if (!actions.length) return null;
   return (
     <>
@@ -162,7 +164,7 @@ export function MembershipActions({
               >
                 {actions.map((value) => (
                   <option key={value} value={value}>
-                    {value}
+                    {value === "reactivate" && row.status === "FROZEN" ? "Unfreeze" : value.charAt(0).toUpperCase() + value.slice(1)}
                   </option>
                 ))}
               </select>
@@ -170,6 +172,7 @@ export function MembershipActions({
             <p>
               Changes are recorded in membership history. Cancelling does not
               automatically refund a payment.
+              Reactivation restores only remaining paid validity, after payment and refund checks. Expired memberships need renewal.
             </p>
             <EditForm
               key={action}
@@ -209,6 +212,7 @@ export function AdminMemberships() {
       statuses={[
         "ACTIVE",
         "FROZEN",
+        "DEACTIVATED",
         "EXPIRED",
         "CANCELLED",
         "GRACE",
@@ -255,6 +259,7 @@ export function AdminMembers() {
   const gyms = useData<Row[]>(
     "/api/v1/workspace/records/gyms?status=ACTIVE&limit=100",
   );
+  const selectedGym = gyms.data?.data.find((gym) => gym.publicId === gymId);
   const client = useQueryClient();
   return (
     <>
@@ -276,7 +281,7 @@ export function AdminMembers() {
         </label>
         <button
           className="btn btn-primary"
-          disabled={!gymId}
+          disabled={!selectedGym}
           onClick={() => setCreate(true)}
         >
           Create member
@@ -332,10 +337,12 @@ export function AdminMembers() {
           </>
         )}
       />
-      {create && (
+      {create && selectedGym && (
         <MemberEditor
           endpoint={`/api/v1/admin/gyms/${gymId}/members`}
           plansEndpoint={`/api/v1/admin/gyms/${gymId}/plans`}
+          timezone={selectedGym.timezone}
+          uploadGymId={selectedGym._id}
           onClose={() => setCreate(false)}
           onSaved={() => {
             setCreate(false);

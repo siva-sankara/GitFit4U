@@ -1,0 +1,42 @@
+import mongoose from "mongoose";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { Gym } from "../models/Gym.js";
+import { ClassBooking, ClassSession } from "../models/Engagement.js";
+import { MemberProfile } from "../models/Member.js";
+import { classes, cancelBooking } from "./memberFeatureController.js";
+vi.mock("../services/domainEventService.js", () => ({ emitDomainEvent: vi.fn() }));
+const gymId = "507f1f77bcf86cd799439011", memberId = "507f1f77bcf86cd799439012", classId = "507f1f77bcf86cd799439013";
+const chain = (value: unknown) => {
+  const query: any = { lean: vi.fn().mockResolvedValue(value) };
+  for (const key of ["select", "populate", "sort", "skip", "limit"]) query[key] = vi.fn().mockReturnValue(query);
+  return query;
+};
+afterEach(() => vi.restoreAllMocks());
+it("paginates classes and reports the authenticated user's booking independently of history pagination", async () => {
+  const rows = chain([{ _id: classId, publicId: "class-two", gymId, startsAt: new Date(Date.now() + 86400000) }]);
+  vi.spyOn(Gym, "find").mockReturnValue(chain([{ _id: gymId, timezone: "Asia/Kolkata" }]));
+  vi.spyOn(ClassSession, "find").mockReturnValue(rows);
+  vi.spyOn(ClassSession, "countDocuments").mockResolvedValue(31);
+  vi.spyOn(MemberProfile, "distinct").mockResolvedValue([memberId]);
+  vi.spyOn(ClassBooking, "find").mockReturnValue(chain([{ _id: "booking", sessionId: classId, status: "BOOKED" }]));
+  const res = { json: vi.fn() };
+  await classes({ query: { page: "2", limit: "12" }, auth: { userId: "user-one" } } as any, res as any);
+  expect(rows.skip).toHaveBeenCalledWith(12);
+  expect(rows.limit).toHaveBeenCalledWith(12);
+  expect(MemberProfile.distinct).toHaveBeenCalledWith("_id", { userId: "user-one" });
+  expect(ClassBooking.find).toHaveBeenCalledWith({ sessionId: { $in: [classId] }, memberProfileId: { $in: [memberId] }, status: { $in: ["BOOKED", "WAITLISTED"] } });
+  expect(res.json.mock.calls[0][0]).toMatchObject({ data: [{ myBooking: { _id: "booking", status: "BOOKED" } }], meta: { page: 2, limit: 12, total: 31, pages: 3 } });
+});
+it.each(["BOOKED", "WAITLISTED"])("cancels an owned %s booking without decrementing seats for a waitlist entry", async (status) => {
+  const session = { withTransaction: vi.fn(async (work) => work()), endSession: vi.fn() };
+  vi.spyOn(mongoose, "startSession").mockResolvedValue(session as any);
+  vi.spyOn(MemberProfile, "distinct").mockReturnValue({ session: vi.fn().mockResolvedValue([memberId]) } as any);
+  vi.spyOn(ClassSession, "findOne").mockReturnValue({ session: vi.fn().mockResolvedValue({ _id: classId, gymId }) } as any);
+  vi.spyOn(ClassBooking, "findOneAndUpdate").mockResolvedValue({ _id: "booking", status });
+  vi.spyOn(ClassSession, "updateOne").mockResolvedValue({ acknowledged: true } as any);
+  const res = { json: vi.fn() };
+  await cancelBooking({ params: { id: "class-two", bookingId: "booking" }, auth: { userId: "user-one" } } as any, res as any);
+  expect(ClassBooking.findOneAndUpdate).toHaveBeenCalledWith(expect.objectContaining({ memberProfileId: { $in: [memberId] } }), expect.anything(), { returnDocument: "before", session });
+  expect(ClassSession.updateOne).toHaveBeenCalledTimes(status === "BOOKED" ? 1 : 0);
+  expect(res.json.mock.calls[0][0].data.status).toBe("CANCELLED");
+});

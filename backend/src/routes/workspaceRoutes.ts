@@ -1,5 +1,6 @@
 ﻿import { Router } from "express";
 import type { Request } from "express";
+import { saveGymClass } from "../services/classManagementService.js";
 import mongoose from "mongoose";
 import { z } from "zod";
 import { nanoid } from "nanoid";
@@ -57,19 +58,23 @@ import {
 } from "./inputSchemas.js";
 import type { Permission } from "../constants/domain.js";
 import { attachmentUrl } from "../integrations/storage/mediaStore.js";
-import { ensureSupportConversation } from "../services/supportConversationService.js";
+import { ensureSupportConversation, notifySupportReply } from "../services/supportConversationService.js";
 import { updateMember } from "../controllers/memberManagementController.js";
 import { allowedContacts } from "../services/contactService.js";
 import { refreshGymRating } from "../services/gymProjectionService.js";
 import { withGymMedia } from "../services/gymMediaService.js";
+import { withMemberMedia, withUserMedia } from "../services/userMediaService.js";
 import {
   registrationStatus,
   legacyRegistrationStates,
 } from "../services/registrationService.js";
 import { env } from "../config/env.js";
+import rateLimit from "express-rate-limit";
+import { downloadPaymentInvoice } from "../controllers/invoiceController.js";
 
 export const workspaceRoutes = Router();
 workspaceRoutes.use(requireAuth);
+workspaceRoutes.get("/payments/:id/invoice", rateLimit({ windowMs: 60000, limit: 15, keyGenerator: req => req.auth!.userId, standardHeaders: "draft-8", legacyHeaders: false }), downloadPaymentInvoice);
 workspaceRoutes.get("/registration-options", (_req, res) =>
   res.json({
     success: true,
@@ -111,7 +116,7 @@ workspaceRoutes.post(
     const data = await Campaign.findOneAndUpdate(
       { _id: campaign._id, status: "DRAFT" },
       { $set: { status: "QUEUED", "analytics.recipients": recipients } },
-      { new: true },
+      { returnDocument: "after" },
     );
     if (!data)
       throw new AppError(
@@ -140,7 +145,7 @@ workspaceRoutes.get("/documents/:id/url", async (req, res) => {
     data: { url: attachmentUrl(attachment) },
   });
 });
-const person = "publicId name email phone avatarUrl";
+const person = "publicId name email phone avatarUrl avatarAttachmentId";
 type Resource = {
   model: any;
   select: string;
@@ -160,11 +165,15 @@ const resources: Record<string, Resource> = {
   members: {
     model: MemberProfile,
     select:
-      "publicId gymId userId contact memberCode status fitnessGoal currentSubscriptionId joinedAt createdAt",
+      "publicId gymId userId contact memberCode status fitnessGoal currentSubscriptionId assignedTrainerId trainerAssignedAt joinedAt createdAt",
     search: ["memberCode", "fitnessGoal"],
     populate: [
       { path: "gymId", select: "name publicId" },
       { path: "userId", select: person },
+      {
+        path: "assignedTrainerId",
+        select: "name publicId status photoUrl photoAttachmentId",
+      },
       {
         path: "currentSubscriptionId",
         select: "publicId planSnapshot status startsAt endsAt",
@@ -186,17 +195,18 @@ const resources: Record<string, Resource> = {
       "publicId type userId gymId planSnapshot status startsAt endsAt renewalAt freezePeriods createdAt",
     populate: [
       { path: "userId", select: person },
-      { path: "gymId", select: "name slug publicId logoAttachmentId logoUrl" },
+      { path: "gymId", select: "name slug publicId logoAttachmentId logoUrl timezone" },
     ],
     permission: "member:read",
   },
   payments: {
     model: Payment,
     select:
-      "publicId purpose payerId gymId amountMinor currency provider status methodCategory capturedAt failureDescription createdAt",
+      "publicId purpose payerId gymId subscriptionId amountMinor currency provider status methodCategory capturedAt failureDescription createdAt",
     populate: [
       { path: "payerId", select: "name publicId" },
       { path: "gymId", select: "name" },
+      { path: "subscriptionId", select: "planSnapshot.name" },
     ],
     permission: "finance:read",
   },
@@ -205,9 +215,9 @@ const resources: Record<string, Resource> = {
     select:
       "publicId memberProfileId userId gymId type occurredAt localDate source",
     populate: [
-      { path: "userId", select: "name publicId" },
+      { path: "userId", select: "name publicId avatarUrl avatarAttachmentId" },
       { path: "gymId", select: "name" },
-      { path: "memberProfileId", select: "memberCode" },
+      { path: "memberProfileId", select: "memberCode gymId contact.name contact.avatarUrl contact.avatarAttachmentId" },
     ],
     sort: "occurredAt",
     permission: "member:read",
@@ -280,7 +290,7 @@ const resources: Record<string, Resource> = {
   gyms: {
     model: Gym,
     select:
-      "publicId name slug ownerId address contact description facilities location status verificationStatus platformSubscriptionStatus createdAt",
+      "publicId name slug ownerId address contact description facilities location timezone status verificationStatus platformSubscriptionStatus createdAt",
     search: ["name", "address.city"],
     populate: [{ path: "ownerId", select: person }],
   },
@@ -607,6 +617,15 @@ workspaceRoutes.get("/records/:resource", async (req, res) => {
       attendanceVisits30Days: visitCounts.get(String(member._id)) || 0,
     }));
   }
+  if (key === "members") memberRows = await withMemberMedia(memberRows);
+  if (key === "attendance") {
+    const people = await withUserMedia(data.map((row: any) => row.userId).filter(Boolean));
+    const members = await withMemberMedia(data.map((row: any) => row.memberProfileId).filter(Boolean));
+    memberRows = data.map((row: any) => ({ ...row,
+      userId: people.find(person => String(person._id) === String(row.userId?._id)) || row.userId,
+      memberProfileId: members.find(member => String(member._id) === String(row.memberProfileId?._id)) || row.memberProfileId,
+    }));
+  }
   res.json({
     success: true,
     data:
@@ -722,31 +741,11 @@ workspaceRoutes.patch(
   requireGymContext,
   requirePermission("class:write"),
   async (req, res) => {
-    const body = classInput.parse(req.body);
-    if (
-      body.trainerId &&
-      !(await Trainer.exists({ _id: body.trainerId, gymId: req.auth!.gymId }))
-    )
-      throw new AppError(
-        422,
-        "TRAINER_INVALID",
-        "Select a trainer at this gym.",
-      );
-    const data = await ClassSession.findOneAndUpdate(
-      {
-        publicId: req.params.id,
-        gymId: req.auth!.gymId,
-        bookedCount: { $lte: body.capacity },
-      },
-      { $set: body },
-      { new: true, runValidators: true },
-    );
-    if (!data)
-      throw new AppError(
-        409,
-        "CLASS_UPDATE_FAILED",
-        "Class unavailable or capacity is below current bookings.",
-      );
+    const data = await saveGymClass({
+      gymId: req.auth!.gymId!,
+      publicId: String(req.params.id),
+      body: req.body,
+    });
     res.json({ success: true, data });
   },
 );
@@ -785,6 +784,7 @@ workspaceRoutes.post("/support/:id/replies", async (req, res) => {
   if (req.auth!.role === "ADMIN" && body.status) ticket.status = body.status;
   await ticket.save();
   const conversation = await ensureSupportConversation(ticket);
+  await notifySupportReply(ticket, conversation.publicId, ticket.messages.at(-1));
   res.json({
     success: true,
     data: { ...ticket.toObject(), conversationId: conversation.publicId },
@@ -805,7 +805,7 @@ workspaceRoutes.patch(
     const data = await PlatformPlan.findByIdAndUpdate(
       req.params.id,
       { $set: platformInput.partial().parse(req.body) },
-      { new: true, runValidators: true },
+      { returnDocument: "after", runValidators: true },
     );
     if (!data) throw new AppError(404, "PLAN_NOT_FOUND", "Plan not found.");
     res.json({ success: true, data });
@@ -821,7 +821,7 @@ workspaceRoutes.patch(
     const data = await Review.findOneAndUpdate(
       { publicId: req.params.id },
       body,
-      { new: true },
+      { returnDocument: "after" },
     );
     if (!data) throw new AppError(404, "REVIEW_NOT_FOUND", "Review not found.");
     await refreshGymRating(data.gymId);

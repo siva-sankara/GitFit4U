@@ -1,4 +1,4 @@
-import { Navigate } from "react-router-dom";
+import { Navigate, useLocation, useParams } from "react-router-dom";
 import { useCurrentUser } from "../../api/hooks";
 export function NotificationInboxRedirect({
   destination = "notifications",
@@ -6,8 +6,9 @@ export function NotificationInboxRedirect({
   destination?: "notifications" | "messages";
 }) {
   const me = useCurrentUser();
+  const location = useLocation(), params = useParams();
   const role = me.data?.data.context?.role;
-  if (!role) return <p className="state-card">Loading notifications?</p>;
+  if (!role) return <p className="state-card">Opening your workspace…</p>;
   const prefix =
     role === "ADMIN"
       ? "admin"
@@ -16,5 +17,7 @@ export function NotificationInboxRedirect({
         : ["GYM_OWNER", "GYM_STAFF"].includes(role)
           ? "owner"
           : "app";
-  return <Navigate to={`/${prefix}/${destination}`} replace />;
+  const search = new URLSearchParams(location.search);
+  if (destination === "messages" && params.conversationId) search.set("conversation", params.conversationId);
+  return <Navigate to={`/${prefix}/${destination}${search.size ? `?${search}` : ""}`} replace />;
 }

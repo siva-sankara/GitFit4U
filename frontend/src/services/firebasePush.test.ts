@@ -70,7 +70,7 @@ it("requests permission only on explicit opt-in and registers the browser token"
   expect(mocks.requestPermission).toHaveBeenCalledOnce();
   expect(mocks.api).toHaveBeenCalledWith("/api/v1/devices", {
     method: "POST",
-    body: JSON.stringify({ token: "new-device-token", platform: "WEB" }),
+    body: JSON.stringify({ token: "new-device-token", platform: "WEB", deviceId: localStorage.getItem("gfu_push_device") }),
   });
   expect(mocks.register).toHaveBeenCalledWith("/assets/firebase-worker.js", {
     type: "module",
@@ -127,6 +127,7 @@ it("passes foreground notifications to the inbox listener and supports cleanup",
     id: "notification-1",
     title: "Membership active",
     message: undefined,
+    actionUrl: undefined,
   });
 });
 it("rolls back opt-in after device registration fails so settings can retry", async () => {

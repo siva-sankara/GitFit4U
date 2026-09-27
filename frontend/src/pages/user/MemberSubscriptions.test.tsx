@@ -59,19 +59,19 @@ async function render() {
 async function until(check: () => boolean) {
   for (let i = 0; i < 60 && !check(); i++)
     await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 15));
+      await new Promise((resolve) => { setTimeout(resolve, 15); });
     });
   expect(check()).toBe(true);
 }
 async function click(text: string) {
-  const button = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+  const button = [...document.querySelectorAll<HTMLButtonElement>("button")].find(
     (entry) => entry.textContent === text,
   );
   expect(button).toBeTruthy();
   await act(async () => button!.click());
 }
 async function reason() {
-  const textarea = host.querySelector("textarea")!;
+  const textarea = document.querySelector("[role=dialog] textarea")!;
   await act(async () => {
     Object.getOwnPropertyDescriptor(
       HTMLTextAreaElement.prototype,
@@ -192,23 +192,23 @@ it("shows submitting feedback, blocks duplicates, and closes after backend succe
   await click("Cancel");
   await reason();
   await click("Confirm request");
-  await until(() => host.textContent!.includes("Submitting…"));
+  await until(() => document.body.textContent!.includes("Submitting…"));
   expect(
     host.querySelector<HTMLButtonElement>('button[type="button"]')?.disabled,
   ).toBe(false);
   expect(
-    [...host.querySelectorAll("button")].find(
+    [...document.querySelectorAll("button")].find(
       (entry) => entry.textContent === "Submitting…",
     )?.disabled,
   ).toBe(true);
-  expect(host.querySelector("[role=dialog]")).not.toBeNull();
+  expect(document.querySelector("[role=dialog]")).not.toBeNull();
   await act(async () =>
     complete({
       success: true,
       data: { ...membership, gymId: "gym-id", status: "CANCELLED" },
     }),
   );
-  await until(() => host.querySelector("[role=dialog]") === null);
+  await until(() => document.querySelector("[role=dialog]") === null);
   expect(host.textContent).toContain("Membership cancelled.");
   expect(host.textContent).toContain("Oak Gym");
   expect(host.textContent).not.toContain("Scan gym QR");
@@ -233,8 +233,8 @@ it("keeps a failed cancellation dialog open and preserves active membership acce
   await click("Cancel");
   await reason();
   await click("Confirm request");
-  await until(() => host.textContent!.includes("Please retry later"));
-  expect(host.querySelector("[role=dialog]")).not.toBeNull();
+  await until(() => document.body.textContent!.includes("Please retry later"));
+  expect(document.querySelector("[role=dialog]")).not.toBeNull();
   expect(host.textContent).toContain("Scan gym QR");
   expect(host.textContent).not.toContain("Membership cancelled.");
 });

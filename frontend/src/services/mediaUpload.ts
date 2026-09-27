@@ -5,6 +5,7 @@ export async function uploadMedia(
   purpose: string,
   onProgress: (progress: number) => void = () => {},
   signal = new AbortController().signal,
+  context?: { gymId?: string },
 ) {
   const start = await apiRequest<
     ApiEnvelope<{ uploadUrl: string; attachment: { publicId: string } }>
@@ -15,6 +16,7 @@ export async function uploadMedia(
       mimeType: file.type,
       size: file.size,
       purpose,
+      ...(context?.gymId ? { gymId: context.gymId } : {}),
     }),
     signal,
   });

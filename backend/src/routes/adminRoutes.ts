@@ -20,6 +20,7 @@ import {
 import { requireIdempotencyKey } from "../middleware/idempotency.js";
 import { validate } from "../middleware/validate.js";
 import { platformInput } from "./inputSchemas.js";
+import * as promotions from "../controllers/promotionController.js";
 
 export const adminRoutes = Router();
 adminRoutes.use(
@@ -28,6 +29,12 @@ adminRoutes.use(
   requirePermission("admin:platform"),
 );
 adminRoutes.get("/dashboard", controller.dashboard);
+adminRoutes.get("/promotions/offers", promotions.listOffers);
+adminRoutes.post("/promotions/offers", promotions.createOffer);
+adminRoutes.patch("/promotions/offers/:id", promotions.updateOffer);
+adminRoutes.get("/promotions/ads", promotions.listAds);
+adminRoutes.post("/promotions/ads", promotions.createAd);
+adminRoutes.patch("/promotions/ads/:id", promotions.updateAd);
 adminRoutes.post("/users", management.createAccount);
 adminRoutes.patch("/users/:id", management.updateAccount);
 adminRoutes.post("/users/:id/roles", management.assignRole);

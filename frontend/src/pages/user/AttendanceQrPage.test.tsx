@@ -101,7 +101,7 @@ it("submits a scanned gym QR only once and displays duplicate check-in feedback"
   await act(async () => {
     callback({ getText: () => "signed-gym-token" }, null, { stop: mocks.stop });
     callback({ getText: () => "signed-gym-token" }, null, { stop: mocks.stop });
-    await new Promise((resolve) => setTimeout(resolve, 20));
+      await new Promise((resolve) => { setTimeout(resolve, 20); });
   });
   expect(mocks.request).toHaveBeenCalledTimes(1);
   expect(mocks.request).toHaveBeenCalledWith(

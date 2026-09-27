@@ -1,5 +1,8 @@
 import { Router } from "express";
 import { z } from "zod";
+import rateLimit from "express-rate-limit";
+import { profileUpdateInput } from "./profileSchemas.js";
+import * as contact from "../controllers/profileContactController.js";
 import * as controller from "../controllers/userController.js";
 import { requireAuth, requireRole } from "../middleware/auth.js";
 import { validate } from "../middleware/validate.js";
@@ -11,6 +14,7 @@ import {
 } from "../controllers/attendanceController.js";
 import { requestGymJoin } from "../controllers/memberManagementController.js";
 import { requireIdempotencyKey } from "../middleware/idempotency.js";
+import { deleteNotifications, notificationDetails } from "../controllers/notificationController.js";
 
 export const userRoutes = Router();
 userRoutes.use(
@@ -24,60 +28,11 @@ userRoutes.use((req, _res, next) => {
 });
 userRoutes.get("/me", controller.getProfile);
 userRoutes.get("/me/reviews", feature.ownReview);
-userRoutes.patch(
-  "/me",
-  validate(
-    z.object({
-      body: z.object({
-        name: z.string().min(2).max(120).optional(),
-        avatarUrl: z.string().url().optional(),
-        preferences: z
-          .object({ theme: z.enum(["system", "light", "dark"]).optional() })
-          .optional(),
-        notificationPreferences: z
-          .object({
-            push: z.boolean().optional(),
-            categories: z
-              .array(
-                z.enum([
-                  "SYSTEM",
-                  "MEMBERSHIP",
-                  "PAYMENT",
-                  "ATTENDANCE",
-                  "GYM",
-                  "TRAINER",
-                  "WORKOUT",
-                ]),
-              )
-              .max(7)
-              .optional(),
-          })
-          .optional(),
-        profile: z
-          .object({
-            dateOfBirth: z.coerce.date().optional(),
-            gender: z
-              .enum(["MALE", "FEMALE", "NON_BINARY", "PREFER_NOT_TO_SAY"])
-              .optional(),
-            heightCm: z.number().min(50).max(260).optional(),
-            weightKg: z.number().min(20).max(400).optional(),
-            fitnessGoal: z.string().max(200).optional(),
-            emergencyContact: z
-              .object({
-                name: z.string(),
-                phone: z.string(),
-                relationship: z.string(),
-              })
-              .optional(),
-          })
-          .optional(),
-      }),
-      params: z.object({}),
-      query: z.object({}),
-    }),
-  ),
-  controller.updateProfile,
-);
+userRoutes.patch("/me", validate(z.object({ body: profileUpdateInput, params: z.object({}), query: z.object({}) })), controller.updateProfile);
+const contactLimit = rateLimit({ windowMs: 15 * 60000, limit: 8, keyGenerator: req => req.auth!.userId, standardHeaders: "draft-8", legacyHeaders: false });
+userRoutes.post("/me/contact/phone/request", contactLimit, contact.requestPhoneChange);
+userRoutes.post("/me/contact/phone/confirm", contactLimit, contact.confirmPhoneChange);
+userRoutes.post("/me/contact/email", contactLimit, contact.changeEmail);
 userRoutes.get("/me/subscriptions", controller.subscriptions);
 userRoutes.get("/me/subscriptions/:id", controller.subscriptionDetails);
 userRoutes.get("/me/payments", controller.payments);
@@ -90,6 +45,9 @@ userRoutes.post(
 );
 userRoutes.post("/me/gym-join-requests", requestGymJoin);
 userRoutes.get("/me/notifications", controller.notifications);
+userRoutes.get("/me/notifications/:id", notificationDetails);
+userRoutes.delete("/me/notifications", deleteNotifications);
+userRoutes.delete("/me/notifications/:id", deleteNotifications);
 userRoutes.post("/me/notifications/:id/read", controller.markNotificationRead);
 userRoutes.post(
   "/me/notifications/read-all",
@@ -119,13 +77,7 @@ userRoutes.post(
   "/me/reviews",
   validate(
     z.object({
-      body: z.object({
-        gymId: z.string(),
-        rating: z.number().int().min(1).max(5),
-        title: z.string().max(160).optional(),
-        body: z.string().max(3000).optional(),
-        photoUrls: z.array(z.string().url()).max(8).optional(),
-      }),
+      body: reviewInput.extend({ gymId: z.string().min(3).max(64) }).strict(),
       params: z.object({}),
       query: z.object({}),
     }),

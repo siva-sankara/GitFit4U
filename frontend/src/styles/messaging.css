@@ -1,6 +1,50 @@
 .messaging-page {
   min-width: 0;
 }
+.chat-list-filter {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.chat-sender {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 6px;
+}
+.chat-list-filter .btn {
+  flex: 1;
+  padding: 8px;
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+.chat-list-filter [aria-pressed="true"] {
+  box-shadow: inset 0 0 0 1px var(--brand-strong);
+}
+.modern-chat .message-bubble,
+.modern-chat .message-bubble p,
+.modern-chat .message-bubble a,
+.modern-chat .conversation.active,
+.modern-chat .chat-header,
+.modern-chat .message-composer {
+  color: var(--text);
+}
+.modern-chat .conversation small,
+.modern-chat .message-bubble footer,
+.modern-chat .message-bubble strong {
+  color: var(--text-secondary);
+}
+.modern-chat .message-composer textarea::placeholder {
+  color: var(--text-muted);
+  opacity: 1;
+}
+.modern-chat .message-bubble footer {
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+.modern-chat .message-bubble footer time {
+  white-space: nowrap;
+}
 .chat-start {
   padding: 14px 18px;
 }
@@ -368,3 +412,5 @@
     gap: 7px;
   }
 }
+.chat-contact-pagination { display: flex; align-items: center; gap: .65rem; flex-wrap: wrap; }
+.chat-contact-phone { color: var(--text-muted); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }

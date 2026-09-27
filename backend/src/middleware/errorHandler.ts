@@ -39,11 +39,19 @@ export const errorHandler: ErrorRequestHandler = (error, req, res, _next) => {
       "The supplied identifier is invalid.",
     );
   } else if (error instanceof ZodError) {
+    const fieldErrors: Record<string, string[]> = {};
+    for (const issue of error.issues) {
+      const path =
+        issue.path
+          .filter((part) => !["body", "params", "query"].includes(String(part)))
+          .join(".") || "form";
+      (fieldErrors[path] ||= []).push(issue.message);
+    }
     appError = new AppError(
       422,
       "VALIDATION_ERROR",
-      "Request validation failed.",
-      error.flatten(),
+      error.issues[0]?.message || "Review the highlighted fields.",
+      { fieldErrors },
     );
   } else if ((error as { code?: number }).code === 11000) {
     appError = new AppError(
@@ -63,7 +71,7 @@ export const errorHandler: ErrorRequestHandler = (error, req, res, _next) => {
 
   if (statusCode >= 500) {
     logger.error(
-      { err: error, requestId: req.requestId, path: req.originalUrl },
+      { err: error, requestId: req.requestId, path: req.path },
       "request failed",
     );
   }

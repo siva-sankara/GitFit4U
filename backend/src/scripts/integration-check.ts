@@ -2,6 +2,7 @@
 import mongoose from "mongoose";
 import assert from "node:assert/strict";
 import request from "supertest";
+import { isolatedScriptDatabase } from "./isolatedScriptDatabase.js";
 import { createHmac } from "node:crypto";
 process.env.NODE_ENV = "test";
 process.env.LOG_LEVEL = "silent";
@@ -27,7 +28,8 @@ const { ClassSession, Notification } = await import("../models/Engagement.js");
 const { createSession } = await import("../services/tokenService.js");
 const { OWNER_DEFAULT_PERMISSIONS } = await import("../constants/domain.js");
 const { maintainRecords } = await import("../services/maintenanceService.js");
-const databaseName = `getfit4u_integration_${Date.now()}`;
+const testDatabase = isolatedScriptDatabase("gfi");
+const { databaseName } = testDatabase;
 let checks = 0;
 const ok = (condition: unknown, message: string) => {
   assert.ok(condition, message);
@@ -40,9 +42,10 @@ async function call(
   body?: unknown,
   status = 200,
 ) {
-  let query = (request(app) as any)
-    [method]("/api/v1" + path)
-    .set("idempotency-key", crypto.randomUUID());
+  const agent = request(app) as any;
+  let query = agent[method]("/api/v1" + path)
+    .set("idempotency-key", crypto.randomUUID())
+    .set("x-csrf-protection", "1");
   if (token) query = query.set("authorization", `Bearer ${token}`);
   if (body !== undefined) query = query.send(body);
   const response = await query;
@@ -57,11 +60,9 @@ async function call(
 try {
   await mongoose.connect(
     process.env.MONGO_URI || "mongodb://127.0.0.1:27017/getfit4u",
-    { dbName: databaseName, serverSelectionTimeoutMS: 10000 },
+    { dbName: databaseName, serverSelectionTimeoutMS: 10000, autoCreate: false, autoIndex: false },
   );
-  await Promise.all(
-    Object.values(mongoose.models).map((model) => model.init()),
-  );
+  await testDatabase.initialize();
   const signup = await call(
       "post",
       "/auth/register",
@@ -95,6 +96,17 @@ try {
   await call("patch", "/users/me", memberToken, {
     name: "Updated Member",
     roles: ["ADMIN"],
+    profile: { fitnessGoal: "Strength" },
+  }, 422);
+  const rejectedProfile = await call("get", "/users/me", memberToken);
+  ok(
+    rejectedProfile.data.name === user.name &&
+      rejectedProfile.data.roles.length === 1 &&
+      rejectedProfile.data.roles[0] === "USER",
+    "Invalid profile updates are rejected atomically without escalating roles",
+  );
+  await call("patch", "/users/me", memberToken, {
+    name: "Updated Member",
     profile: { fitnessGoal: "Strength" },
   });
   const profile = await call("get", "/users/me", memberToken);
@@ -287,24 +299,27 @@ try {
     (await ClassSession.findById(cls.data._id)).bookedCount === 1,
     "Rebooking does not corrupt capacity",
   );
-  const qr = await call(
+  await call(
     "post",
     "/users/me/attendance/qr",
     memberToken,
     { gymId: String(gym._id) },
-    201,
+    410,
   );
+  const qr = await call("get", "/owner/attendance/qr", ownerToken);
+  const repeatedQr = await call("get", "/owner/attendance/qr", ownerToken);
+  ok(qr.data.token === repeatedQr.data.token, "Gym QR identity persists across requests");
   await call(
     "post",
-    "/owner/scanner/check-in",
-    ownerToken,
-    { qrToken: qr.data.token, source: "QR", scannerId: "web-front-desk" },
+    "/users/me/attendance/check-in",
+    memberToken,
+    { qrToken: qr.data.token },
     201,
   );
   ok(
     (await call("get", "/workspace/records/attendance", memberToken)).data
       .length === 1,
-    "Scanner creates real attendance",
+    "Authenticated member scans the gym QR to create real attendance",
   );
   await call(
     "post",
@@ -763,13 +778,10 @@ try {
   console.error(error instanceof Error ? error.message : "Integration failed");
   process.exitCode = 1;
 } finally {
-  if (
-    mongoose.connection.readyState === 1 &&
-    mongoose.connection.name === databaseName &&
-    /^getfit4u_integration_\d+$/.test(databaseName)
-  ) {
-    await mongoose.connection.dropDatabase();
-    console.log("Temporary integration database removed.");
+  try {
+    if (await testDatabase.cleanup())
+      console.log("Temporary integration database removed.");
+  } finally {
+    await mongoose.disconnect();
   }
-  await mongoose.disconnect();
 }

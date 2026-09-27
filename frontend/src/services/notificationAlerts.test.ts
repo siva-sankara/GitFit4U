@@ -73,6 +73,9 @@ it("delivers distinct notifications with the same creation timestamp", () => {
 });
 it("plays the local MP3 and respects the saved mute preference", async () => {
   const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue();
+  expect(notificationSoundEnabled()).toBe(false);
+  expect(await playNotificationSound()).toBe(false);
+  setNotificationSoundEnabled(true);
   expect(await playNotificationSound()).toBe(true);
   expect((play.mock.instances[0] as HTMLAudioElement).src).toContain(
     "/sounds/notification.mp3",
@@ -84,8 +87,16 @@ it("plays the local MP3 and respects the saved mute preference", async () => {
   expect(await playNotificationSound(true)).toBe(true);
 });
 it("handles autoplay rejection without failing delivery or creating an unhandled promise", async () => {
+  setNotificationSoundEnabled(true);
   vi.spyOn(HTMLMediaElement.prototype, "play").mockRejectedValue(
     new DOMException("Blocked", "NotAllowedError"),
   );
   expect(await playNotificationSound()).toBe(false);
+});
+it("never sounds for a read notification arriving through a delayed push channel", () => {
+  const alert = vi.fn();
+  const tracker = createNotificationTracker(alert);
+  tracker.receive({ id: "read", title: "Already read", readAt: new Date().toISOString() });
+  tracker.receive({ id: "read", title: "Late duplicate" });
+  expect(alert).not.toHaveBeenCalled();
 });

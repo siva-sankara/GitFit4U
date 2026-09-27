@@ -4,6 +4,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest, type ApiEnvelope } from "../../services/apiClient";
 import { Modal } from "../../components/Modal";
 import { StatusBadge } from "../../components/StatusBadge";
+import { Avatar } from "../../components/Avatar";
+import { MediaImageEditor } from "../../components/MediaImageEditor";
 import type { MemberRow } from "./OwnerMembersPage";
 import "../../styles/member-management.css";
 
@@ -13,10 +15,13 @@ export function OwnerTrainersPage() {
   const path = "/api/v1/owner/trainers",
     client = useQueryClient();
   const [editing, setEditing] = useState<MemberRow | null>(null);
+  const [photo, setPhoto] = useState<{ id: string | null; url?: string }>();
+  const [imageBusy, setImageBusy] = useState(false);
   const [availability, setAvailability] = useState<
     Array<{ day: number; from: string; to: string }>
   >([]);
   function openTrainer(row: MemberRow) {
+    setPhoto(undefined);
     save.reset();
     setAvailability(
       (row.availability || []).map((entry: any) => ({
@@ -51,7 +56,7 @@ export function OwnerTrainersPage() {
       name: text("name"),
       email: text("email"),
       ...(text("phone") ? { phone: text("phone") } : {}),
-      ...(text("photoUrl") ? { photoUrl: text("photoUrl") } : {}),
+      ...(photo ? { photoAttachmentId: photo.id } : {}),
       experienceYears: Number(text("experienceYears") || 0),
       specializations: text("specializations")
         .split(",")
@@ -114,13 +119,7 @@ export function OwnerTrainersPage() {
               {query.data?.data.map((trainer) => (
                 <tr key={trainer.publicId}>
                   <td>
-                    {trainer.photoUrl && (
-                      <img
-                        className="member-management-avatar"
-                        src={trainer.photoUrl}
-                        alt=""
-                      />
-                    )}
+                    <Avatar name={trainer.name} src={trainer.photoUrl} thumbnailSrc={trainer.photoThumbnailUrl} />
                     <strong>{trainer.name}</strong>
                   </td>
                   <td>
@@ -176,7 +175,6 @@ export function OwnerTrainersPage() {
                 ["name", "Full name", "text"],
                 ["email", "Account email", "email"],
                 ["phone", "Phone number", "tel"],
-                ["photoUrl", "Profile image URL", "url"],
               ] as const
             ).map(([name, label, type]) => (
               <label className="field" key={name}>
@@ -202,6 +200,7 @@ export function OwnerTrainersPage() {
                 defaultValue={editing.experienceYears || 0}
               />
             </label>
+            <div className="full-width"><MediaImageEditor purpose="TRAINER_IMAGE" label="Trainer photo" previewUrl={photo ? photo.url : editing.photoUrl} onBusyChange={setImageBusy} onChange={(id, url) => setPhoto({ id, url })} /></div>
             <label className="field">
               <span>Status</span>
               <select
@@ -341,7 +340,7 @@ export function OwnerTrainersPage() {
             )}
             <button
               className="btn btn-primary full-width"
-              disabled={save.isPending}
+              disabled={save.isPending || imageBusy}
             >
               {save.isPending ? "Saving..." : "Save trainer"}
             </button>

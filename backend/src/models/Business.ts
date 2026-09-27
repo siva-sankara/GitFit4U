@@ -55,6 +55,10 @@ const invoiceSchema = new Schema(
     paymentId: { type: Schema.Types.ObjectId, ref: "Payment", required: true },
     supplierSnapshot: { type: Schema.Types.Mixed, required: true },
     customerSnapshot: { type: Schema.Types.Mixed, required: true },
+    membershipSnapshot: Schema.Types.Mixed,
+    paymentSnapshot: Schema.Types.Mixed,
+    pricingSnapshot: Schema.Types.Mixed,
+    snapshotVersion: { type: Number, default: 1 },
     lines: [
       {
         description: String,
@@ -66,6 +70,7 @@ const invoiceSchema = new Schema(
       },
     ],
     subtotalMinor: Number,
+    discountMinor: Number,
     taxMinor: Number,
     totalMinor: Number,
     currency: { type: String, default: "INR" },
@@ -81,6 +86,7 @@ const invoiceSchema = new Schema(
   { timestamps: true },
 );
 invoiceSchema.index({ gymId: 1, issuedAt: -1 });
+invoiceSchema.index({ paymentId: 1 }, { unique: true });
 
 const attachmentSchema = new Schema(
   {
@@ -101,6 +107,10 @@ const attachmentSchema = new Schema(
       type: String,
       enum: [
         "AVATAR",
+        "MEMBER_AVATAR",
+        "TRAINER_IMAGE",
+        "POST_IMAGE",
+        "STORY_IMAGE",
         "GYM_LOGO",
         "GYM_COVER",
         "GYM_GALLERY",
@@ -113,6 +123,8 @@ const attachmentSchema = new Schema(
       required: true,
     },
     objectKey: { type: String, required: true, unique: true },
+    thumbnailObjectKey: String,
+    thumbnailSize: Number,
     originalName: String,
     mimeType: { type: String, required: true },
     size: { type: Number, min: 1, required: true },
@@ -134,10 +146,11 @@ const attachmentSchema = new Schema(
     format: String,
     status: {
       type: String,
-      enum: ["PENDING", "UPLOADED", "SCANNING", "READY", "REJECTED", "DELETED"],
+      enum: ["PENDING", "UPLOADED", "SCANNING", "READY", "REJECTED", "DELETING", "DELETED"],
       default: "PENDING",
     },
     checksum: String,
+    bindingVersion: { type: Number, default: 0 },
     deletedAt: Date,
   },
   { timestamps: true },
@@ -153,7 +166,7 @@ const promotionFields = {
   endsAt: { type: Date, required: true },
   status: {
     type: String,
-    enum: ["DRAFT", "SCHEDULED", "ACTIVE", "PAUSED", "ENDED", "ARCHIVED"],
+    enum: ["DRAFT", "SCHEDULED", "ACTIVE", "PAUSED", "EXPIRED", "ENDED", "ARCHIVED"],
     default: "DRAFT",
     index: true,
   },
@@ -168,15 +181,28 @@ const offerSchema = new Schema(
       required: true,
     },
     discount: Schema.Types.Mixed,
+    code: { type: String, trim: true, uppercase: true, maxlength: 30 },
+    terms: { type: String, maxlength: 3000 },
+    applicablePlanIds: [{ type: Schema.Types.ObjectId, ref: "MembershipPlan" }],
+    minimumPurchaseMinor: { type: Number, min: 0, default: 0 },
     redemptionLimit: Number,
+    perUserLimit: { type: Number, min: 1, default: 1 },
     redemptionCount: { type: Number, default: 0 },
+    reservationVersion: { type: Number, default: 0, select: false },
   },
   { timestamps: true },
 );
+offerSchema.index({ gymId: 1, code: 1 }, { unique: true, partialFilterExpression: { code: { $type: "string" } } });
+offerSchema.index({ gymId: 1, status: 1, startsAt: 1, endsAt: 1 });
 const advertisementSchema = new Schema(
   {
     ...promotionFields,
     creativeAttachmentId: { type: Schema.Types.ObjectId, ref: "Attachment" },
+    placements: [{ type: String, enum: ["EXPLORE", "DASHBOARD", "GYM_PROFILE"] }],
+    ctaLabel: { type: String, maxlength: 60, default: "View gym" },
+    ctaTarget: { type: String, enum: ["GYM", "PLANS", "OFFER", "EXTERNAL"], default: "GYM" },
+    ctaUrl: { type: String, maxlength: 2000 },
+    offerId: { type: Schema.Types.ObjectId, ref: "Offer" },
     budgetMinor: { type: Number, min: 0 },
     spentMinor: { type: Number, min: 0, default: 0 },
     metrics: {
@@ -187,6 +213,7 @@ const advertisementSchema = new Schema(
   },
   { timestamps: true },
 );
+advertisementSchema.index({ placements: 1, status: 1, startsAt: 1, endsAt: 1, gymId: 1 });
 
 const favoriteSchema = new Schema(
   {

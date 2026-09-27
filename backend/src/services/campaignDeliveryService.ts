@@ -24,7 +24,7 @@ export async function deliverCampaignBatch() {
         status: "PROCESSING",
       },
     },
-    { new: true, sort: { createdAt: 1 } },
+    { returnDocument: "after", sort: { createdAt: 1 } },
   );
   if (!campaign) return false;
   const owned = { _id: campaign._id, leaseId };

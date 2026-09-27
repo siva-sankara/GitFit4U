@@ -55,6 +55,10 @@ try {
   );
   process.exitCode = 1;
 } finally {
+  await checkBrowserCorsAndCleanup();
+}
+
+async function checkBrowserCorsAndCleanup() {
   // Check browser permissions independently, even when IAM blocks the PUT.
   try {
     for (const origin of env.CLIENT_ORIGIN.split(",")

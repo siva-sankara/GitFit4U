@@ -3,6 +3,7 @@ import { Conversation, Message } from "../models/Collaboration.js";
 import { SupportTicket } from "../models/Engagement.js";
 import { User } from "../models/User.js";
 import { emitDomainEvent } from "./domainEventService.js";
+import { AppError } from "../utils/AppError.js";
 
 /** Idempotent, additive migration. Historical tickets and attachments remain intact. */
 export async function ensureSupportConversation(ticket: any) {
@@ -21,7 +22,7 @@ export async function ensureSupportConversation(ticket: any) {
           lastMessageAt: ticket.updatedAt || ticket.createdAt,
         },
       },
-      { upsert: true, new: true, setDefaultsOnInsert: true },
+      { upsert: true, returnDocument: "after", setDefaultsOnInsert: true },
     );
   } catch (error: any) {
     if (error?.code !== 11000) throw error;
@@ -112,4 +113,30 @@ export async function notifySupportCreated(
       }),
     ),
   );
+}
+
+/** Notify a persisted legacy reply using its stable subdocument id, never a timestamp. */
+export async function notifySupportReply(
+  ticket: any,
+  conversationId: string,
+  reply: { _id?: unknown; authorId?: unknown } | undefined,
+) {
+  if (!reply?._id || !reply.authorId)
+    throw new AppError(409, "SUPPORT_REPLY_NOT_SAVED", "Save the support reply before notifying participants.");
+  const senderId = String(reply.authorId);
+  const requesterId = String(ticket.requesterId);
+  const fromRequester = senderId === requesterId;
+  if (!fromRequester && !(await User.exists({ _id: reply.authorId, roles: "ADMIN", status: "ACTIVE" })))
+    throw new AppError(403, "SUPPORT_REPLY_FORBIDDEN", "Only the requester or support administrators may reply.");
+  const recipients = fromRequester
+    ? await User.find({ roles: "ADMIN", status: "ACTIVE", _id: { $ne: reply.authorId } }).select("_id").limit(100).lean()
+    : [{ _id: ticket.requesterId }];
+  await Promise.all(recipients.map((recipient) => emitDomainEvent({
+    event: "support.updated",
+    userId: recipient._id,
+    gymId: ticket.gymId,
+    entityId: String(ticket._id),
+    occurrenceId: `reply:${reply._id}`,
+    actionUrl: `/messages/${encodeURIComponent(conversationId)}`,
+  })));
 }

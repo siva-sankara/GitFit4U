@@ -1,5 +1,6 @@
 ﻿import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
+import { Avatar } from "../../components/Avatar";
 import {
   ArrowLeft,
   ArrowUpRight,
@@ -20,6 +21,7 @@ import {
 } from "lucide-react";
 import { GymLocation } from "../../components/GymLocation";
 import { GymIdentity } from "../../components/GymIdentity";
+import { ClassCard } from "../../components/ClassCard";
 import { validCoordinates } from "../../services/location";
 import type { Row } from "../live/LiveData";
 import "../../styles/gym-details.css";
@@ -429,36 +431,9 @@ export function GymDetailsView({
                 View timetable <ArrowUpRight size={16} />
               </Link>
             </div>
-            <div className="gd-class-list">
+            <div className="class-grid">
               {classes.map((c) => (
-                <article key={c.publicId} className="gd-class">
-                  <div className="gd-class-date">
-                    <span>
-                      {localDate(c.startsAt, timezone, { month: "short" })}
-                    </span>
-                    <strong>
-                      {localDate(c.startsAt, timezone, { day: "2-digit" })}
-                    </strong>
-                  </div>
-                  <div className="gd-class-info">
-                    <span className="gd-kicker">
-                      {c.category?.replaceAll("_", " ")}
-                    </span>
-                    <h3>{c.name}</h3>
-                    <p>
-                      <Clock3 size={14} />
-                      {localDate(c.startsAt, timezone, {
-                        hour: "numeric",
-                        minute: "2-digit",
-                      })}
-                      {c.room && ` · ${c.room}`}
-                    </p>
-                  </div>
-                  <span className="gd-class-spaces">
-                    <Users size={15} />
-                    {Math.max(0, c.capacity - (c.bookedCount || 0))} spots left
-                  </span>
-                </article>
+                <ClassCard key={c.publicId} session={{ ...c, gymId: { name: gym.name, timezone } }} />
               ))}
             </div>
             {!classes.length && (
@@ -473,6 +448,7 @@ export function GymDetailsView({
               </small>
             )}
           </section>
+          {gym.terms?.text && <section className="gd-section" aria-labelledby="gym-terms-heading"><h2 id="gym-terms-heading">Gym terms and conditions</h2><p style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{gym.terms.text}</p></section>}
           {!!trainers.length && (
             <section className="gd-section">
               <span className="gd-kicker">MEET YOUR SUPPORT TEAM</span>
@@ -480,15 +456,7 @@ export function GymDetailsView({
               <div className="gd-trainers">
                 {trainers.map((t) => (
                   <article key={t.publicId}>
-                    {t.photoUrl ? (
-                      <MediaImage
-                        src={t.photoUrl}
-                        alt={t.name}
-                        className="gd-avatar"
-                      />
-                    ) : (
-                      <span className="gd-avatar">{t.name?.charAt(0)}</span>
-                    )}
+                    <Avatar name={t.name} src={t.photoUrl} thumbnailSrc={t.photoThumbnailUrl} size={48} />
                     <div>
                       <h3>{t.name}</h3>
                       <p>
@@ -626,6 +594,7 @@ export function GymDetailsView({
             {reviews.map((r) => (
               <article className="gd-review" key={r.publicId}>
                 <div>
+                  <Avatar user={r.userId} />
                   <strong>{r.userId?.name || "Gym member"}</strong>
                   <span className="gd-review-rating">
                     <Star size={15} fill="currentColor" />
@@ -642,6 +611,10 @@ export function GymDetailsView({
                 </div>
                 {r.title && <h3>{r.title}</h3>}
                 <p>{r.body}</p>
+                {!!(r.images?.length || r.photoUrls?.length) && <div className="review-photo-grid">
+                  {(r.images || []).map((photo: Row, index: number) => <a key={photo.id} href={photo.url} target="_blank" rel="noopener noreferrer"><img src={photo.thumbnailUrl || photo.url} alt={`Review photo ${index + 1}`} width={96} height={96} loading="lazy" /></a>)}
+                  {(r.photoUrls || []).filter((url: string) => /^https:\/\//i.test(url)).map((url: string, index: number) => <img key={url} src={url} alt={`Legacy review photo ${index + 1}`} width={96} height={96} loading="lazy" referrerPolicy="no-referrer" />)}
+                </div>}
                 {r.ownerResponse?.body && (
                   <blockquote>
                     <strong>Response from the gym</strong>

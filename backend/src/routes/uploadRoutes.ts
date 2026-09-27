@@ -25,6 +25,7 @@ uploadRoutes.post(
     z.object({
       body: z.object({
         registrationId: z.string().min(8).max(64).optional(),
+        gymId: z.string().regex(/^[a-f\d]{24}$/i).optional(),
         name: z.string().min(1).max(255),
         mimeType: z.enum([
           "image/jpeg",
@@ -36,6 +37,10 @@ uploadRoutes.post(
         size: z.number().int().positive().max(50_000_000),
         purpose: z.enum([
           "AVATAR",
+          "MEMBER_AVATAR",
+          "TRAINER_IMAGE",
+          "POST_IMAGE",
+          "STORY_IMAGE",
           "GYM_LOGO",
           "GYM_COVER",
           "GYM_GALLERY",

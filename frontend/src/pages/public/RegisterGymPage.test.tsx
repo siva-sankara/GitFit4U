@@ -85,7 +85,7 @@ afterEach(async () => {
 async function until(check: () => boolean) {
   for (let i = 0; i < 80 && !check(); i++)
     await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 20));
+      await new Promise((resolve) => { setTimeout(resolve, 20); });
     });
   expect(check()).toBe(true);
 }

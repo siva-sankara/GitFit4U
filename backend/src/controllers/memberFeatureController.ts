@@ -21,6 +21,13 @@ import { createMembershipQuote } from "../services/checkoutService.js";
 import { refreshGymRating } from "../services/gymProjectionService.js";
 import { emitDomainEvent } from "../services/domainEventService.js";
 import { withGymMedia } from "../services/gymMediaService.js";
+import { shiftCalendarDate, zonedDayStart } from "../utils/gymCalendar.js";
+import { withTrainerMedia } from "../services/userMediaService.js";
+import {
+  validateReviewImages,
+  withReviewMedia,
+} from "../services/reviewMediaService.js";
+import { paginationFromQuery, pageMeta } from "../utils/pagination.js";
 
 export async function favorites(req: Request, res: Response) {
   const data = await Favorite.find({ userId: req.auth!.userId })
@@ -52,7 +59,7 @@ export async function addFavorite(req: Request, res: Response) {
   const data = await Favorite.findOneAndUpdate(
     { userId: req.auth!.userId, gymId: gym._id },
     { $setOnInsert: { userId: req.auth!.userId, gymId: gym._id } },
-    { upsert: true, new: true },
+    { upsert: true, returnDocument: "after" },
   );
   res.status(201).json({ success: true, data });
 }
@@ -83,16 +90,28 @@ export async function createReview(req: Request, res: Response) {
       "REVIEW_EXISTS",
       "You already reviewed this gym. Edit your existing review.",
     );
-  const data = await Review.create({
-    publicId: nanoid(20),
-    gymId: gym._id,
-    userId: req.auth!.userId,
-    rating: req.body.rating,
-    title: req.body.title,
-    body: req.body.body,
-    photoUrls: req.body.photoUrls || [],
-    status: "PUBLISHED",
-  });
+  const persist = async (session?: mongoose.ClientSession) => {
+    const record = {
+      publicId: nanoid(20),
+      gymId: gym._id,
+      userId: req.auth!.userId,
+      rating: req.body.rating,
+      title: req.body.title,
+      body: req.body.body,
+      attachmentIds: await validateReviewImages(
+        req.body.attachmentIds || [],
+        req.auth!.userId,
+        session,
+      ),
+      status: "PUBLISHED",
+    };
+    return session
+      ? (await Review.create([record], { session }))[0]
+      : Review.create(record);
+  };
+  const data = req.body.attachmentIds?.length
+    ? await mongoose.connection.transaction(persist)
+    : await persist();
   await refreshGymRating(data.gymId);
   await emitDomainEvent({
     event: "review.created",
@@ -101,23 +120,47 @@ export async function createReview(req: Request, res: Response) {
     entityId: data.publicId,
     actionUrl: `/gyms/${gym.slug}#gym-reviews`,
   });
-  res.status(201).json({ success: true, data });
+  res
+    .status(201)
+    .json({
+      success: true,
+      data: (await withReviewMedia([data.toObject()]))[0],
+    });
 }
 export async function updateReview(req: Request, res: Response) {
-  const data = await Review.findOneAndUpdate(
-    { publicId: req.params.id, userId: req.auth!.userId },
-    {
-      $set: {
-        rating: req.body.rating,
-        title: req.body.title,
-        body: req.body.body,
-        photoUrls: req.body.photoUrls || [],
-        editedAt: new Date(),
+  const persist = async (session?: mongoose.ClientSession) => {
+    const attachmentIds =
+      req.body.attachmentIds === undefined
+        ? undefined
+        : await validateReviewImages(
+            req.body.attachmentIds,
+            req.auth!.userId,
+            session,
+          );
+    const data = await Review.findOneAndUpdate(
+      { publicId: req.params.id, userId: req.auth!.userId },
+      {
+        $set: {
+          rating: req.body.rating,
+          title: req.body.title,
+          body: req.body.body,
+          ...(attachmentIds !== undefined ? { attachmentIds } : {}),
+          ...(req.body.removeLegacyPhotos ? { photoUrls: [] } : {}),
+          editedAt: new Date(),
+        },
       },
-    },
-    { new: true, runValidators: true },
-  );
-  if (!data) throw new AppError(404, "REVIEW_NOT_FOUND", "Review not found.");
+      {
+        returnDocument: "after",
+        runValidators: true,
+        ...(session ? { session } : {}),
+      },
+    );
+    if (!data) throw new AppError(404, "REVIEW_NOT_FOUND", "Review not found.");
+    return data;
+  };
+  const data = req.body.attachmentIds?.length
+    ? await mongoose.connection.transaction(persist)
+    : await persist();
   await refreshGymRating(data.gymId);
   const gym = await Gym.findById(data.gymId).select("ownerId slug");
   if (gym)
@@ -129,7 +172,10 @@ export async function updateReview(req: Request, res: Response) {
       occurrenceId: data.editedAt.toISOString(),
       actionUrl: `/gyms/${gym.slug}#gym-reviews`,
     });
-  res.json({ success: true, data });
+  res.json({
+    success: true,
+    data: (await withReviewMedia([data.toObject()]))[0],
+  });
 }
 
 export async function ownReview(req: Request, res: Response) {
@@ -141,30 +187,108 @@ export async function ownReview(req: Request, res: Response) {
     gymId: gym._id,
     userId: req.auth!.userId,
   }).lean();
-  res.json({ success: true, data });
+  res.json({
+    success: true,
+    data: data ? (await withReviewMedia([data]))[0] : null,
+  });
 }
 
 export async function classes(req: Request, res: Response) {
+  const { page, limit, skip } = paginationFromQuery(req.query);
   const from = req.query.from ? new Date(String(req.query.from)) : new Date();
   if (Number.isNaN(from.getTime()))
     throw new AppError(422, "INVALID_DATE", "Enter a valid date.");
-  const visibleGyms = await Gym.distinct("_id", {
+  const day = req.query.day;
+  if (
+    day &&
+    (typeof day !== "string" ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(day) ||
+      !Number.isFinite(Date.parse(day)) ||
+      new Date(day).toISOString().slice(0, 10) !== day)
+  )
+    throw new AppError(422, "INVALID_DATE", "Choose a valid calendar date.");
+  if (
+    req.query.gymId &&
+    (typeof req.query.gymId !== "string" ||
+      !mongoose.isValidObjectId(req.query.gymId))
+  )
+    throw new AppError(422, "GYM_INVALID", "Choose a valid gym.");
+  const visibleGyms = await Gym.find({
     status: "ACTIVE",
     verificationStatus: "VERIFIED",
     platformSubscriptionStatus: "ACTIVE",
     ...(req.query.gymId ? { _id: req.query.gymId } : {}),
-  });
-  const data = await ClassSession.find({
-    startsAt: { $gte: from },
-    status: "SCHEDULED",
-    gymId: { $in: visibleGyms },
   })
-    .populate("gymId", "publicId name slug")
-    .populate("trainerId", "publicId name photoUrl")
-    .sort({ startsAt: 1 })
-    .limit(100)
+    .select("_id timezone")
     .lean();
-  res.json({ success: true, data });
+  if (!visibleGyms.length) {
+    res.json({ success: true, data: [], meta: pageMeta(page, limit, 0) });
+    return;
+  }
+  const filter = {
+    ...(day
+      ? {
+          $or: visibleGyms.map((gym) => ({
+            gymId: gym._id,
+            startsAt: {
+              $gte: new Date(
+                Math.max(
+                  Date.now(),
+                  zonedDayStart(
+                    String(day),
+                    gym.timezone || "Asia/Kolkata",
+                  ).getTime(),
+                ),
+              ),
+              $lt: zonedDayStart(
+                shiftCalendarDate(String(day), 1),
+                gym.timezone || "Asia/Kolkata",
+              ),
+            },
+          })),
+        }
+      : { startsAt: { $gte: from } }),
+    status: "SCHEDULED",
+    gymId: { $in: visibleGyms.map((gym) => gym._id) },
+  };
+  const data = await ClassSession.find(filter)
+    .populate("gymId", "publicId name slug timezone")
+    .populate("trainerId", "publicId name photoUrl photoAttachmentId")
+    .sort({ startsAt: 1, _id: 1 })
+    .skip(skip)
+    .limit(limit)
+    .lean();
+  const trainers = await withTrainerMedia(
+    data.flatMap((row: any) => (row.trainerId ? [row.trainerId] : [])),
+  );
+  const ownBookings = data.length
+    ? await ClassBooking.find({
+        sessionId: { $in: data.map((row) => row._id) },
+        memberProfileId: {
+          $in: await MemberProfile.distinct("_id", {
+            userId: req.auth!.userId,
+          }),
+        },
+        status: { $in: ["BOOKED", "WAITLISTED"] },
+      })
+        .select("_id sessionId status")
+        .lean()
+    : [];
+  res.json({
+    success: true,
+    data: data.map((row: any) => ({
+      ...row,
+      myBooking:
+        ownBookings.find(
+          (booking) => String(booking.sessionId) === String(row._id),
+        ) || null,
+      trainerId:
+        trainers.find(
+          (trainer: any) => String(trainer._id) === String(row.trainerId?._id),
+        ) || row.trainerId,
+    })),
+    meta: pageMeta(page, limit, await ClassSession.countDocuments(filter)),
+  });
 }
 export async function bookClass(req: Request, res: Response) {
   const session = await mongoose.startSession();
@@ -179,13 +303,27 @@ export async function bookClass(req: Request, res: Response) {
           $expr: { $lt: ["$bookedCount", "$capacity"] },
         },
         { $inc: { bookedCount: 1 } },
-        { new: true, session },
+        { returnDocument: "after", session },
       );
       if (!classSession)
         throw new AppError(
           409,
           "CLASS_FULL_OR_UNAVAILABLE",
           "This class is full or no longer available.",
+        );
+      if (
+        !(await Gym.exists({
+          _id: classSession.gymId,
+          status: "ACTIVE",
+          verificationStatus: "VERIFIED",
+          platformSubscriptionStatus: "ACTIVE",
+          deletedAt: null,
+        }).session(session))
+      )
+        throw new AppError(
+          409,
+          "GYM_UNAVAILABLE",
+          "This gym is not accepting class bookings.",
         );
       const member = await MemberProfile.findOne({
         gymId: classSession.gymId,
@@ -231,8 +369,17 @@ export async function bookClass(req: Request, res: Response) {
             cancelledAt: null,
           },
         },
-        { upsert: true, new: true, session },
+        { upsert: true, returnDocument: "after", session },
       );
+      await emitDomainEvent({
+        event: "class.booked",
+        userId: req.auth!.userId,
+        gymId: classSession.gymId,
+        entityId: String(booking._id),
+        occurrenceId: booking.bookedAt.toISOString(),
+        actionUrl: "/app/classes",
+        session,
+      });
     });
   } finally {
     await session.endSession();
@@ -257,15 +404,16 @@ export async function cancelBooking(req: Request, res: Response) {
           "CLASS_UNAVAILABLE",
           "Only upcoming bookings can be cancelled.",
         );
+      const cancelledAt = new Date();
       data = await ClassBooking.findOneAndUpdate(
         {
           _id: req.params.bookingId,
           sessionId: classSession._id,
           memberProfileId: { $in: ids },
-          status: "BOOKED",
+          status: { $in: ["BOOKED", "WAITLISTED"] },
         },
-        { $set: { status: "CANCELLED", cancelledAt: new Date() } },
-        { new: true, session },
+        { $set: { status: "CANCELLED", cancelledAt } },
+        { returnDocument: "before", session },
       );
       if (!data)
         throw new AppError(
@@ -273,11 +421,23 @@ export async function cancelBooking(req: Request, res: Response) {
           "BOOKING_NOT_ACTIVE",
           "This booking is not active or does not belong to you.",
         );
-      await ClassSession.updateOne(
-        { _id: classSession._id, bookedCount: { $gt: 0 } },
-        { $inc: { bookedCount: -1 } },
-        { session },
-      );
+      if (data.status === "BOOKED")
+        await ClassSession.updateOne(
+          { _id: classSession._id, bookedCount: { $gt: 0 } },
+          { $inc: { bookedCount: -1 } },
+          { session },
+        );
+      data.status = "CANCELLED";
+      data.cancelledAt = cancelledAt;
+      await emitDomainEvent({
+        event: "class.cancelled",
+        userId: req.auth!.userId,
+        gymId: classSession.gymId,
+        entityId: String(data._id),
+        occurrenceId: data.cancelledAt.toISOString(),
+        actionUrl: "/app/classes",
+        session,
+      });
     });
   } finally {
     await session.endSession();
@@ -292,6 +452,7 @@ export async function subscriptionCommand(req: Request, res: Response) {
       userId: req.auth!.userId,
       actorId: req.auth!.userId,
       action: command as "cancel" | "freeze" | "reactivate",
+      actorRole: req.auth!.role,
       endsAt: req.body.endsAt,
       reason: req.body.reason,
     });

@@ -11,6 +11,7 @@ import {
 } from "../models/Fitness.js";
 import { Notification } from "../models/Engagement.js";
 import { AppError } from "../utils/AppError.js";
+import { withMemberMedia } from "../services/userMediaService.js";
 
 async function trainerFor(req: Request) {
   const trainer = await Trainer.findOne({
@@ -83,10 +84,13 @@ export async function clients(req: Request, res: Response) {
     $or: [{ _id: { $in: memberIds } }, { assignedTrainerId: trainer._id }],
     gymId: trainer.gymId,
   })
-    .populate("userId", "publicId name phone email avatarUrl")
+    .populate(
+      "userId",
+      "publicId name phone email avatarUrl avatarAttachmentId",
+    )
     .populate("currentSubscriptionId", "publicId status startsAt endsAt")
     .lean();
-  res.json({ success: true, data });
+  res.json({ success: true, data: await withMemberMedia(data) });
 }
 
 export async function sessions(req: Request, res: Response) {
@@ -128,7 +132,7 @@ export async function updateWorkoutPlan(req: Request, res: Response) {
   const data = await WorkoutPlan.findOneAndUpdate(
     { publicId: req.params.id, trainerId: trainer._id },
     { $set: req.body, $inc: { version: 1 } },
-    { new: true, runValidators: true },
+    { returnDocument: "after", runValidators: true },
   );
   if (!data)
     throw new AppError(

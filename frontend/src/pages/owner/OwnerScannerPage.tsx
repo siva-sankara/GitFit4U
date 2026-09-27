@@ -5,6 +5,7 @@ import { QRCodeSVG } from "qrcode.react";
 import { apiRequest, type ApiEnvelope } from "../../services/apiClient";
 import { Modal } from "../../components/Modal";
 import { deviceLocation } from "../../services/location";
+import "../../styles/member-management.css";
 
 type GymQr = {
   token: string;
@@ -97,81 +98,83 @@ export function OwnerScannerPage() {
           </button>
         </div>
       )}
-      {qr.data && (
-        <section className="panel state-card" style={{ maxWidth: 600 }}>
-          <h2>{qr.data.data.gymName}</h2>
-          <div
-            id="gym-attendance-qr"
-            style={{
-              display: "inline-flex",
-              padding: 20,
-              background: "#fff",
-              borderRadius: 16,
-            }}
-          >
-            <QRCodeSVG
-              value={qr.data.data.token}
-              size={240}
-              marginSize={2}
-              level="M"
-            />
-          </div>
-          <p>Persistent gym QR - Version {qr.data.data.revision}</p>
-          <p>
-            {qr.data.data.locationRequired
-              ? "Members must enable location and be near this gym."
-              : "Membership and daily duplicate checks are required for every scan."}
-          </p>
-          <div className="heading-actions">
-            <button className="btn btn-primary" onClick={download}>
-              Download QR
-            </button>
-            {permissions.includes("gym:update") && (
-              <button
-                className="btn btn-secondary"
-                onClick={() => setReplace(true)}
-              >
-                Replace QR
-              </button>
-            )}
-          </div>
-        </section>
-      )}
-      {permissions.includes("attendance:scan") && (
-        <section className="panel" style={{ padding: 24, maxWidth: 600 }}>
-          <h2>Manual attendance exception</h2>
-          <p>Use this when an eligible member cannot access their camera.</p>
-          <form
-            className="modal-form"
-            onSubmit={(event) => {
-              event.preventDefault();
-              manual.mutate();
-            }}
-          >
-            <label className="field">
-              <span>Member code</span>
-              <input
-                className="input"
-                required
-                minLength={3}
-                value={memberCode}
-                onChange={(event) => setMemberCode(event.target.value)}
+      <div className="owner-attendance-grid">
+        {qr.data && (
+          <section className="panel attendance-qr-card">
+            <h2>{qr.data.data.gymName}</h2>
+            <div
+              id="gym-attendance-qr"
+              style={{
+                display: "inline-flex",
+                padding: 20,
+                background: "#fff",
+                borderRadius: 16,
+              }}
+            >
+              <QRCodeSVG
+                value={qr.data.data.token}
+                size={210}
+                marginSize={2}
+                level="M"
               />
-            </label>
-            <button className="btn btn-secondary" disabled={manual.isPending}>
-              {manual.isPending ? "Recording..." : "Record check-in"}
-            </button>
-            {manual.isError && <p role="alert">{manual.error.message}</p>}
-            {manual.isSuccess && (
-              <p role="status">
-                {manual.data.data.duplicate
-                  ? "This member is already checked in today."
-                  : "Attendance recorded."}
-              </p>
-            )}
-          </form>
-        </section>
-      )}
+            </div>
+            <p>Persistent gym QR - Version {qr.data.data.revision}</p>
+            <p>
+              {qr.data.data.locationRequired
+                ? "Members must enable location and be near this gym."
+                : "Membership and daily duplicate checks are required for every scan."}
+            </p>
+            <div className="heading-actions">
+              <button className="btn btn-primary" onClick={download}>
+                Download QR
+              </button>
+              {permissions.includes("gym:update") && (
+                <button
+                  className="btn btn-secondary"
+                  onClick={() => setReplace(true)}
+                >
+                  Replace QR
+                </button>
+              )}
+            </div>
+          </section>
+        )}
+        {permissions.includes("attendance:scan") && (
+          <section className="panel attendance-manual-card">
+            <h2>Manual attendance exception</h2>
+            <p>Use this when an eligible member cannot access their camera.</p>
+            <form
+              className="modal-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                manual.mutate();
+              }}
+            >
+              <label className="field">
+                <span>Member code</span>
+                <input
+                  className="input"
+                  required
+                  minLength={3}
+                  value={memberCode}
+                  onChange={(event) => setMemberCode(event.target.value)}
+                />
+              </label>
+              <button className="btn btn-secondary" disabled={manual.isPending}>
+                {manual.isPending ? "Recording..." : "Record check-in"}
+              </button>
+              {manual.isError && <p role="alert">{manual.error.message}</p>}
+              {manual.isSuccess && (
+                <p role="status">
+                  {manual.data.data.duplicate
+                    ? "This member is already checked in today."
+                    : "Attendance recorded."}
+                </p>
+              )}
+            </form>
+          </section>
+        )}
+      </div>
       <Modal
         open={replace}
         title="Replace gym QR?"

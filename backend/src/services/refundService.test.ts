@@ -156,7 +156,7 @@ it("serializes refund reservations and includes pending refunds in the remaining
   expect(Payment.findOneAndUpdate).toHaveBeenCalledWith(
     expect.anything(),
     { $inc: { __v: 1 } },
-    { new: true, session },
+    { returnDocument: "after", session },
   );
   expect(Refund.aggregate).toHaveBeenCalledWith(
     expect.arrayContaining([

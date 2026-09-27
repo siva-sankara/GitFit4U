@@ -2,6 +2,7 @@ import "dotenv/config";
 import mongoose from "mongoose";
 import assert from "node:assert/strict";
 import request from "supertest";
+import { isolatedScriptDatabase } from "./isolatedScriptDatabase.js";
 Object.assign(process.env, {
   NODE_ENV: "test",
   LOG_LEVEL: "silent",
@@ -18,7 +19,8 @@ const { createSession } = await import("../services/tokenService.js");
 const { FirebaseProvider, PushDeliveryError } =
   await import("../integrations/notifications/firebaseProvider.js");
 const { deliverPush } = await import("../services/notificationService.js");
-const databaseName = `gfu_push_${Date.now()}`;
+const testDatabase = isolatedScriptDatabase("gfp");
+const { databaseName } = testDatabase;
 let checks = 0;
 function check(value: unknown, message: string) {
   assert.ok(value, message);
@@ -41,6 +43,7 @@ async function call(
   status = 200,
 ) {
   let req = (request(app) as any)[method]("/api/v1" + path);
+  req = req.set("x-csrf-protection", "1");
   if (token) req = req.auth(token, { type: "bearer" });
   if (body) req = req.send(body);
   const res = await req;
@@ -52,10 +55,10 @@ try {
   await mongoose.connect(process.env.MONGO_URI!, {
     dbName: databaseName,
     serverSelectionTimeoutMS: 15000,
+    autoCreate: false,
+    autoIndex: false,
   });
-  await Promise.all(
-    Object.values(mongoose.models).map((model) => model.init()),
-  );
+  await testDatabase.initialize();
   const user = await User.create({
     publicId: "push-user",
     name: "Push user",
@@ -217,12 +220,10 @@ try {
     `PASS: ${checks} Firebase push checks; all provider delivery simulated.`,
   );
 } finally {
-  if (
-    mongoose.connection.name === databaseName &&
-    /^gfu_push_\d+$/.test(databaseName)
-  ) {
-    await mongoose.connection.dropDatabase();
-    console.log("Temporary push database removed.");
+  try {
+    if (await testDatabase.cleanup())
+      console.log("Temporary push database removed.");
+  } finally {
+    await mongoose.disconnect();
   }
-  await mongoose.disconnect();
 }

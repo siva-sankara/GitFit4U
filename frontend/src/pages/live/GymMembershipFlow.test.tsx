@@ -144,7 +144,7 @@ async function render(path: string) {
 async function until(check: () => boolean) {
   for (let n = 0; n < 80 && !check(); n++)
     await act(async () => {
-      await new Promise((r) => setTimeout(r, 15));
+      await new Promise((r) => { setTimeout(r, 15); });
     });
   expect(check()).toBe(true);
 }
@@ -210,6 +210,6 @@ it("does not checkout a removed plan and lets an authenticated member choose a c
       .find((b) => b.textContent === "Monthly membership")!
       .click(),
   );
-  await until(() => !!host.querySelector('[role="dialog"]'));
-  expect(host.textContent).toContain("Membership checkout");
+  await until(() => !!document.querySelector('[role="dialog"]'));
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Membership checkout");
 });

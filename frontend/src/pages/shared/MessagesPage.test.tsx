@@ -9,6 +9,8 @@ const state = vi.hoisted(() => ({
   error: false,
   read: vi.fn(),
   rows: [] as any[],
+  archived: false,
+  query: vi.fn(),
 }));
 vi.mock("../../api/hooks", () => ({
   useCurrentUser: () => ({
@@ -22,6 +24,7 @@ vi.mock("@tanstack/react-query", () => ({
   useQueryClient: () => ({ invalidateQueries: vi.fn() }),
   useMutation: () => ({ mutate: state.read, isPending: false, isError: false }),
   useQuery: ({ queryKey }: { queryKey: string[] }) => {
+    state.query(queryKey);
     const conversation = {
       publicId: "conversation-one",
       participants: [
@@ -29,6 +32,7 @@ vi.mock("@tanstack/react-query", () => ({
         { _id: "current-user", name: "Same name" },
       ],
       supportTicketId: state.ticket,
+      archivedBy: state.archived ? ["current-user"] : [],
     };
     return {
       isPending: false,
@@ -54,6 +58,7 @@ beforeEach(() => {
   state.role = "USER";
   state.ticket = null;
   state.error = false;
+  state.archived = false;
   vi.clearAllMocks();
   state.rows = [
     {
@@ -117,4 +122,21 @@ it("shows backend message errors without presenting cached history as readable",
     "no longer have access",
   );
   expect(host.querySelector(".message-bubble")).toBeNull();
+});
+it("offers a persistent Archived chats filter backed by the conversation query", async () => {
+  await render();
+  const archived = [...host.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Archived chats")!;
+  await act(async () => archived.click());
+  expect(state.query.mock.calls.some(([key]) => key[0] === "conversations" && key[3] === true)).toBe(true);
+  expect(archived.getAttribute("aria-pressed")).toBe("true");
+});
+it("offers Restore for an archived conversation without exposing a destructive delete action", async () => {
+  state.archived = true;
+  await render();
+  const restore = host.querySelector<HTMLButtonElement>('[aria-label="Restore conversation"]');
+  expect(restore).not.toBeNull();
+  expect(host.querySelector('[aria-label="Archive conversation for me"]')).toBeNull();
+  state.read.mockClear();
+  await act(async () => restore!.click());
+  expect(state.read).toHaveBeenCalledOnce();
 });

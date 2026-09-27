@@ -68,6 +68,7 @@ export type Field = {
     | "select"
     | "checkbox";
   required?: boolean;
+  clearable?: boolean;
   min?: number;
   max?: number;
   options?: string[];
@@ -187,7 +188,10 @@ export function EditForm({
         const body: Row = {};
         for (const f of fields) {
           let value = values[f.key];
-          if (value === "" && !f.required) continue;
+          if (value === "" && !f.required) {
+            if (!f.clearable) continue;
+            value = null;
+          }
           if (["number", "money"].includes(f.type || ""))
             value = Number(value) * (f.type === "money" ? 100 : 1);
           if (f.type === "money") value = Math.round(value);
@@ -329,6 +333,7 @@ export function EditForm({
 export type Column = {
   key: string;
   title: string;
+  render?: (row: Row) => ReactNode;
   format?: "money" | "date" | "status";
   link?: (row: Row) => string;
 };
@@ -377,7 +382,7 @@ export function Table({
             <tr key={row._id || row.publicId || row.code}>
               {columns.map((c) => (
                 <td key={c.key}>
-                  {c.link ? (
+                  {c.render ? c.render(row) : c.link ? (
                     <Link to={c.link(row)}>{display(row, c)}</Link>
                   ) : c.format === "status" ? (
                     <StatusBadge status={read(row, c.key)} />

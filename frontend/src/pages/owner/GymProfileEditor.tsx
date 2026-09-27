@@ -1,6 +1,8 @@
 ﻿import { useEffect, useRef, useState } from "react";
 import { Modal } from "../../components/Modal";
 import { GymLogoEditor } from "./GymLogoEditor";
+import { GymTermsEditor } from "./GymTermsEditor";
+import { OwnerClassManagement } from "./OwnerClassManagement";
 import { Link } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useCurrentUser } from "../../api/hooks";
@@ -101,6 +103,7 @@ export function GymProfileEditor({
           "Location",
           "Hours",
           "Classes",
+          "Terms",
         ].map((s) => (
           <a key={s} href={`#gym-${s.toLowerCase()}`}>
             {s}
@@ -132,10 +135,10 @@ export function GymProfileEditor({
                   fields={[
                     field("name", "Gym name", "text", true),
                     field("description", "About the gym", "textarea"),
-                    field("contact.phone", "Contact phone"),
-                    field("contact.email", "Contact email", "email"),
-                    field("contact.whatsapp", "WhatsApp number"),
-                    field("contact.website", "Website", "text"),
+                    { ...field("contact.phone", "Contact phone"), clearable: true },
+                    { ...field("contact.email", "Contact email", "email"), clearable: true },
+                    { ...field("contact.whatsapp", "WhatsApp number"), clearable: true },
+                    { ...field("contact.website", "Website", "text"), clearable: true },
                     field("facilities", "Facilities (one per line)", "lines"),
                     field("amenities", "Amenities (one per line)", "lines"),
                     field(
@@ -186,6 +189,7 @@ export function GymProfileEditor({
               canWrite={permissions.includes("class:write")}
               canRead={permissions.includes("gym:read")}
             />
+            <GymTermsEditor terms={gym.data.data.terms} disabled={!canEdit} />
           </>
         )}
       </QueryState>
@@ -625,49 +629,7 @@ function GymProfileClasses({
   canWrite: boolean;
   canRead: boolean;
 }) {
-  const classes = useData<Row[]>("/api/v1/owner/classes", canRead);
-  return (
-    <section id="gym-classes" className="panel form-section page-stack">
-      <h2>Classes and group sessions</h2>
-      <p>
-        Scheduled upcoming classes appear on your public gym page. Members book
-        through the class timetable.
-      </p>
-      <p>
-        Enter class times in your device timezone:{" "}
-        {Intl.DateTimeFormat().resolvedOptions().timeZone}.
-      </p>
-      {canRead && (
-        <QueryState query={classes}>
-          {classes.data?.data
-            .filter(
-              (c) =>
-                c.status === "SCHEDULED" && new Date(c.startsAt) > new Date(),
-            )
-            .slice(0, 5)
-            .map((c) => (
-              <p key={c.publicId}>
-                {c.name} · {date(c.startsAt)} · {c.capacity} places
-              </p>
-            ))}
-          <Link className="btn btn-secondary" to="/owner/classes">
-            Manage timetable and bookings
-          </Link>
-        </QueryState>
-      )}
-      {canWrite && (
-        <details>
-          <summary>Add a class</summary>
-          <EditForm
-            endpoint="/api/v1/owner/classes"
-            fields={fields}
-            initial={{ status: "SCHEDULED", capacity: 10 }}
-            submitLabel="Create class"
-          />
-        </details>
-      )}
-    </section>
-  );
+  return <OwnerClassManagement embedded canRead={canRead} canWrite={canWrite} />;
 }
 
 export function GymProfilePlans({

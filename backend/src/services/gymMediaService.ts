@@ -1,4 +1,5 @@
 import { Attachment } from "../models/Business.js";
+import type { ClientSession } from "mongoose";
 import { attachmentUrl } from "../integrations/storage/mediaStore.js";
 import { AppError } from "../utils/AppError.js";
 
@@ -6,15 +7,18 @@ export async function validateGymMedia(
   gymId: string,
   ids: string[],
   coverId?: string | null,
+  session?: ClientSession,
 ) {
-  const files = await Attachment.find({
+  const query = Attachment.find({
     _id: { $in: ids },
     gymId,
     status: "READY",
     deletedAt: null,
     purpose: { $in: ["GYM_GALLERY", "GYM_COVER"] },
     mimeType: { $in: ["image/jpeg", "image/png", "image/webp", "video/mp4"] },
-  }).lean();
+  });
+  if (session) query.session(session);
+  const files = await query.lean();
   if (files.length !== ids.length)
     throw new AppError(
       422,
@@ -35,10 +39,9 @@ export async function validateGymMedia(
 }
 
 // Persist attachment IDs, not expiring S3 URLs. Resolve fresh viewing links on every read.
-export async function validateGymLogo(gymId: string, id?: string | null) {
+export async function validateGymLogo(gymId: string, id?: string | null, session?: ClientSession) {
   if (!id) return;
-  if (
-    !(await Attachment.exists({
+  const query = Attachment.exists({
       _id: id,
       gymId,
       purpose: "GYM_LOGO",
@@ -46,8 +49,9 @@ export async function validateGymLogo(gymId: string, id?: string | null) {
       deletedAt: null,
       mimeType: { $in: ["image/jpeg", "image/png", "image/webp"] },
       size: { $lte: 5_000_000 },
-    }))
-  )
+    });
+  if (session) query.session(session);
+  if (!(await query))
     throw new AppError(
       422,
       "GYM_LOGO_INVALID",

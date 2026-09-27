@@ -40,12 +40,44 @@ function app(role: NonNullable<Request["auth"]>["role"] = "USER") {
   return instance;
 }
 function mockConversation(value: any) {
-  vi.spyOn(Conversation, "findOne").mockReturnValue({
+  const query = {
+    session: vi.fn(() => query),
     populate: vi.fn().mockResolvedValue(value),
-  } as never);
+  };
+  vi.spyOn(Conversation, "findOne").mockReturnValue(query as never);
 }
 afterEach(() => vi.restoreAllMocks());
 describe("conversation authorization and integrity", () => {
+  it("restores only the authenticated participant's archive flag", async () => {
+    mockConversation({
+      _id: conversationId,
+      type: "DIRECT",
+      participants: [userId, otherId],
+      archivedBy: [userId, otherId],
+    });
+    const update = vi
+      .spyOn(Conversation, "updateOne")
+      .mockResolvedValue({} as never);
+    expect(
+      (await request(app()).post("/conversations/thread-id/restore")).body.data,
+    ).toEqual({ archived: false, scope: "FOR_ME" });
+    expect(update).toHaveBeenCalledWith(
+      { _id: conversationId },
+      { $pull: { archivedBy: userId } },
+    );
+  });
+  it("does not let a nonparticipant restore a hidden conversation", async () => {
+    mockConversation({
+      _id: conversationId,
+      type: "DIRECT",
+      participants: [otherId],
+    });
+    const update = vi.spyOn(Conversation, "updateOne");
+    expect(
+      (await request(app()).post("/conversations/thread-id/restore")).status,
+    ).toBe(404);
+    expect(update).not.toHaveBeenCalled();
+  });
   it("rejects nonparticipants before reading message history", async () => {
     mockConversation({
       _id: conversationId,
@@ -189,12 +221,14 @@ describe("conversation authorization and integrity", () => {
     expect(find).not.toHaveBeenCalled();
   });
   it("rejects attachment identities that are not ready message uploads owned by the sender", async () => {
+    vi.spyOn(mongoose.connection, "transaction").mockImplementation(async (callback: any) => callback({}));
     mockConversation({
       _id: conversationId,
       type: "DIRECT",
       participants: [userId],
     });
-    const files = vi.spyOn(Attachment, "find").mockResolvedValue([]);
+    const query = Object.assign(Promise.resolve([]), { session: vi.fn() });
+    const files = vi.spyOn(Attachment, "find").mockReturnValue(query as never);
     const create = vi.spyOn(Message, "create");
     const response = await request(app())
       .post("/conversations/thread-id/messages")

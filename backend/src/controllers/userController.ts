@@ -1,9 +1,14 @@
 import type { Request, Response } from "express";
+import mongoose, { type ClientSession } from "mongoose";
 import { User } from "../models/User.js";
+import { profileUpdateInput } from "../routes/profileSchemas.js";
+import { profileUpdateOperation } from "../services/profileUpdateService.js";
+import { withUserMedia, validatedImageAttachment } from "../services/userMediaService.js";
 import { Subscription, Payment } from "../models/Commerce.js";
-import { AttendanceEvent, StreakProjection } from "../models/Attendance.js";
+import { attendanceOverview } from "../services/attendanceHistoryService.js";
 import { MemberProfile } from "../models/Member.js";
 import { Notification, SupportTicket } from "../models/Engagement.js";
+import { withNotificationLinks } from "../services/notificationLinkService.js";
 import { AppError } from "../utils/AppError.js";
 import { nanoid } from "nanoid";
 import { issueAttendanceQr } from "../services/attendanceQrService.js";
@@ -17,22 +22,27 @@ import { withGymMedia } from "../services/gymMediaService.js";
 
 export async function getProfile(req: Request, res: Response) {
   const user = await User.findById(req.auth!.userId).lean();
-  res.json({ success: true, data: user });
+  if (!user) throw new AppError(404, "USER_NOT_FOUND", "Account not found.");
+  res.json({ success: true, data: (await withUserMedia([user]))[0] });
 }
 
 export async function updateProfile(req: Request, res: Response) {
-  const update: Record<string, unknown> = { ...req.body };
-  for (const group of ["profile", "preferences", "notificationPreferences"]) {
-    delete update[group];
-    for (const [key, value] of Object.entries(req.body[group] || {}))
-      update[`${group}.${key}`] = value;
-  }
-  const user = await User.findByIdAndUpdate(
-    req.auth!.userId,
-    { $set: update },
-    { new: true, runValidators: true },
-  ).lean();
-  res.json({ success: true, data: user });
+  const body = profileUpdateInput.parse(req.body);
+  const save = async (session?: ClientSession) => {
+    if (body.avatarAttachmentId)
+      await validatedImageAttachment(body.avatarAttachmentId, req.auth!.userId, "AVATAR", undefined, session);
+    const user = await User.findByIdAndUpdate(
+      req.auth!.userId,
+      profileUpdateOperation(body),
+      { returnDocument: "after", runValidators: true, ...(session ? { session } : {}) },
+    ).lean();
+    if (!user) throw new AppError(404, "USER_NOT_FOUND", "Account not found.");
+    return user;
+  };
+  const user = body.avatarAttachmentId
+    ? await mongoose.connection.transaction((session) => save(session))
+    : await save();
+  res.json({ success: true, data: (await withUserMedia([user]))[0] });
 }
 
 export async function subscriptions(req: Request, res: Response) {
@@ -91,21 +101,7 @@ export async function payments(req: Request, res: Response) {
 }
 
 export async function attendance(req: Request, res: Response) {
-  const memberships = await MemberProfile.find({ userId: req.auth!.userId })
-    .select("_id gymId")
-    .lean();
-  const memberIds = memberships.map((member) => member._id);
-  const [events, streaks] = await Promise.all([
-    AttendanceEvent.find({
-      memberProfileId: { $in: memberIds },
-      type: "CHECK_IN",
-    })
-      .sort({ occurredAt: -1 })
-      .limit(365)
-      .lean(),
-    StreakProjection.find({ memberProfileId: { $in: memberIds } }).lean(),
-  ]);
-  res.json({ success: true, data: { events, streaks } });
+  res.json({ success: true, ...await attendanceOverview(req.auth!.userId, req.query) });
 }
 
 export async function attendanceQr(req: Request, res: Response) {
@@ -150,7 +146,7 @@ export async function attendanceQr(req: Request, res: Response) {
 
 export async function markAllNotificationsRead(req: Request, res: Response) {
   const result = await Notification.updateMany(
-    { userId: req.auth!.userId, readAt: null },
+    { userId: req.auth!.userId, readAt: null, archivedAt: null },
     { $set: { readAt: new Date() } },
   );
   res.json({ success: true, data: { updated: result.modifiedCount } });
@@ -178,14 +174,14 @@ export async function notifications(req: Request, res: Response) {
       .lean(),
     Notification.countDocuments(filter),
   ]);
-  res.json({ success: true, data, meta: pageMeta(page, limit, total) });
+  res.json({ success: true, data: await withNotificationLinks(data), meta: pageMeta(page, limit, total) });
 }
 
 export async function markNotificationRead(req: Request, res: Response) {
   const notification = await Notification.findOneAndUpdate(
-    { _id: req.params.id, userId: req.auth!.userId },
+    { _id: req.params.id, userId: req.auth!.userId, archivedAt: null },
     { readAt: new Date() },
-    { new: true },
+    { returnDocument: "after" },
   ).lean();
   if (!notification)
     throw new AppError(
@@ -193,7 +189,7 @@ export async function markNotificationRead(req: Request, res: Response) {
       "NOTIFICATION_NOT_FOUND",
       "Notification not found.",
     );
-  res.json({ success: true, data: notification });
+  res.json({ success: true, data: (await withNotificationLinks([notification]))[0] });
 }
 
 export async function createSupportTicket(req: Request, res: Response) {
@@ -227,7 +223,7 @@ export async function createSupportTicket(req: Request, res: Response) {
     ticket = await SupportTicket.findOneAndUpdate(
       { publicId, requesterId: req.auth!.userId },
       { $setOnInsert: input },
-      { upsert: true, new: true, runValidators: true },
+      { upsert: true, returnDocument: "after", runValidators: true },
     );
   } catch (error: any) {
     if (error?.code !== 11000) throw error;

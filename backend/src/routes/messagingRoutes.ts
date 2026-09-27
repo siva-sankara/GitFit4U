@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
+import rateLimit from "express-rate-limit";
 import { requireAuth, requireRole } from "../middleware/auth.js";
 import { validate } from "../middleware/validate.js";
 import * as controller from "../controllers/messagingController.js";
@@ -9,6 +10,12 @@ const id = z.string().min(6).max(120);
 const schema = (body: z.ZodType, params: z.ZodType = z.object({ id })) =>
   validate(z.object({ body, params, query: z.object({}) }));
 messagingRoutes.use(requireAuth);
+const contactLimiter = rateLimit({ windowMs: 60_000, limit: 60, keyGenerator: req => req.auth!.userId, standardHeaders: "draft-8", legacyHeaders: false });
+messagingRoutes.get("/contacts", contactLimiter, validate(z.object({ body: z.any(), params: z.object({}), query: z.object({
+  q: z.string().trim().max(80).default("").refine(value => !value || value.length >= 2, "Enter at least two characters."),
+  page: z.coerce.number().int().min(1).max(10000).default(1),
+  limit: z.coerce.number().int().min(1).max(50).default(20),
+}) })), controller.listContacts);
 messagingRoutes.get(
   "/broadcasts",
   requireRole("ADMIN"),
@@ -35,6 +42,7 @@ messagingRoutes.post(
 messagingRoutes.get("/", controller.listConversations);
 messagingRoutes.post(
   "/",
+  contactLimiter,
   schema(
     z.object({
       participantIds: z
@@ -80,6 +88,7 @@ messagingRoutes.post(
 );
 messagingRoutes.post("/:id/read", controller.markRead);
 messagingRoutes.delete("/:id", controller.archiveConversation);
+messagingRoutes.post("/:id/restore", controller.restoreConversation);
 messagingRoutes.delete("/:id/messages/:messageId", controller.deleteMessage);
 messagingRoutes.patch(
   "/:id/support-status",

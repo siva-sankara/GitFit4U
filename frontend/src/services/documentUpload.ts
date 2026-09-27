@@ -60,7 +60,9 @@ export function uploadDocumentBytes(
     xhr.onerror = () =>
       finish(
         new Error(
-          "Could not reach cloud storage. Check your connection and retry. If this continues, contact support to check upload access.",
+          internal
+            ? "Could not reach the upload API. Check that the application server is running and allows this site's origin, then retry."
+            : "Could not reach cloud storage. Refresh this page to obtain a new S3 upload request and retry.",
         ),
       );
     xhr.ontimeout = () =>

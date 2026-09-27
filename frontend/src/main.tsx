@@ -7,6 +7,8 @@ import "./styles/global.css";
 import "./styles/layouts.css";
 import "./styles/pages.css";
 import "./styles/product-polish.css";
+import "./styles/dialog.css";
+import "./styles/workspace-navigation.css";
 
 const queryClient = new QueryClient({
   defaultOptions: {

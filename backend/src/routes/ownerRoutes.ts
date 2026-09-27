@@ -51,7 +51,8 @@ ownerRoutes.use((req, _res, next) => {
   if (
     ["POST", "PATCH"].includes(req.method) &&
     schemas[base] &&
-    !(base === "/members" && req.path.includes("/join/"))
+    !(base === "/members" && req.path.includes("/join/")) &&
+    !(base === "/classes" && req.path.endsWith("/cancel"))
   ) {
     const schema =
       req.method === "PATCH" && base === "/plans"
@@ -197,6 +198,11 @@ ownerRoutes.post(
   requirePermission("class:write"),
   controller.createClass,
 );
+ownerRoutes.post(
+  "/classes/:id/cancel",
+  requirePermission("class:write"),
+  controller.cancelClass,
+);
 ownerRoutes.get(
   "/trainers",
   requirePermission("gym:read"),
@@ -258,6 +264,7 @@ ownerRoutes.post(
   requirePermission("campaign:write"),
   controller.createAd,
 );
+ownerRoutes.patch("/ads/:id", requirePermission("campaign:write"), controller.updateAd);
 ownerRoutes.get(
   "/revenue",
   requirePermission("finance:read"),

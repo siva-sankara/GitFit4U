@@ -17,6 +17,7 @@ import {
   gymRevenue,
   platformMonthlyReceipts,
   revenueRange,
+  revenuePeriod,
 } from "./revenueService.js";
 
 beforeEach(() => {
@@ -82,7 +83,7 @@ describe("gym revenue accounting", () => {
       monthMinor: 9000,
       pendingMinor: 2000,
       currency: "INR",
-      dateRangeTimezone: "UTC",
+      dateRangeTimezone: "Asia/Kolkata",
       groupingTimezone: "Asia/Kolkata",
       series: [{ date: "2026-09-01", amountMinor: 12000 }],
     });
@@ -98,7 +99,10 @@ describe("gym revenue accounting", () => {
       status: {
         $in: ["CAPTURED", "PARTIALLY_REFUNDED", "REFUNDED", "REFUND_PENDING"],
       },
-      capturedAt: { $gte: new Date("2026-09-01"), $lt: new Date("2026-10-01") },
+      capturedAt: {
+        $gte: new Date("2026-08-31T18:30:00Z"),
+        $lt: new Date("2026-09-30T18:30:00Z"),
+      },
     });
     expect(receiptPipeline[1].$lookup).toMatchObject({
       from: "refunds",
@@ -146,6 +150,36 @@ describe("gym revenue accounting", () => {
       "capturedAt",
     );
   });
+});
+
+describe("gym-local period selection", () => {
+  it("includes seven calendar days ending today in the gym timezone", () => {
+    const selected = revenuePeriod(
+      "7d",
+      "Asia/Kolkata",
+      new Date("2026-09-27T20:00:00Z"),
+    );
+    expect(selected).toMatchObject({ from: "2026-09-22", to: "2026-09-28" });
+    expect(selected.range.$gte?.toISOString()).toBe("2026-09-21T18:30:00.000Z");
+    expect(selected.range.$lt?.toISOString()).toBe("2026-09-28T18:30:00.000Z");
+  });
+  it("handles year boundaries in last-month and quarter views", () => {
+    const now = new Date("2026-01-16T10:00:00Z");
+    expect(revenuePeriod("last-month", "UTC", now)).toMatchObject({
+      from: "2025-12-01",
+      to: "2025-12-31",
+    });
+    expect(revenuePeriod("3m", "UTC", now)).toMatchObject({
+      from: "2025-11-01",
+      to: "2026-01-16",
+    });
+  });
+  it("uses a 23-hour day during a daylight-saving transition", () => {
+    const range = revenueRange("2026-03-08", "2026-03-08", "America/New_York");
+    expect(range.$lt!.getTime() - range.$gte!.getTime()).toBe(23 * 3600000);
+  });
+  it("rejects unknown period values rather than returning unfiltered revenue", () =>
+    expect(() => revenuePeriod("unsupported", "UTC")).toThrow());
 });
 
 describe("platform-wide captured payment receipts", () => {

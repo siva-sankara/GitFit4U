@@ -14,11 +14,15 @@ import {
   ShieldCheck,
   Building2,
   LogOut,
+  Compass,
+  UserRound,
+  LifeBuoy,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Brand } from "../components/Brand";
+import { Avatar } from "../components/Avatar";
 import { GymIdentity } from "../components/GymIdentity";
 import { ThemePicker } from "../components/ThemePicker";
 import { useData, type Row } from "../pages/live/LiveData";
@@ -30,22 +34,16 @@ const navigation: Record<string, Array<[string, string, string?]>> = {
   USER: [
     ["Home", "home"],
     ["Explore gyms", "explore"],
-    ["Subscriptions", "subscriptions"],
     ["Attendance", "attendance"],
     ["Scan gym QR", "attendance/qr"],
     ["Classes", "classes"],
-    ["Workouts", "workouts"],
-    ["Favorites", "favorites"],
-    ["Payments", "payments"],
-    ["Invoices", "invoices"],
-    ["Referrals", "referrals"],
     ["Notifications", "notifications"],
     ["Messages", "messages"],
     ["Support", "support"],
   ],
   GYM_OWNER: [
     ["Dashboard", "dashboard", "gym:read"],
-    ["Gym profile", "gym-profile", "gym:update"],
+    ["Gym Profile Settings", "gym-profile", "gym:update"],
     ["Members", "members", "member:read"],
     ["Plans", "plans", "gym:read"],
     ["Subscriptions", "subscriptions", "member:read"],
@@ -62,7 +60,6 @@ const navigation: Record<string, Array<[string, string, string?]>> = {
     ["Advertisements", "ads", "campaign:write"],
     ["Messages", "messages"],
     ["Notifications", "notifications"],
-    ["Settings", "settings", "gym:update"],
     ["Support", "support"],
   ],
   TRAINER: [
@@ -93,6 +90,7 @@ const navigation: Record<string, Array<[string, string, string?]>> = {
     ["Refunds", "refunds"],
     ["Campaigns", "whatsapp"],
     ["Advertisements", "ads"],
+    ["Offers", "offers"],
     ["Reviews", "reviews"],
     ["Monitoring", "monitoring"],
     ["Audit logs", "audit"],
@@ -105,7 +103,7 @@ const navigation: Record<string, Array<[string, string, string?]>> = {
 };
 export function WorkspaceLayout() {
   const [drawer, setDrawer] = useState(false),
-    { toast } = useApp(),
+    { toast, toastActionUrl, dismissToast } = useApp(),
     me = useCurrentUser(),
     notifications = useNotifications(),
     client = useQueryClient(),
@@ -127,6 +125,14 @@ export function WorkspaceLayout() {
     location.pathname === `${prefix}/profile`
       ? "My profile"
       : "GETFIT4U");
+  const mobileChoices = role === "USER"
+    ? [["Home", "home", LayoutDashboard], ["Explore", "explore", Compass], ["Attendance", "attendance", Activity], ["Messages", "messages", MessageCircle], ["Profile", "profile", UserRound]] as const
+    : role === "GYM_OWNER"
+      ? [["Dashboard", "dashboard", LayoutDashboard], ["Members", "members", Users], ["Attendance", "attendance", Activity], ["Messages", "messages", MessageCircle]] as const
+      : role === "TRAINER"
+        ? [["Dashboard", "dashboard", LayoutDashboard], ["Clients", "clients", Users], ["Schedule", "schedule", CalendarDays], ["Messages", "messages", MessageCircle]] as const
+        : [["Dashboard", "dashboard", LayoutDashboard], ["Gyms", "gyms", Building2], ["Users", "users", Users], ["Support", "support", LifeBuoy]] as const;
+  const mobileRows = mobileChoices.filter(([, page]) => page === "profile" || rows.some(([, route]) => route === page));
   const ownerGym = useData<Row>(
     "/api/v1/owner/gym",
     role === "GYM_OWNER" &&
@@ -147,17 +153,12 @@ export function WorkspaceLayout() {
           : activeRole === "ADMIN"
             ? "Administrator"
             : "Trainer";
-  const initials = (user?.name || "Member")
-    .split(" ")
-    .map((part) => part[0])
-    .slice(0, 2)
-    .join("");
   const unread =
     notifications.data?.data.filter((notification) => !notification.readAt)
       .length || 0;
   useEffect(() => {
     setDrawer(false);
-  }, [location.pathname]);
+  }, [location.pathname, location.search]);
   useEffect(() => {
     if (!drawer) return;
     const close = (event: KeyboardEvent) => {
@@ -254,7 +255,7 @@ export function WorkspaceLayout() {
             aria-label={`Open profile for ${user?.name || "Member"}`}
             title={user?.name || "My profile"}
           >
-            <span className="avatar">{initials}</span>
+            <Avatar user={user} size={36} />
             <span className="profile-name">
               <strong>{user?.name || "Member"}</strong>
               <small>My profile</small>
@@ -310,7 +311,7 @@ export function WorkspaceLayout() {
               aria-label={`Open profile for ${user?.name || "Member"}`}
               title="My profile"
             >
-              <span className="avatar">{initials}</span>
+              <Avatar user={user} size={32} />
               <strong>{user?.name || "Member"}</strong>
             </NavLink>
           </div>
@@ -328,16 +329,26 @@ export function WorkspaceLayout() {
         </main>
       </div>
       <nav className="mobile-bottom-nav" aria-label="Mobile navigation">
-        {rows.slice(0, 5).map(([text, page]) => (
-          <NavLink key={page} to={`${prefix}/${page}`}>
+        {mobileRows.map(([text, page, Icon]) => (
+          <NavLink key={page} to={`${prefix}/${page}`} className={({ isActive }) => isActive || (page === "profile" && location.pathname === "/profile") ? "active" : undefined} aria-label={text}>
+            <Icon size={21} aria-hidden="true" />
             <span>{text}</span>
           </NavLink>
         ))}
+        {role !== "USER" && <button type="button" aria-label="More navigation" aria-expanded={drawer} onClick={() => setDrawer(value => !value)}><Menu size={21} aria-hidden="true" /><span>More</span></button>}
       </nav>
       {toast && (
-        <div className="toast" role="status">
-          <ShieldCheck />
-          {toast}
+        <div className="toast" role="status" aria-live="polite">
+          <ShieldCheck aria-hidden="true" />
+          <span>{toast}</span>
+          {toastActionUrl && (
+            <NavLink className="btn btn-secondary" to={toastActionUrl} onClick={dismissToast}>
+              Open notification
+            </NavLink>
+          )}
+          <button type="button" className="btn btn-secondary" aria-label="Dismiss notification" onClick={dismissToast}>
+            <X size={16} aria-hidden="true" />
+          </button>
         </div>
       )}
     </div>

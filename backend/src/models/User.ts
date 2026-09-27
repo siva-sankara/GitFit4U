@@ -23,6 +23,18 @@ const userSchema = new Schema(
       index: true,
     },
     avatarUrl: { type: String },
+    avatarAttachmentId: { type: Schema.Types.ObjectId, ref: "Attachment" },
+    social: {
+      bio: { type: String, trim: true, maxlength: 500 },
+      location: { type: String, trim: true, maxlength: 120 },
+      fitnessInterests: [{ type: String, trim: true, maxlength: 60 }],
+      visibility: {
+        type: String,
+        enum: ["PUBLIC", "PRIVATE"],
+        default: "PRIVATE",
+      },
+      timezone: { type: String, default: "Asia/Kolkata" },
+    },
     preferences: {
       theme: {
         type: String,
@@ -32,6 +44,7 @@ const userSchema = new Schema(
     },
     notificationPreferences: {
       push: { type: Boolean, default: true },
+      sound: { type: Boolean, default: false },
       categories: { type: [String], default: undefined },
     },
     roles: [{ type: String, enum: ROLES }],
@@ -61,5 +74,7 @@ const userSchema = new Schema(
   },
   { timestamps: true, versionKey: "version" },
 );
+
+userSchema.index({ status: 1, "social.visibility": 1, name: 1, _id: 1 });
 
 export const User = models.User || model("User", userSchema);

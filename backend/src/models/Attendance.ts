@@ -75,6 +75,7 @@ const attendanceEventSchema = new Schema(
 );
 attendanceEventSchema.index({ gymId: 1, memberProfileId: 1, occurredAt: -1 });
 attendanceEventSchema.index({ gymId: 1, localDate: 1, occurredAt: -1 });
+attendanceEventSchema.index({ supersedesEventId: 1, type: 1, occurredAt: 1 });
 attendanceEventSchema.index(
   { gymId: 1, idempotencyKey: 1 },
   { unique: true, sparse: true },
@@ -103,24 +104,46 @@ attendanceProjectionSchema.index(
 
 const streakProjectionSchema = new Schema(
   {
-    gymId: { type: Schema.Types.ObjectId, ref: "Gym", required: true },
+    scope: { type: String, enum: ["GYM", "USER"], default: "GYM" },
+    userId: { type: Schema.Types.ObjectId, ref: "User" },
+    timezone: String,
+    gymId: { type: Schema.Types.ObjectId, ref: "Gym" },
     memberProfileId: {
       type: Schema.Types.ObjectId,
       ref: "MemberProfile",
-      required: true,
     },
     currentStreak: { type: Number, default: 0 },
     longestStreak: { type: Number, default: 0 },
     totalVisits: { type: Number, default: 0 },
     lastAttendanceDate: String,
     calculatedAt: Date,
+    calculationVersion: Number,
+    sourceEventId: { type: Schema.Types.ObjectId, ref: "AttendanceEvent" },
+    lastCheckIn: Date,
   },
   { timestamps: true },
 );
 streakProjectionSchema.index(
   { gymId: 1, memberProfileId: 1 },
-  { unique: true },
+  {
+    unique: true,
+    partialFilterExpression: {
+      gymId: { $type: "objectId" },
+      memberProfileId: { $type: "objectId" },
+    },
+  },
 );
+streakProjectionSchema.index(
+  { userId: 1 },
+  { unique: true, partialFilterExpression: { scope: "USER" } },
+);
+attendanceEventSchema.index({ userId: 1, type: 1, occurredAt: -1 });
+attendanceEventSchema.index({
+  userId: 1,
+  type: 1,
+  createdAt: -1,
+  occurredAt: -1,
+});
 
 export const GymScanner =
   models.GymScanner || model("GymScanner", gymScannerSchema);

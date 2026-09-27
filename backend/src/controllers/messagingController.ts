@@ -1,5 +1,5 @@
 import type { Request, Response } from "express";
-import mongoose from "mongoose";
+import mongoose, { type ClientSession } from "mongoose";
 import { nanoid } from "nanoid";
 import { Conversation, Message } from "../models/Collaboration.js";
 import { SupportTicket, Campaign } from "../models/Engagement.js";
@@ -8,17 +8,22 @@ import { Attachment } from "../models/Business.js";
 import { attachmentUrl } from "../integrations/storage/mediaStore.js";
 import { AppError } from "../utils/AppError.js";
 import { paginationFromQuery, pageMeta } from "../utils/pagination.js";
-import { allowedContacts } from "../services/contactService.js";
+import { assertAllowedParticipants, conversationPeople, searchContacts } from "../services/contactService.js";
 import { ensureSupportConversation } from "../services/supportConversationService.js";
 import { emitDomainEvent } from "../services/domainEventService.js";
 import { writeAudit } from "../services/auditService.js";
 import { withGymMedia } from "../services/gymMediaService.js";
+import { withUserMedia } from "../services/userMediaService.js";
+import { lockAttachments } from "../services/mediaBindingService.js";
 
 export async function authorizedConversation(
   publicId: string,
   auth: NonNullable<Request["auth"]>,
+  session?: ClientSession,
 ) {
-  const conversation = await Conversation.findOne({ publicId }).populate(
+  const query = Conversation.findOne({ publicId });
+  if (session) query.session(session);
+  const conversation = await query.populate(
     "supportTicketId",
     "requesterId status subject",
   );
@@ -45,6 +50,7 @@ export async function authorizedConversation(
 export async function listConversations(req: Request, res: Response) {
   const { page, limit, skip } = paginationFromQuery(req.query);
   const supportOnly = req.query.type === "SUPPORT";
+  const archived = req.query.archived === "true";
   let migratedIds: any[] = [];
   let supportTotal = 0;
   if (supportOnly) {
@@ -84,22 +90,21 @@ export async function listConversations(req: Request, res: Response) {
         };
   const filter = {
     ...visibility,
-    ...(supportOnly ? { type: "SUPPORT", _id: { $in: migratedIds } } : {}),
-    archivedBy: { $ne: req.auth!.userId },
+    ...(supportOnly ? { type: "SUPPORT", _id: { $in: migratedIds } } : {
+      archivedBy: archived ? req.auth!.userId : { $ne: req.auth!.userId },
+    }),
   };
   const [data, total] = await Promise.all([
     Conversation.find(filter)
-      .populate("participants", "publicId name avatarUrl")
+      .populate("participants", "publicId name avatarUrl avatarAttachmentId")
       .populate("gymId", "publicId name logoUrl logoAttachmentId")
-      .populate("supportTicketId", "publicId status priority requesterId")
+      .populate("supportTicketId", "publicId subject status priority requesterId createdAt updatedAt")
       .populate("lastMessageId", "text createdAt deletedAt senderId")
       .sort({ lastMessageAt: -1, _id: -1 })
       .skip(supportOnly ? 0 : skip)
       .limit(limit)
       .lean(),
-    supportOnly
-      ? Promise.resolve(supportTotal)
-      : Conversation.countDocuments(filter),
+    supportOnly ? Promise.resolve(supportTotal) : Conversation.countDocuments(filter),
   ]);
   const counts = data.length
     ? await Message.aggregate([
@@ -118,10 +123,20 @@ export async function listConversations(req: Request, res: Response) {
     : [];
   const unread = new Map(counts.map((row) => [String(row._id), row.count]));
   const gyms = await withGymMedia(data.map((row) => row.gymId).filter(Boolean));
+  const people = await conversationPeople(req,
+    data.flatMap((row) => row.participants).filter(Boolean),
+  );
   res.json({
     success: true,
     data: data.map((row) => ({
       ...row,
+      participants: row.participants
+        .filter(Boolean)
+        .map(
+          (person: any) =>
+            people.find((value) => String(value._id) === String(person._id)) ||
+            person,
+        ),
       gymId:
         gyms.find((gym) => String(gym._id) === String(row.gymId?._id)) ||
         row.gymId,
@@ -132,19 +147,7 @@ export async function listConversations(req: Request, res: Response) {
 }
 
 export async function createConversation(req: Request, res: Response) {
-  const allowed = new Set(
-    (await allowedContacts(req)).map((user) => String(user._id)),
-  );
-  if (
-    req.body.participantIds.some(
-      (id: string) => id !== req.auth!.userId && !allowed.has(id),
-    )
-  )
-    throw new AppError(
-      403,
-      "PARTICIPANT_FORBIDDEN",
-      "Select a contact assigned to your gym or account.",
-    );
+  await assertAllowedParticipants(req, req.body.participantIds);
   const participantIds = [
     ...new Set<string>([req.auth!.userId, ...req.body.participantIds]),
   ].map((id) => new mongoose.Types.ObjectId(id));
@@ -189,6 +192,8 @@ export async function createConversation(req: Request, res: Response) {
     if (error?.code !== 11000 || !directKey) throw error;
     data = await Conversation.findOne({ directKey });
     if (!data) throw error;
+    await Conversation.updateOne({ _id: data._id }, { $pull: { archivedBy: req.auth!.userId } });
+    return res.json({ success: true, data });
   }
   res.status(201).json({ success: true, data });
 }
@@ -198,7 +203,10 @@ export async function conversationDetails(req: Request, res: Response) {
     String(req.params.id),
     req.auth!,
   );
-  await conversation.populate("participants", "publicId name avatarUrl");
+  await conversation.populate(
+    "participants",
+    "publicId name avatarUrl avatarAttachmentId",
+  );
   await conversation.populate(
     "gymId",
     "publicId name logoUrl logoAttachmentId",
@@ -208,6 +216,7 @@ export async function conversationDetails(req: Request, res: Response) {
     success: true,
     data: {
       ...data,
+      participants: await conversationPeople(req, data.participants),
       gymId: data.gymId ? (await withGymMedia([data.gymId]))[0] : data.gymId,
     },
   });
@@ -251,7 +260,7 @@ export async function listMessages(req: Request, res: Response) {
     );
   }
   const data = await Message.find(filter)
-    .populate("senderId", "publicId name avatarUrl")
+    .populate("senderId", "publicId name avatarUrl avatarAttachmentId")
     .sort({ createdAt: -1, _id: -1 })
     .limit(limit + 1)
     .lean();
@@ -272,7 +281,14 @@ export async function listMessages(req: Request, res: Response) {
       [file.objectKey, attachmentUrl(file)],
     ]),
   );
+  const senders = await withUserMedia(
+    data.map((row) => row.senderId).filter(Boolean),
+  );
   for (const row of data) {
+    row.senderId =
+      senders.find(
+        (value) => String(value._id) === String(row.senderId?._id),
+      ) || row.senderId;
     if (row.deletedAt) {
       row.text = "";
       row.attachments = [];
@@ -299,8 +315,14 @@ export async function listMessages(req: Request, res: Response) {
   });
 }
 
+export async function listContacts(req: Request, res: Response) {
+  const { page, limit } = paginationFromQuery(req.query);
+  const { data, total } = await searchContacts(req, { q: String(req.query.q || ""), page, limit });
+  res.json({ success: true, data, meta: pageMeta(page, limit, total) });
+}
+
 export async function sendMessage(req: Request, res: Response) {
-  const conversation = await authorizedConversation(
+  let conversation = await authorizedConversation(
     String(req.params.id),
     req.auth!,
   );
@@ -318,8 +340,15 @@ export async function sendMessage(req: Request, res: Response) {
       (req.body.attachments || []).map((item: any) => item.key),
     ),
   ];
-  const media = attachmentKeys.length
-    ? await Attachment.find({
+  let attachments: Array<{ key: string; name: string; mimeType: string; size: number }> = [];
+  const persist = async (session?: ClientSession) => {
+  if (session) {
+    conversation = await authorizedConversation(String(req.params.id), req.auth!, session);
+    if (conversation.type === "SUPPORT" && ["RESOLVED", "CLOSED"].includes(conversation.supportTicketId?.status))
+      throw new AppError(409, "SUPPORT_CLOSED", "Reopen this support conversation before replying.");
+  }
+  const mediaQuery = attachmentKeys.length
+    ? Attachment.find({
         ownerId: req.auth!.userId,
         purpose: "MESSAGE",
         status: "READY",
@@ -328,8 +357,9 @@ export async function sendMessage(req: Request, res: Response) {
           { publicId: { $in: attachmentKeys } },
           { objectKey: { $in: attachmentKeys } },
         ],
-      })
-    : [];
+      }) : null;
+  if (session && mediaQuery) mediaQuery.session(session);
+  const media = mediaQuery ? await mediaQuery : [];
   if (media.length !== attachmentKeys.length)
     throw new AppError(
       422,
@@ -337,25 +367,31 @@ export async function sendMessage(req: Request, res: Response) {
       "Upload your message attachments before sending.",
     );
   // Private media URLs expire; persist stable identities and resolve URLs on authorized reads.
-  const attachments = media.map((item) => ({
+  attachments = media.map((item) => ({
     key: item.publicId,
     name: item.originalName,
     mimeType: item.mimeType,
     size: item.size,
   }));
+  if (session) await lockAttachments(media.map((item) => item._id), session);
+  const input = {
+    publicId: nanoid(20),
+    conversationId: conversation._id,
+    senderId: req.auth!.userId,
+    clientMessageId: req.body.clientMessageId,
+    type: req.body.type || "TEXT",
+    text: req.body.text,
+    attachments,
+    readBy: [{ userId: req.auth!.userId, at: new Date() }],
+  };
+  return session ? (await Message.create([input], { session }))[0] : await Message.create(input);
+  };
   let message,
     created = true;
   try {
-    message = await Message.create({
-      publicId: nanoid(20),
-      conversationId: conversation._id,
-      senderId: req.auth!.userId,
-      clientMessageId: req.body.clientMessageId,
-      type: req.body.type || "TEXT",
-      text: req.body.text,
-      attachments,
-      readBy: [{ userId: req.auth!.userId, at: new Date() }],
-    });
+    message = attachmentKeys.length
+      ? await mongoose.connection.transaction((session) => persist(session))
+      : await persist();
   } catch (error: any) {
     if (error?.code !== 11000) throw error;
     message = await Message.findOne({
@@ -390,7 +426,6 @@ export async function sendMessage(req: Request, res: Response) {
       $set: {
         lastMessageId: message!._id,
         lastMessageAt: message!.createdAt,
-        archivedBy: [],
       },
     },
   );
@@ -433,7 +468,7 @@ export async function sendMessage(req: Request, res: Response) {
           userId,
           gymId: conversation.gymId,
           entityId: message!.publicId,
-          actionUrl: `/messages?conversation=${conversation.publicId}`,
+          actionUrl: `/messages/${conversation.publicId}`,
         }),
       ),
   );
@@ -483,6 +518,18 @@ export async function archiveConversation(req: Request, res: Response) {
   res.json({ success: true, data: { archived: true, scope: "FOR_ME" } });
 }
 
+export async function restoreConversation(req: Request, res: Response) {
+  const conversation = await authorizedConversation(
+    String(req.params.id),
+    req.auth!,
+  );
+  await Conversation.updateOne(
+    { _id: conversation._id },
+    { $pull: { archivedBy: req.auth!.userId } },
+  );
+  res.json({ success: true, data: { archived: false, scope: "FOR_ME" } });
+}
+
 export async function deleteMessage(req: Request, res: Response) {
   const conversation = await authorizedConversation(
     String(req.params.id),
@@ -496,7 +543,7 @@ export async function deleteMessage(req: Request, res: Response) {
       type: { $ne: "SYSTEM" },
     },
     { $set: { text: "", attachments: [], deletedAt: new Date() } },
-    { new: true },
+    { returnDocument: "after" },
   );
   if (!data)
     throw new AppError(
@@ -557,7 +604,7 @@ export async function updateSupportStatus(req: Request, res: Response) {
     userId: ticket.requesterId,
     entityId: String(ticket._id),
     occurrenceId: `${ticket.status}:${req.body.status}:${Date.now()}`,
-    actionUrl: `/messages?conversation=${conversation.publicId}`,
+    actionUrl: `/messages/${conversation.publicId}`,
   });
   res.json({ success: true, data: { status: req.body.status } });
 }

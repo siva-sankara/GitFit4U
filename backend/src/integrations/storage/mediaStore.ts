@@ -1,19 +1,11 @@
 import { createHash } from "node:crypto";
+import { prepareImage } from "../../services/imageProcessingService.js";
 import { env } from "../../config/env.js";
 import { AppError } from "../../utils/AppError.js";
 import { presignedObjectUrl } from "./s3ObjectStore.js";
 
-export function storageProvider() {
-  return (
-    env.MEDIA_STORAGE_PROVIDER ||
-    (env.OBJECT_STORAGE_ENDPOINT &&
-    env.OBJECT_STORAGE_ACCESS_KEY &&
-    env.OBJECT_STORAGE_SECRET_KEY
-      ? "s3"
-      : env.CLOUDINARY_CLOUD_NAME
-        ? "cloudinary"
-        : "s3")
-  );
+export function storageProvider(): "s3" | "cloudinary" {
+  return "s3";
 }
 function cloudinaryConfig() {
   if (
@@ -45,7 +37,7 @@ export function cloudinarySignature(
     )
     .digest("hex");
 }
-export function attachmentUrl(file: any) {
+export function attachmentUrl(file: any, thumbnail = false) {
   if (
     file.storageProvider === "cloudinary" &&
     file.deliveryType === "authenticated"
@@ -68,12 +60,22 @@ export function attachmentUrl(file: any) {
     return `https://api.cloudinary.com/v1_1/${config.cloud}/${file.resourceType || "image"}/download?${query}`;
   }
   return file.storageProvider === "cloudinary"
-    ? file.secureUrl
-    : presignedObjectUrl("GET", file.objectKey, 3600);
+    ? thumbnail && file.secureUrl?.includes("/image/upload/")
+      ? file.secureUrl.replace(
+          "/image/upload/",
+          "/image/upload/c_fill,w_160,h_160,q_auto,f_auto/",
+        )
+      : file.secureUrl
+    : presignedObjectUrl(
+        "GET",
+        thumbnail && file.thumbnailObjectKey
+          ? file.thumbnailObjectKey
+          : file.objectKey,
+        300,
+      );
 }
 export function verifyMediaConfiguration() {
-  if (storageProvider() === "cloudinary") cloudinaryConfig();
-  else if (
+  if (
     !env.OBJECT_STORAGE_ENDPOINT ||
     !env.OBJECT_STORAGE_ACCESS_KEY ||
     !env.OBJECT_STORAGE_SECRET_KEY
@@ -84,9 +86,13 @@ export function verifyMediaConfiguration() {
       "Image storage is not configured. Ask the administrator to configure the media provider.",
     );
 }
-export async function uploadMediaBytes(file: any, bytes: Buffer) {
+export async function putS3Bytes(file: any, bytes: Buffer) {
   if (file.storageProvider === "cloudinary")
-    return uploadCloudinary(file, bytes);
+    throw new AppError(
+      409,
+      "LEGACY_UPLOAD_DISABLED",
+      "Start a new upload to save this file in S3.",
+    );
   let response: Response;
   try {
     response = await fetch(presignedObjectUrl("PUT", file.objectKey, 120), {
@@ -113,80 +119,28 @@ export async function uploadMediaBytes(file: any, bytes: Buffer) {
     );
   return {};
 }
-export async function uploadCloudinary(file: any, bytes: Buffer) {
-  const config = cloudinaryConfig();
-  const resource = file.mimeType.startsWith("video/")
-    ? "video"
-    : file.mimeType.startsWith("image/")
-      ? "image"
-      : "raw";
-  const publicId = `${env.CLOUDINARY_FOLDER}/${resource === "raw" ? file.objectKey : file.objectKey.replace(/\.[^.\/]+$/, "")}`;
-  const deliveryType = [
-    "GYM_LOGO",
-    "GYM_COVER",
-    "GYM_GALLERY",
-    "AVATAR",
-    "REVIEW",
-    "AD",
-  ].includes(file.purpose)
-    ? "upload"
-    : "authenticated";
-  const parameters = {
-    public_id: publicId,
-    timestamp: String(Math.floor(Date.now() / 1000)),
-    overwrite: "false",
-    type: deliveryType,
-  };
-  const body = new FormData();
-  for (const [key, value] of Object.entries(parameters))
-    body.append(key, value);
-  body.append("api_key", config.key);
-  body.append("signature", cloudinarySignature(parameters, config.secret));
-  body.append(
-    "file",
-    new Blob([new Uint8Array(bytes)], { type: file.mimeType }),
-    file.originalName,
+export async function uploadMediaBytes(file: any, bytes: Buffer) {
+  if (file.storageProvider === "cloudinary")
+    throw new AppError(
+      409,
+      "LEGACY_UPLOAD_DISABLED",
+      "Start a new upload to save this file in S3.",
+    );
+  verifyMediaConfiguration();
+  if (!file.mimeType.startsWith("image/")) return putS3Bytes(file, bytes);
+  const prepared = await prepareImage(bytes, file.mimeType);
+  const thumbnailObjectKey = file.objectKey + ".thumb.webp";
+  await putS3Bytes(file, prepared.original);
+  await putS3Bytes(
+    { ...file, objectKey: thumbnailObjectKey, mimeType: "image/webp" },
+    prepared.thumbnail,
   );
-  let response: Response;
-  try {
-    response = await fetch(
-      `https://api.cloudinary.com/v1_1/${config.cloud}/${resource}/upload`,
-      { method: "POST", body, signal: AbortSignal.timeout(90000) },
-    );
-  } catch {
-    throw new AppError(
-      502,
-      "MEDIA_UNREACHABLE",
-      "Image storage could not be reached. Retry your upload shortly.",
-    );
-  }
-  if (!response.ok)
-    throw new AppError(
-      502,
-      "MEDIA_UPLOAD_FAILED",
-      response.status === 401 || response.status === 403
-        ? "Image storage rejected its server credentials. Contact the administrator."
-        : "Image storage could not process this file. Choose a supported file and retry.",
-    );
-  const result = (await response.json()) as any;
-  if (
-    !result.secure_url?.startsWith("https://res.cloudinary.com/") ||
-    result.public_id !== publicId ||
-    result.bytes !== file.size
-  )
-    throw new AppError(
-      502,
-      "MEDIA_RESPONSE_INVALID",
-      "Image storage returned an invalid upload response. Please retry.",
-    );
   return {
-    providerPublicId: result.public_id,
-    secureUrl: result.secure_url,
-    width: result.width,
-    height: result.height,
-    deliveryType,
-    resourceType: resource,
-    format: result.format,
+    size: prepared.original.length,
+    width: prepared.width,
+    height: prepared.height,
+    thumbnailObjectKey,
+    thumbnailSize: prepared.thumbnail.length,
   };
 }
 export async function deleteMedia(file: any) {
@@ -201,6 +155,12 @@ export async function deleteMedia(file: any) {
         "STORAGE_DELETE_FAILED",
         "File could not be deleted.",
       );
+    if (file.thumbnailObjectKey)
+      await deleteMedia({
+        ...file,
+        objectKey: file.thumbnailObjectKey,
+        thumbnailObjectKey: undefined,
+      });
     return;
   }
   if (!file.providerPublicId) return;

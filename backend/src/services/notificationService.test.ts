@@ -15,6 +15,7 @@ import { Notification } from "../models/Engagement.js";
 import { DeviceToken } from "../models/Collaboration.js";
 import { Session } from "../models/Auth.js";
 import { User } from "../models/User.js";
+import { Gym } from "../models/Gym.js";
 import { allowsPush, deliverPush } from "./notificationService.js";
 beforeEach(() => {
   firebase.send.mockReset();
@@ -71,7 +72,7 @@ function setup(preferences: any = { push: true }) {
   const update = vi
     .spyOn(Notification, "updateOne")
     .mockResolvedValue({} as never);
-  return { claim, user, devices, update, active, session };
+  return { claim, user, devices, update, active, session, notification };
 }
 it("treats an explicitly empty category list as opting out of every push category", () => {
   expect(
@@ -141,4 +142,12 @@ it("keeps announcement contents out of push payloads", async () => {
   expect(JSON.stringify(firebase.send.mock.calls)).not.toContain(
     "Private contents",
   );
+});
+it("normalizes an old queued platform reminder before handing its destination to FCM", async () => {
+  const { notification } = setup();
+  const gymId = "507f1f77bcf86cd799439011";
+  Object.assign(notification, { event: "platform.expiring", gymId, actionUrl: "/owner/platform-subscription" });
+  vi.spyOn(Gym, "find").mockReturnValue({ select: () => ({ lean: async () => [{ _id: gymId, publicId: "target-gym" }] }) } as never);
+  await deliverPush();
+  expect(firebase.send).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ navigationPath: "/platform-renewal?gym=target-gym" }) }));
 });

@@ -3,9 +3,12 @@ import { Subscription } from "../models/Commerce.js";
 import { logger } from "../config/logger.js";
 import { WorkoutAssignment } from "../models/Fitness.js";
 import { transitionMembership } from "./membershipLifecycleService.js";
-import { emitDomainEvent } from "./domainEventService.js";
+import { cleanupExpiredStories } from "./socialService.js";
+import { cleanupOrphanedFollows } from "./socialRelationshipService.js";
 import { deliverCampaignBatch } from "./campaignDeliveryService.js";
+import { scheduleMembershipReminders } from "./membershipReminderService.js";
 let running = false;
+let followCleanupCursor: string | undefined;
 export async function maintainRecords() {
   if (running) return;
   running = true;
@@ -56,24 +59,7 @@ export async function maintainRecords() {
         }
       }
     }
-    const expiring = Subscription.find({
-      type: "GYM_MEMBERSHIP",
-      status: "ACTIVE",
-      endsAt: { $gt: now, $lte: new Date(now.getTime() + 7 * 86400000) },
-    })
-      .select("publicId userId gymId endsAt")
-      .lean()
-      .cursor({ batchSize: 100 });
-    for await (const record of expiring)
-      if (record.userId)
-        await emitDomainEvent({
-          event: "membership.expiring",
-          userId: record.userId,
-          gymId: record.gymId,
-          entityId: record.publicId,
-          occurrenceId: record.endsAt.toISOString(),
-          actionUrl: "/app/subscriptions",
-        });
+    await scheduleMembershipReminders(now);
     await Subscription.updateMany(
       {
         type: "PLATFORM",
@@ -100,6 +86,12 @@ export async function maintainRecords() {
           { $set: { platformSubscriptionStatus: "EXPIRED" } },
         );
     await deliverCampaignBatch();
+    await cleanupExpiredStories({ limit: 100, now });
+    const followCleanup = await cleanupOrphanedFollows({
+      after: followCleanupCursor,
+      limit: 100,
+    });
+    followCleanupCursor = followCleanup.nextCursor;
   } catch (error) {
     logger.error({ err: error }, "Background record maintenance failed");
   } finally {

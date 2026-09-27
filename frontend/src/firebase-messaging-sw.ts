@@ -36,7 +36,7 @@ worker.addEventListener("notificationclick", (event) => {
         (client) => new URL(client.url).origin === url.origin,
       );
       if (existing) {
-        await existing.navigate(url.href);
+        existing.postMessage({ type: "GETFIT4U_NOTIFICATION_CLICK", path: url.pathname + url.search + url.hash });
         await existing.focus();
       } else await worker.clients.openWindow(url.href);
     })(),
@@ -58,6 +58,7 @@ if (
         body: payload.data?.body || "You have a new update.",
         icon: "/brand/favicon.svg",
         tag: payload.data?.notificationId,
+        silent: payload.data?.soundEnabled !== "true",
         data: {
           navigationPath: payload.data?.navigationPath || "/notifications",
         },

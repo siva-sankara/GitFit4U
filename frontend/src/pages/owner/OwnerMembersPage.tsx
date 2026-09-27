@@ -1,11 +1,20 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
 import { apiRequest, type ApiEnvelope } from "../../services/apiClient";
 import { Modal } from "../../components/Modal";
 import { StatusBadge } from "../../components/StatusBadge";
 import { useCurrentUser } from "../../api/hooks";
+import { Avatar } from "../../components/Avatar";
+import { MediaImageEditor } from "../../components/MediaImageEditor";
+import { addCalendarDays, gymCalendarDate } from "../../services/gymCalendar";
+import {
+  gymDate,
+  MembershipStatusDot,
+  membershipPresentation,
+} from "../../components/MembershipStatusDot";
 import "../../styles/member-management.css";
+import { MemberQuickActions } from "../../components/MemberQuickActions";
 
 export type MemberRow = Record<string, any>;
 export const memberName = (row: MemberRow) =>
@@ -20,17 +29,24 @@ export function MemberEditor({
   onClose,
   endpoint = "/api/v1/owner/members",
   plansEndpoint = "/api/v1/owner/plans",
+  timezone = Intl.DateTimeFormat().resolvedOptions().timeZone,
+  uploadGymId,
 }: {
   member?: MemberRow;
   onSaved: () => void;
   onClose: () => void;
   endpoint?: string;
   plansEndpoint?: string;
+  timezone?: string;
+  uploadGymId?: string;
 }) {
   const edit = !!member;
   const [planId, setPlanId] = useState("");
+  const [photo, setPhoto] = useState<{ id: string | null; url?: string }>();
+  const [imageBusy, setImageBusy] = useState(false);
+  const today = gymCalendarDate(new Date(), timezone);
   const [startsAt, setStartsAt] = useState(
-    new Date().toISOString().slice(0, 10),
+    today,
   );
   const plans = useQuery({
     queryKey: ["api", plansEndpoint],
@@ -49,9 +65,7 @@ export function MemberEditor({
     Math.round((discounted * (plan?.taxRateBasisPoints || 0)) / 10000);
   const end =
     plan && startsAt
-      ? new Date(
-          new Date(startsAt).getTime() + plan.durationDays * 86400000,
-        ).toLocaleDateString()
+      ? gymDate(addCalendarDays(startsAt, plan.durationDays) + "T00:00:00Z", "UTC")
       : "Select a plan";
   const save = useMutation({
     mutationFn: (body: object) =>
@@ -64,6 +78,7 @@ export function MemberEditor({
   });
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (imageBusy || save.isPending) return;
     const form = new FormData(event.currentTarget),
       text = (name: string) => String(form.get(name) || "").trim();
     const emergencyName = text("emergencyName"),
@@ -72,7 +87,7 @@ export function MemberEditor({
       name: text("name"),
       ...(text("email") ? { email: text("email") } : {}),
       ...(text("phone") ? { phone: text("phone") } : {}),
-      ...(text("avatarUrl") ? { avatarUrl: text("avatarUrl") } : {}),
+      ...(photo ? { avatarAttachmentId: photo.id } : {}),
       fitnessGoal: text("fitnessGoal"),
       medicalNotes: text("medicalNotes"),
       ...(emergencyName && emergencyPhone
@@ -87,11 +102,11 @@ export function MemberEditor({
       ...(!edit
         ? {
             planId,
-            startsAt: new Date(startsAt).toISOString(),
+            startsAt,
             payment: {
               amountMinor: totalMinor,
               method: text("method"),
-              paidAt: new Date(text("paidAt")).toISOString(),
+              paidAt: text("paidAt"),
               reference: text("reference"),
               notes: text("notes"),
             },
@@ -104,7 +119,7 @@ export function MemberEditor({
       open
       title={edit ? "Edit gym member" : "Create member and membership"}
       onClose={() => {
-        if (!save.isPending) onClose();
+        if (!save.isPending && !imageBusy) onClose();
       }}
       wide
     >
@@ -119,7 +134,6 @@ export function MemberEditor({
             ["name", "Full name", "text"],
             ["email", "Email", "email"],
             ["phone", "Phone number", "tel"],
-            ["avatarUrl", "Profile image URL", "url"],
             ["fitnessGoal", "Fitness goal", "text"],
           ] as const
         ).map(([key, label, type]) => (
@@ -130,7 +144,7 @@ export function MemberEditor({
               name={key}
               type={type}
               required={key === "name" || (!edit && key === "phone")}
-              maxLength={key === "avatarUrl" ? 2000 : 200}
+              maxLength={200}
               defaultValue={
                 member?.contact?.[key] ||
                 member?.userId?.[key] ||
@@ -140,6 +154,12 @@ export function MemberEditor({
             />
           </label>
         ))}
+        {(endpoint.startsWith("/api/v1/owner/") || uploadGymId) && <div className="full-width">
+          <MediaImageEditor purpose="MEMBER_AVATAR" label="Gym member photo" gymId={uploadGymId}
+            previewUrl={photo === undefined ? member?.contact?.avatarUrl : photo.url}
+            onChange={(id, url) => setPhoto({ id, url })} onBusyChange={setImageBusy} />
+          <small>This recognition photo belongs to this gym; it does not change the member's account photo.</small>
+        </div>}
         <label className="field">
           <span>Emergency contact name</span>
           <input
@@ -223,8 +243,8 @@ export function MemberEditor({
                 name="paidAt"
                 type="date"
                 required
-                defaultValue={new Date().toISOString().slice(0, 10)}
-                max={new Date().toISOString().slice(0, 10)}
+                defaultValue={today}
+                max={today}
               />
             </label>
             <label className="field">
@@ -257,7 +277,7 @@ export function MemberEditor({
         <div className="heading-actions full-width">
           <button
             className="btn btn-primary"
-            disabled={save.isPending || (!edit && !plan)}
+            disabled={save.isPending || imageBusy || (!edit && !plan)}
           >
             {save.isPending
               ? "Saving..."
@@ -269,7 +289,7 @@ export function MemberEditor({
             type="button"
             className="btn btn-secondary"
             onClick={onClose}
-            disabled={save.isPending}
+            disabled={save.isPending || imageBusy}
           >
             Cancel
           </button>
@@ -286,18 +306,48 @@ export function OwnerMembersPage() {
     session.data?.data.context.permissions.includes("member:write");
   const [page, setPage] = useState(1),
     [search, setSearch] = useState(""),
+    [debouncedSearch, setDebouncedSearch] = useState(""),
     [status, setStatus] = useState(""),
+    [planId, setPlanId] = useState(""),
+    [trainerId, setTrainerId] = useState(""),
     [create, setCreate] = useState(false);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedSearch(search), 300);
+    return () => window.clearTimeout(timer);
+  }, [search]);
+  const plans = useQuery({
+    queryKey: ["api", "/api/v1/owner/plans"],
+    enabled: session.data?.data.context.permissions.includes("gym:read"),
+    queryFn: () => apiRequest<ApiEnvelope<MemberRow[]>>("/api/v1/owner/plans"),
+  });
+  const trainers = useQuery({
+    queryKey: ["api", "/api/v1/owner/trainers"],
+    enabled: session.data?.data.context.permissions.includes("gym:read"),
+    queryFn: () =>
+      apiRequest<ApiEnvelope<MemberRow[]>>("/api/v1/owner/trainers"),
+  });
   const client = useQueryClient(),
     navigate = useNavigate();
   const path =
     "/api/v1/owner/members?" +
-    new URLSearchParams({ page: String(page), limit: "20", q: search, status });
+    new URLSearchParams({
+      page: String(page),
+      limit: "20",
+      q: debouncedSearch,
+      status: status === "JOIN_REQUESTED" ? status : "",
+      membershipStatus: status === "JOIN_REQUESTED" ? "" : status,
+      planId,
+      trainerId,
+    });
   const query = useQuery({
     queryKey: ["api", path],
     queryFn: () => apiRequest<ApiEnvelope<MemberRow[]>>(path),
     retry: false,
   });
+  const timezone = query.data?.meta?.timezone || "Asia/Kolkata";
+  const now = query.data?.meta?.serverNow
+    ? new Date(query.data.meta.serverNow)
+    : new Date();
   return (
     <div className="page-stack">
       <header className="page-heading">
@@ -307,12 +357,12 @@ export function OwnerMembersPage() {
           <p>Manage member details, memberships and join requests.</p>
         </div>
         {canManage && (
-          <button className="btn btn-primary" onClick={() => setCreate(true)}>
+          <button className="btn btn-primary" disabled={query.isPending || query.isError} onClick={() => setCreate(true)}>
             Create member
           </button>
         )}
       </header>
-      <div className="panel heading-actions" style={{ padding: 16 }}>
+      <div className="panel member-filter-toolbar">
         <label className="search-field">
           <span className="sr-only">Search members</span>
           <input
@@ -326,7 +376,7 @@ export function OwnerMembersPage() {
         </label>
         <select
           className="select"
-          aria-label="Member status"
+          aria-label="Membership status"
           value={status}
           onChange={(e) => {
             setStatus(e.target.value);
@@ -337,14 +387,58 @@ export function OwnerMembersPage() {
           {[
             "JOIN_REQUESTED",
             "ACTIVE",
-            "INACTIVE",
-            "SUSPENDED",
-            "ARCHIVED",
+            "EXPIRING",
+            "FROZEN",
+            "EXPIRED",
+            "CANCELLED",
+            "DEACTIVATED",
+            "GRACE",
+            "PENDING_PAYMENT",
+            "NONE",
           ].map((s) => (
             <option key={s}>{s}</option>
           ))}
         </select>
+        <select
+          className="select"
+          aria-label="Membership plan"
+          value={planId}
+          onChange={(event) => {
+            setPlanId(event.target.value);
+            setPage(1);
+          }}
+        >
+          <option value="">All plans</option>
+          {plans.data?.data.map((plan) => (
+            <option key={plan.publicId} value={plan.publicId}>
+              {plan.name}
+            </option>
+          ))}
+        </select>
+        <select
+          className="select"
+          aria-label="Assigned trainer"
+          value={trainerId}
+          onChange={(event) => {
+            setTrainerId(event.target.value);
+            setPage(1);
+          }}
+        >
+          <option value="">All trainers</option>
+          <option value="none">Not assigned</option>
+          {trainers.data?.data.map((trainer) => (
+            <option key={trainer._id} value={trainer._id}>
+              {trainer.name}
+            </option>
+          ))}
+        </select>
       </div>
+      {(plans.isError || trainers.isError) && (
+        <p role="alert">
+          Some filter options could not load.{" "}
+          {plans.error?.message || trainers.error?.message}
+        </p>
+      )}
       {query.isPending ? (
         <p role="status">Loading members...</p>
       ) : query.isError ? (
@@ -365,25 +459,40 @@ export function OwnerMembersPage() {
                 <th>Member</th>
                 <th>Member code</th>
                 <th>Phone</th>
-                <th>Plan</th>
-                <th>Expires</th>
                 <th>Membership</th>
+                <th>Expires</th>
                 <th>Visits (30 days)</th>
                 {canReadFinance && <th>Payment</th>}
                 <th>Joined</th>
-                <th>Member status</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
               {query.data?.data.map((row) => (
                 <tr
                   key={row.publicId}
+                  className={
+                    membershipPresentation(row, timezone, now).state ===
+                    "EXPIRING"
+                      ? "member-expiring-row"
+                      : undefined
+                  }
                   onDoubleClick={() =>
                     navigate("/owner/members/" + row.publicId)
                   }
                 >
                   <td>
-                    <strong>{memberName(row)}</strong>
+                    <div className="member-identity">
+                      <Avatar
+                        name={memberName(row)}
+                        src={row.contact?.avatarUrl || row.userId?.avatarUrl}
+                        thumbnailSrc={row.contact?.avatarThumbnailUrl || (!row.contact?.avatarUrl ? row.userId?.avatarThumbnailUrl : undefined)}
+                      />
+                      <strong>{memberName(row)}</strong>
+                    </div>
+                    <small>
+                      Trainer: {row.assignedTrainerId?.name || "Not assigned"}
+                    </small>
                     <small>
                       <Link to={"/owner/members/" + row.publicId}>
                         {canManage ? "View / Edit" : "View"}
@@ -396,25 +505,27 @@ export function OwnerMembersPage() {
                     <small>{row.contact?.email || row.userId?.email}</small>
                   </td>
                   <td>
-                    {row.currentSubscriptionId?.planSnapshot?.name ||
-                      (row.directAccess
-                        ? "Approved direct access"
-                        : "No membership")}
+                    <div className="member-plan-status">
+                      <span>
+                        {membershipPresentation(row, timezone, now).plan}
+                      </span>
+                      <MembershipStatusDot
+                        member={row}
+                        timezone={timezone}
+                        now={now}
+                      />
+                    </div>
                   </td>
                   <td>
-                    {row.currentSubscriptionId?.endsAt
-                      ? new Date(
-                          row.currentSubscriptionId.endsAt,
-                        ).toLocaleDateString()
-                      : "Not started"}
-                  </td>
-                  <td>
-                    {row.currentSubscriptionId?.status ? (
-                      <StatusBadge status={row.currentSubscriptionId.status} />
-                    ) : row.directAccess ? (
-                      "Direct access"
-                    ) : (
-                      "Not enrolled"
+                    {gymDate(row.currentSubscriptionId?.endsAt, timezone)}
+                    {membershipPresentation(row, timezone, now).state ===
+                      "EXPIRING" && (
+                      <small>
+                        {membershipPresentation(row, timezone, now)
+                          .daysRemaining === 0
+                          ? "Expires today"
+                          : `Expires in ${membershipPresentation(row, timezone, now).daysRemaining} days`}
+                      </small>
                     )}
                   </td>
                   <td>{row.attendanceVisits30Days || 0}</td>
@@ -431,14 +542,8 @@ export function OwnerMembersPage() {
                       )}
                     </td>
                   )}
-                  <td>
-                    {row.joinedAt
-                      ? new Date(row.joinedAt).toLocaleDateString()
-                      : "Not recorded"}
-                  </td>
-                  <td>
-                    <StatusBadge status={row.status} />
-                  </td>
+                  <td>{gymDate(row.joinedAt, timezone)}</td>
+                  <td><MemberQuickActions member={row} /></td>
                 </tr>
               ))}
             </tbody>
@@ -465,6 +570,7 @@ export function OwnerMembersPage() {
       </footer>
       {create && (
         <MemberEditor
+          timezone={timezone}
           onClose={() => setCreate(false)}
           onSaved={() => {
             setCreate(false);

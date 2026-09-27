@@ -33,6 +33,13 @@ export function useReadAllNotifications() {
     onSuccess: () => client.invalidateQueries({ queryKey: ["notifications"] }),
   });
 }
+export function useDeleteNotifications() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (selection: { ids?: string[]; all?: boolean; confirmed?: boolean }) => apiRequest("/api/v1/users/me/notifications", { method: "DELETE", body: JSON.stringify(selection) }),
+    onSuccess: () => client.invalidateQueries({ queryKey: ["notifications"] }),
+  });
+}
 export const useConversations = () =>
   useQuery({
     queryKey: ["conversations"],

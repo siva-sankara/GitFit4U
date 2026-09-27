@@ -1,0 +1,94 @@
+.class-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr));
+  gap: 14px;
+  max-height: 68vh;
+  overflow: auto;
+  padding: 2px;
+}
+.class-card {
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+  min-width: 0;
+  gap: 10px;
+}
+.class-card header,
+.class-trainer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.class-trainer {
+  justify-content: flex-start;
+  font-size: 0.85rem;
+}
+.class-card h3 {
+  font-size: 1.06rem;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.class-card dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+  gap: 10px;
+  font-size: 0.85rem;
+}
+.class-card dt,
+.class-timezone {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+.class-card dd {
+  margin: 3px 0 0;
+}
+.class-card footer {
+  margin-top: auto;
+}
+.class-description {
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+  max-height: 6em;
+  overflow: auto;
+  margin: 0;
+}
+.class-editor {
+  display: grid;
+  gap: 20px;
+}
+.class-editor fieldset {
+  border: 0;
+  min-width: 0;
+  padding: 0;
+  margin: 0;
+}
+.class-editor legend {
+  font-weight: 650;
+  margin-bottom: 12px;
+}
+.class-editor p {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  margin: 10px 0;
+}
+.class-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+.class-form-wide {
+  grid-column: 1/-1;
+}
+.class-status-filter {
+  max-width: 230px;
+}
+@media (max-width: 600px) {
+  .class-form-grid {
+    grid-template-columns: 1fr;
+  }
+  .class-card-grid {
+    max-height: none;
+  }
+}

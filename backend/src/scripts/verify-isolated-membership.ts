@@ -24,8 +24,18 @@ import {
 import { Conversation, Message } from "../models/Collaboration.js";
 import { deliverCampaignBatch } from "../services/campaignDeliveryService.js";
 import { logger } from "../config/logger.js";
+import { checkProductEnhancements } from "./check-product-enhancements.js";
+import { checkSocialProfileRegressions } from "./check-social-profile-regressions.js";
+import { checkOwnerRegressions } from "./check-owner-regressions.js";
+import { checkReviewMediaRegressions } from "./check-review-media-regressions.js";
+import { checkNotificationEnhancements } from "./check-notification-enhancements.js";
+import { checkMembershipStreakEnhancements } from "./check-membership-streak-enhancements.js";
+import { checkPromotionRegressions } from "./check-promotion-regressions.js";
+import { prepareImage } from "../services/imageProcessingService.js";
+import { attachmentUrl } from "../integrations/storage/mediaStore.js";
 
 logger.level = "warn";
+mongoose.set("strictQuery", true);
 
 if (!process.argv.includes("--run-isolated"))
   throw new Error(
@@ -111,10 +121,11 @@ async function call(
   auth: string,
   body?: object,
 ) {
-  const operation = request(app)
-    [method](path)
+  const agent = request(app);
+  const operation = agent[method](path)
     .set("authorization", `Bearer ${auth}`)
-    .set("idempotency-key", randomUUID());
+    .set("idempotency-key", randomUUID())
+    .set("x-csrf-protection", "1");
   return body ? operation.send(body) : operation;
 }
 function status(response: { status: number; body: any }, expected: number) {
@@ -133,7 +144,7 @@ async function removeCreatedMedia(media: VerificationMedia) {
   );
   assert.equal(
     media.objectKey,
-    `${media.gymId}/${media.ownerId}/gym_logo/${media.publicId}.png`,
+    `gyms/${media.gymId}/gym_logo/${media.publicId}.png`,
   );
   const attachment = await Attachment.findOne({
     publicId: media.publicId,
@@ -170,6 +181,7 @@ async function verifyGymMedia(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
     "base64",
   );
+  const processed = await prepareImage(png, "image/png");
   async function upload(name: string) {
     assertDatabase();
     const initiated = await call("post", "/api/v1/uploads", ownerToken, {
@@ -184,7 +196,7 @@ async function verifyGymMedia(
     assert.equal(String(file.ownerId), String(owner._id));
     assert.equal(
       file.objectKey,
-      `${gym._id}/${owner._id}/gym_logo/${file.publicId}.png`,
+      `gyms/${gym._id}/gym_logo/${file.publicId}.png`,
     );
     assert.equal(
       initiated.body.data.uploadUrl,
@@ -216,6 +228,11 @@ async function verifyGymMedia(
     status(completed, 200);
     assert.equal(completed.body.data.status, "READY");
     assert.equal(completed.body.data._id, file._id);
+    const ready = await Attachment.findById(file._id).lean();
+    assert.equal(ready.thumbnailObjectKey, `${file.objectKey}.thumb.webp`);
+    const thumbnail = await fetch(attachmentUrl(ready, true), { signal: AbortSignal.timeout(20000) });
+    assert.equal(thumbnail.status, 200);
+    assert(Buffer.from(await thumbnail.arrayBuffer()).equals(processed.thumbnail));
     assert.equal(
       (await Attachment.findById(file._id))?.objectKey,
       file.objectKey,
@@ -252,8 +269,8 @@ async function verifyGymMedia(
       );
       if (media.provider === "s3")
         assert(
-          received.equals(png),
-          "S3 download bytes must match the validated upload.",
+          received.equals(processed.original),
+          "S3 download bytes must match the validated, metadata-stripped image.",
         );
     }
   }
@@ -1049,6 +1066,13 @@ try {
   results.push(
     "Suspended gyms reject writes through existing or newly issued owner sessions while preserving reads and authorized admin management; unpaid activation remains blocked",
   );
+  results.push(...await checkProductEnhancements());
+  results.push(...await checkSocialProfileRegressions({ assertDatabase }));
+  results.push(...await checkOwnerRegressions());
+  results.push(...await checkReviewMediaRegressions({ assertDatabase }));
+  results.push(...await checkNotificationEnhancements({ app, owner, gym, member, ownerToken, memberToken }));
+  results.push(...await checkMembershipStreakEnhancements({ assertDatabase }));
+  results.push(...await checkPromotionRegressions({ assertDatabase }));
   console.log(JSON.stringify({ success: true, checks: results }, null, 2));
 } catch (error) {
   console.error(

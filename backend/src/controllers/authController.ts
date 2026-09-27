@@ -3,6 +3,7 @@ import type { Request, Response } from "express";
 import { emitDomainEvent } from "../services/domainEventService.js";
 import mongoose from "mongoose";
 import { OAuth2Client } from "google-auth-library";
+import { withUserMedia } from "../services/userMediaService.js";
 import bcrypt from "bcrypt";
 import crypto from "node:crypto";
 import { nanoid } from "nanoid";
@@ -204,7 +205,7 @@ export async function verifyRecoveryOtp(req: Request, res: Response) {
     const user = await User.findOneAndUpdate(
       { phone: verified.phone, status: "ACTIVE" },
       { $inc: { version: 1 } },
-      { session, new: true },
+      { session, returnDocument: "after" },
     );
     if (!user)
       throw new AppError(
@@ -254,7 +255,7 @@ export async function resetPassword(req: Request, res: Response) {
     const grant = await PasswordResetGrant.findOneAndUpdate(
       { publicId, tokenHash, consumedAt: null, expiresAt: { $gt: new Date() } },
       { $set: { consumedAt: new Date() } },
-      { session, new: true },
+      { session, returnDocument: "after" },
     );
     if (!grant) throw invalidGrant();
     // The common User write serializes resets with administrative identity,
@@ -262,7 +263,7 @@ export async function resetPassword(req: Request, res: Response) {
     const user = await User.findOneAndUpdate(
       { _id: grant.userId, status: "ACTIVE" },
       { $inc: { version: 1 } },
-      { session, new: true },
+      { session, returnDocument: "after" },
     );
     if (!user || !(user.email || user.phone)) throw invalidGrant();
     await AuthIdentity.findOneAndUpdate(
@@ -274,7 +275,7 @@ export async function resetPassword(req: Request, res: Response) {
           verifiedAt: new Date(),
         },
       },
-      { session, upsert: true, new: true, runValidators: true },
+      { session, upsert: true, returnDocument: "after", runValidators: true },
     );
     await PasswordResetGrant.updateMany(
       { userId: user._id, consumedAt: null },
@@ -415,15 +416,18 @@ export async function refresh(req: Request, res: Response) {
 
 export async function logout(req: Request, res: Response) {
   const token = req.cookies?.gfu_refresh;
-  const sessionId = token?.split(".")[0];
-  if (sessionId)
-    await Session.updateOne(
-      { publicId: sessionId },
-      { revokedAt: new Date(), revokeReason: "LOGOUT" },
-    );
-  if (sessionId)
+  const sessionId = typeof token === "string" ? token.split(".")[0] : undefined;
+  // A public session identifier alone is not proof that the caller owns it.
+  const session = sessionId
+    ? await Session.findOneAndUpdate(
+        { publicId: sessionId, refreshTokenHash: sha256(token), revokedAt: null },
+        { $set: { revokedAt: new Date(), revokeReason: "LOGOUT" } },
+        { returnDocument: "after" },
+      ).select("publicId userId").lean()
+    : null;
+  if (session)
     await DeviceToken.updateMany(
-      { sessionId, revokedAt: null },
+      { sessionId: session.publicId, userId: session.userId, revokedAt: null },
       { $set: { revokedAt: new Date() } },
     );
   clearRefreshCookie(res);
@@ -450,7 +454,7 @@ export async function me(req: Request, res: Response) {
       .populate("gymId", "publicId name status")
       .lean(),
   ]);
-  res.json({ success: true, data: { user, assignments, context: req.auth } });
+  res.json({ success: true, data: { user: user ? (await withUserMedia([user]))[0] : null, assignments, context: req.auth } });
 }
 
 export async function switchRole(req: Request, res: Response) {

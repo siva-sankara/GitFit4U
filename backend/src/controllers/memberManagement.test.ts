@@ -1,10 +1,29 @@
 import { describe, expect, it } from "vitest";
-import { offlinePlanQuote } from "./memberManagementController.js";
+import { offlinePlanQuote, memberInputDate } from "./memberManagementController.js";
 import {
   ownerMemberCreateInput,
   ownerTrainerInput,
+  ownerMemberUpdateInput,
 } from "../routes/memberManagementSchemas.js";
 describe("owner member creation contract", () => {
+  it("interprets calendar dates in the gym timezone and preserves legacy explicit instants", () => {
+    expect(memberInputDate("2026-09-27", "America/New_York").toISOString()).toBe("2026-09-27T04:00:00.000Z");
+    expect(memberInputDate("2026-09-27", "Asia/Kolkata").toISOString()).toBe("2026-09-26T18:30:00.000Z");
+    const legacy = new Date("2026-09-27T10:15:00Z");
+    expect(memberInputDate(legacy, "America/New_York")).toBe(legacy);
+    const result = offlinePlanQuote({ priceMinor: 100, durationDays: 1 }, memberInputDate("2026-11-01", "America/New_York"), "America/New_York");
+    expect(result.endsAt.toISOString()).toBe("2026-11-02T05:00:00.000Z");
+  });
+  it("accepts date-only entry without coercing it to UTC and rejects invalid dates", () => {
+    const body = { name: "Member One", phone: "+919876543210", planId: "gold", startsAt: "2026-09-27", payment: { amountMinor: 100, method: "CASH", paidAt: "2026-09-27" } };
+    expect(ownerMemberCreateInput.parse(body).startsAt).toBe("2026-09-27");
+    expect(ownerMemberCreateInput.safeParse({ ...body, startsAt: "2026-02-30" }).success).toBe(false);
+    expect(ownerMemberCreateInput.parse({ ...body, startsAt: "2026-09-27T00:00:00Z" }).startsAt).toBeInstanceOf(Date);
+  });
+  it("accepts authorized image references/removal but rejects new arbitrary avatar URLs", () => {
+    expect(ownerMemberUpdateInput.parse({ avatarAttachmentId: null })).toEqual({ avatarAttachmentId: null });
+    expect(ownerMemberUpdateInput.safeParse({ avatarUrl: "https://untrusted.test/photo.jpg" }).success).toBe(false);
+  });
   it("calculates tax after discount and derives membership end from plan duration", () => {
     const result = offlinePlanQuote(
       {

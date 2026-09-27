@@ -4,6 +4,7 @@ import type { Request, Response } from "express";
 const mocks = vi.hoisted(() => ({
   members: vi.fn(),
   subscriptions: vi.fn(),
+  platform: vi.fn(),
   attendance: vi.fn(),
   revenue: vi.fn(),
   classes: vi.fn(),
@@ -14,7 +15,10 @@ vi.mock("../models/Member.js", () => ({
 }));
 vi.mock("../models/Commerce.js", () => ({
   MembershipPlan: {},
-  Subscription: { countDocuments: mocks.subscriptions },
+  Subscription: {
+    countDocuments: mocks.subscriptions,
+    findOne: mocks.platform,
+  },
   Payment: {},
 }));
 vi.mock("../services/revenueService.js", () => ({
@@ -35,6 +39,9 @@ beforeEach(() => {
   vi.resetAllMocks();
   mocks.members.mockResolvedValueOnce(10).mockResolvedValueOnce(8);
   mocks.subscriptions.mockResolvedValue(2);
+  mocks.platform.mockReturnValue({
+    sort: vi.fn().mockReturnValue({ lean: vi.fn().mockResolvedValue(null) }),
+  });
   mocks.attendance.mockResolvedValue(4);
   mocks.revenue.mockResolvedValue({ monthMinor: 120_000 });
   mocks.classes.mockResolvedValue(3);
@@ -43,6 +50,43 @@ beforeEach(() => {
       lean: vi.fn().mockResolvedValue({ status: "ACTIVE" }),
     }),
   });
+});
+
+it("returns real platform plan limits, gym usage and expiry to the owner", async () => {
+  mocks.platform.mockReturnValue({
+    sort: vi
+      .fn()
+      .mockReturnValue({
+        lean: vi
+          .fn()
+          .mockResolvedValue({
+            publicId: "platform-sub",
+            status: "ACTIVE",
+            planId: "plan-id",
+            planSnapshot: { name: "Professional", memberLimit: 500 },
+            endsAt: new Date(Date.now() + 7 * 86400000),
+          }),
+      }),
+  });
+  const res = { json: vi.fn() };
+  await dashboard(
+    {
+      auth: {
+        gymId: "507f1f77bcf86cd799439011",
+        role: "GYM_OWNER",
+        permissions: [],
+      },
+    } as any,
+    res as any,
+  );
+  expect(res.json.mock.calls[0][0].data.platformSubscription).toMatchObject({
+    publicId: "platform-sub",
+    plan: { name: "Professional", memberLimit: 500 },
+    usage: { members: 8, memberLimit: 500 },
+    canRenew: true,
+    renewalUrl: "/owner/platform-subscription",
+  });
+  expect(mocks.subscriptions).toHaveBeenCalledWith(expect.objectContaining({ type: "GYM_MEMBERSHIP" }));
 });
 
 describe("owner dashboard financial permissions", () => {

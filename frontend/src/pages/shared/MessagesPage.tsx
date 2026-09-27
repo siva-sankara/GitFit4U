@@ -4,6 +4,7 @@ import { useSearchParams } from "react-router-dom";
 import {
   ArrowLeft,
   Archive,
+  ArchiveRestore,
   MessageSquare,
   Paperclip,
   Send,
@@ -12,7 +13,8 @@ import {
 import { apiRequest, type ApiEnvelope } from "../../services/apiClient";
 import { useCurrentUser } from "../../api/hooks";
 import { uploadMedia } from "../../services/mediaUpload";
-import { useData, QueryState, date, type Row } from "../live/LiveData";
+import { Avatar } from "../../components/Avatar";
+import { QueryState, date, type Row } from "../live/LiveData";
 import "../../styles/messaging.css";
 
 export function messageBelongsToUser(message: Row, userId?: string) {
@@ -28,6 +30,7 @@ const statuses = [
   "CLOSED",
 ];
 const path = (id: string) => "/api/v1/conversations/" + id;
+type ConversationScope = { conversationId: string };
 export function MessagesPage({
   supportOnly = false,
 }: {
@@ -40,6 +43,12 @@ export function MessagesPage({
     admin = me.data?.data?.context?.role === "ADMIN";
   const [page, setPage] = useState(1),
     [search, setSearch] = useState("");
+  const [archived, setArchived] = useState(false);
+  const [contactSearch, setContactSearch] = useState(""), [contactQuery, setContactQuery] = useState(""), [contactPage, setContactPage] = useState(1), [contactOpen, setContactOpen] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => { setContactQuery(contactSearch.trim()); setContactPage(1); setRecipient(""); }, 300);
+    return () => clearTimeout(timer);
+  }, [contactSearch]);
   const [active, setActive] = useState(params.get("conversation") || "");
   const [text, setText] = useState(""),
     [recipient, setRecipient] = useState("");
@@ -54,18 +63,36 @@ export function MessagesPage({
     previous = useRef("");
   const history = useRef<HTMLDivElement>(null),
     fileInput = useRef<HTMLInputElement>(null);
+  // Every selection gets a fresh identity, including A -> B -> A. Late work
+  // must not attach a file or clear a draft created during a later selection.
+  const scope = useRef<ConversationScope>({ conversationId: active });
+  function selectConversation(id: string) {
+    if (scope.current.conversationId === id) return;
+    scope.current = { conversationId: id };
+    setActive(id);
+    setOlder([]);
+    setCursor(undefined);
+    setText("");
+    setAttachments([]);
+    draftId.current = crypto.randomUUID();
+  }
   const conversations = useQuery({
-    queryKey: ["conversations", supportOnly, page],
+    queryKey: ["conversations", supportOnly, page, archived],
     queryFn: () =>
       apiRequest<ApiEnvelope<Row[]>>(
         "/api/v1/conversations?page=" +
           page +
           "&limit=20" +
+          (archived ? "&archived=true" : "") +
           (supportOnly ? "&type=SUPPORT" : ""),
       ),
     refetchInterval: 10000,
   });
-  const contacts = useData<Row[]>("/api/v1/workspace/contacts", !supportOnly);
+  const contacts = useQuery({
+    queryKey: ["conversation-contacts", me.data?.data.context?.role, me.data?.data.context?.gymId, contactQuery, contactPage],
+    enabled: !supportOnly && contactOpen && (contactQuery.length === 0 || contactQuery.length >= 2),
+    queryFn: () => apiRequest<ApiEnvelope<Row[]>>("/api/v1/conversations/contacts?q=" + encodeURIComponent(contactQuery) + "&page=" + contactPage + "&limit=20"),
+  });
   const details = useQuery({
     queryKey: ["conversation", active],
     enabled: !!active,
@@ -79,14 +106,14 @@ export function MessagesPage({
     refetchInterval: 5000,
   });
   function open(id: string) {
-    setActive(id);
+    selectConversation(id);
     setParams(id ? { conversation: id } : {}, { replace: true });
   }
-  function refresh() {
+  function refresh(conversationId = scope.current.conversationId) {
     for (const key of [
       ["conversations"],
-      ["conversation", active],
-      ["messages", active],
+      ["conversation", conversationId],
+      ["messages", conversationId],
     ])
       void client.invalidateQueries({ queryKey: key });
   }
@@ -124,12 +151,12 @@ export function MessagesPage({
   });
   const send = useMutation({
     mutationFn: (draft: {
-      conversationId: string;
+      scope: ConversationScope;
       clientMessageId: string;
       text: string;
       attachments: Row[];
     }) =>
-      apiRequest(path(draft.conversationId) + "/messages", {
+      apiRequest(path(draft.scope.conversationId) + "/messages", {
         method: "POST",
         body: JSON.stringify({
           clientMessageId: draft.clientMessageId,
@@ -141,40 +168,44 @@ export function MessagesPage({
         }),
       }),
     onSuccess: (_result, draft) => {
-      if (draft.conversationId === active) {
+      if (draft.scope === scope.current && draft.clientMessageId === draftId.current) {
         setText("");
         setAttachments([]);
         draftId.current = crypto.randomUUID();
       }
-      refresh();
-      requestAnimationFrame(() =>
+      refresh(draft.scope.conversationId);
+      requestAnimationFrame(() => {
+        if (draft.scope !== scope.current) return;
         history.current?.scrollTo({
           top: history.current.scrollHeight,
           behavior: "smooth",
-        }),
-      );
+        });
+      });
     },
   });
   const upload = useMutation({
-    mutationFn: (file: File) => uploadMedia(file, "MESSAGE"),
-    onSuccess: (result) => {
+    mutationFn: (input: { file: File; scope: ConversationScope }) => uploadMedia(input.file, "MESSAGE"),
+    onSuccess: (result, input) => {
+      if (input.scope !== scope.current) return;
       setAttachments((value) => [...value, result]);
       draftId.current = crypto.randomUUID();
     },
   });
   const loadOlder = useMutation({
-    mutationFn: () =>
+    mutationFn: (input: { scope: ConversationScope; cursor: string }) =>
       apiRequest<ApiEnvelope<Row[]>>(
-        path(active) +
+        path(input.scope.conversationId) +
           "/messages?before=" +
-          encodeURIComponent(cursor || messages.data?.meta?.nextCursor || ""),
+          encodeURIComponent(input.cursor),
       ),
-    onSuccess: (result) => {
+    onSuccess: (result, input) => {
+      if (input.scope !== scope.current) return;
       const element = history.current,
         height = element?.scrollHeight || 0;
       setOlder((value) => [...result.data, ...value]);
       setCursor(result.meta?.nextCursor || "");
       requestAnimationFrame(() => {
+        if (input.scope !== scope.current) return;
         if (element) element.scrollTop += element.scrollHeight - height;
       });
     },
@@ -186,43 +217,48 @@ export function MessagesPage({
       void client.invalidateQueries({ queryKey: ["conversations"] }),
   });
   const archive = useMutation({
-    mutationFn: () => apiRequest(path(active), { method: "DELETE" }),
-    onSuccess: () => {
+    mutationFn: (input: { scope: ConversationScope }) => apiRequest(path(input.scope.conversationId), { method: "DELETE" }),
+    onSuccess: (_result, input) => {
+      refresh(input.scope.conversationId);
+      if (input.scope !== scope.current) return;
       open("");
       setNotice(
-        "Conversation hidden for you. Other participants keep their history. A new message makes it visible again.",
+        "Conversation archived for you. Open Archived chats to restore it. Other participants are not affected.",
       );
-      refresh();
+    },
+  });
+  const restore = useMutation({
+    mutationFn: (input: { scope: ConversationScope }) => apiRequest(path(input.scope.conversationId) + "/restore", { method: "POST" }),
+    onSuccess: (_result, input) => {
+      refresh(input.scope.conversationId);
+      if (input.scope !== scope.current) return;
+      setArchived(false);
+      setPage(1);
+      setNotice("Conversation restored.");
     },
   });
   const remove = useMutation({
-    mutationFn: (id: string) =>
-      apiRequest(path(active) + "/messages/" + id, { method: "DELETE" }),
-    onSuccess: () => {
+    mutationFn: (input: { id: string; scope: ConversationScope }) =>
+      apiRequest(path(input.scope.conversationId) + "/messages/" + input.id, { method: "DELETE" }),
+    onSuccess: (_result, input) => {
+      refresh(input.scope.conversationId);
+      if (input.scope !== scope.current) return;
       setOlder([]);
       setCursor(undefined);
-      refresh();
     },
   });
   const changeStatus = useMutation({
-    mutationFn: (status: string) =>
-      apiRequest(path(active) + "/support-status", {
+    mutationFn: (input: { status: string; scope: ConversationScope }) =>
+      apiRequest(path(input.scope.conversationId) + "/support-status", {
         method: "PATCH",
-        body: JSON.stringify({ status }),
+        body: JSON.stringify({ status: input.status }),
       }),
-    onSuccess: refresh,
+    onSuccess: (_result, input) => refresh(input.scope.conversationId),
   });
   const lastMessage = messages.data?.data.at(-1)?.publicId;
   useEffect(() => {
-    setActive(params.get("conversation") || "");
+    selectConversation(params.get("conversation") || "");
   }, [params]);
-  useEffect(() => {
-    setOlder([]);
-    setCursor(undefined);
-    setText("");
-    setAttachments([]);
-    draftId.current = crypto.randomUUID();
-  }, [active]);
   useEffect(() => {
     if (!active || !lastMessage) return;
     read.mutate(active);
@@ -242,6 +278,9 @@ export function MessagesPage({
   const closed = Boolean(
     ticket && ["CLOSED", "RESOLVED"].includes(ticket.status),
   );
+  const isArchived = Boolean(
+    current?.archivedBy?.some((id: string) => String(id) === String(userId)),
+  );
   const combined = [
     ...new Map(
       [...older, ...(messages.data?.data || [])].map((row) => [
@@ -260,6 +299,9 @@ export function MessagesPage({
       "Conversation"
     );
   }
+  function contactPhone(row?: Row) {
+    return row?.type === "DIRECT" ? row.participants?.find((person: Row) => String(person._id) !== String(userId))?.phone : undefined;
+  }
   const visible =
     conversations.data?.data.filter((row) =>
       (name(row) + " " + (row.gymId?.name || ""))
@@ -271,9 +313,12 @@ export function MessagesPage({
     upload,
     loadOlder,
     archive,
+    restore,
     remove,
     changeStatus,
-  ].filter((mutation) => mutation.isError);
+  ].filter((mutation) => mutation.isError && mutation.variables?.scope === scope.current);
+  const sendingHere = send.isPending && send.variables?.scope === scope.current;
+  const uploadingHere = upload.isPending && upload.variables?.scope === scope.current;
   return (
     <div className="page-stack messaging-page">
       <header className="page-heading">
@@ -292,7 +337,7 @@ export function MessagesPage({
           {notice}
         </p>
       )}
-      <details className="chat-start panel">
+      <details className="chat-start panel" onToggle={event => setContactOpen(event.currentTarget.open)}>
         <summary>
           {supportOnly
             ? "Start a support conversation"
@@ -353,6 +398,13 @@ export function MessagesPage({
             }}
           >
             <label className="field">
+              <span>Find a contact</span>
+              <input className="input" value={contactSearch} maxLength={80}
+                placeholder={admin ? "Name, phone, email or gym name" : "Search your gym contacts"}
+                onChange={event => setContactSearch(event.target.value)} />
+              {contactQuery.length === 1 && <small>Enter at least two characters to search.</small>}
+            </label>
+            <label className="field">
               <span>Contact</span>
               <select
                 className="select"
@@ -363,11 +415,18 @@ export function MessagesPage({
                 <option value="">Choose a contact</option>
                 {contacts.data?.data.map((row) => (
                   <option key={row._id} value={row._id}>
-                    {row.name || row.publicId}
+                    {(row.name || row.publicId) + (row.phone ? " · " + row.phone : "")}
                   </option>
                 ))}
               </select>
             </label>
+            {contacts.isFetching && <span role="status">Finding contacts…</span>}
+            {!contacts.isPending && !contacts.isError && !contacts.data?.data.length && contactQuery.length !== 1 && <p>No eligible contacts found.</p>}
+            <div className="chat-contact-pagination">
+              <button type="button" className="btn btn-secondary" aria-label="Previous contacts" disabled={contactPage <= 1 || contacts.isFetching} onClick={() => { setContactPage(value => value - 1); setRecipient(""); }}>Previous</button>
+              <span>Page {contactPage} of {Math.max(1, contacts.data?.meta?.pages || 1)}</span>
+              <button type="button" className="btn btn-secondary" aria-label="Next contacts" disabled={contactPage >= (contacts.data?.meta?.pages || 1) || contacts.isFetching} onClick={() => { setContactPage(value => value + 1); setRecipient(""); }}>Next</button>
+            </div>
             <button
               className="btn btn-primary"
               disabled={!recipient || create.isPending}
@@ -385,6 +444,35 @@ export function MessagesPage({
         }
       >
         <aside className="conversation-list" aria-label="Conversations">
+          <div
+            className="chat-list-filter"
+            role="group"
+            aria-label="Conversation visibility"
+          >
+            <button
+              className="btn btn-secondary"
+              aria-pressed={!archived}
+              onClick={() => {
+                setArchived(false);
+                setPage(1);
+                open("");
+              }}
+            >
+              Inbox
+            </button>
+            <button
+              className="btn btn-secondary"
+              aria-pressed={archived}
+              onClick={() => {
+                setArchived(true);
+                setPage(1);
+                open("");
+              }}
+            >
+              <Archive size={15} />
+              Archived chats
+            </button>
+          </div>
           <input
             className="input"
             aria-label="Search conversations on this page"
@@ -410,11 +498,19 @@ export function MessagesPage({
                         alt=""
                       />
                     ) : (
-                      <MessageSquare size={20} />
+                      <Avatar
+                        user={row.participants?.find(
+                          (person: Row) =>
+                            String(person._id) !== String(userId),
+                        )}
+                        name={name(row)}
+                        size={40}
+                      />
                     )}
                   </span>
                   <span className="conversation-copy">
                     <strong>{name(row)}</strong>
+                    {contactPhone(row) && <small className="chat-contact-phone">{contactPhone(row)}</small>}
                     <small>
                       {row.lastMessageId?.deletedAt
                         ? "Message deleted"
@@ -494,6 +590,7 @@ export function MessagesPage({
                 </button>
                 <div className="chat-heading">
                   <strong>{name(current)}</strong>
+                  {contactPhone(current) && <small className="chat-contact-phone">{contactPhone(current)}</small>}
                   <small>
                     {ticket
                       ? "Support · " + ticket.status.replaceAll("_", " ")
@@ -502,20 +599,38 @@ export function MessagesPage({
                 </div>
                 <button
                   className="btn btn-secondary"
-                  aria-label="Hide conversation for me"
-                  title="Hide for me; other participants keep their history"
-                  disabled={archive.isPending}
+                  aria-label={
+                    isArchived
+                      ? "Restore conversation"
+                      : "Archive conversation for me"
+                  }
+                  title={
+                    isArchived
+                      ? "Move back to your inbox"
+                      : "Archive for me; other participants keep their history"
+                  }
+                  disabled={archive.isPending || restore.isPending}
                   onClick={() => {
+                    if (isArchived) {
+                      restore.mutate({ scope: scope.current });
+                      return;
+                    }
                     if (
                       window.confirm(
-                        "Hide this conversation for you? Other participants keep their history.",
+                        "Archive this conversation for you? Restore it anytime from Archived chats. Other participants keep their history.",
                       )
                     )
-                      archive.mutate();
+                      archive.mutate({ scope: scope.current });
                   }}
                 >
-                  <Archive size={17} />
-                  <span className="chat-action-label">Hide for me</span>
+                  {isArchived ? (
+                    <ArchiveRestore size={17} />
+                  ) : (
+                    <Archive size={17} />
+                  )}
+                  <span className="chat-action-label">
+                    {isArchived ? "Restore" : "Archive"}
+                  </span>
                 </button>
                 {ticket && admin && (
                   <select
@@ -524,7 +639,7 @@ export function MessagesPage({
                     value={ticket.status}
                     disabled={changeStatus.isPending}
                     onChange={(event) =>
-                      changeStatus.mutate(event.target.value)
+                      changeStatus.mutate({ status: event.target.value, scope: scope.current })
                     }
                   >
                     {statuses.map((status) => (
@@ -550,7 +665,7 @@ export function MessagesPage({
                     <button
                       className="btn btn-secondary chat-load"
                       disabled={loadOlder.isPending}
-                      onClick={() => loadOlder.mutate()}
+                      onClick={() => loadOlder.mutate({ scope: scope.current, cursor: cursor || messages.data?.meta?.nextCursor || "" })}
                     >
                       Load earlier messages
                     </button>
@@ -578,7 +693,12 @@ export function MessagesPage({
                         }
                       >
                         {!mine && (
-                          <strong>{message.senderId?.name || "Member"}</strong>
+                          <div className="chat-sender">
+                            <Avatar user={message.senderId} size={24} />
+                            <strong>
+                              {message.senderId?.name || "Member"}
+                            </strong>
+                          </div>
                         )}
                         <p>
                           {message.deletedAt
@@ -632,7 +752,7 @@ export function MessagesPage({
                                     "Delete this message for everyone?",
                                   )
                                 )
-                                  remove.mutate(message.publicId);
+                                  remove.mutate({ id: message.publicId, scope: scope.current });
                               }}
                             >
                               <Trash2 size={13} />
@@ -645,7 +765,7 @@ export function MessagesPage({
                 </QueryState>
               </div>
               <div className="chat-compose-area">
-                {read.isError && (
+                {read.isError && read.variables === active && (
                   <p role="alert">
                     Could not update read status.{" "}
                     <button type="button" onClick={() => read.mutate(active)}>
@@ -667,7 +787,7 @@ export function MessagesPage({
                     <button
                       className="btn btn-secondary"
                       disabled={changeStatus.isPending}
-                      onClick={() => changeStatus.mutate("OPEN")}
+                      onClick={() => changeStatus.mutate({ status: "OPEN", scope: scope.current })}
                     >
                       Reopen conversation
                     </button>
@@ -678,12 +798,12 @@ export function MessagesPage({
                     onSubmit={(event) => {
                       event.preventDefault();
                       if (
-                        !send.isPending &&
-                        !upload.isPending &&
+                        !sendingHere &&
+                        !uploadingHere &&
                         (text.trim() || attachments.length)
                       )
                         send.mutate({
-                          conversationId: active,
+                          scope: scope.current,
                           clientMessageId: draftId.current,
                           text: text.trim(),
                           attachments,
@@ -698,6 +818,7 @@ export function MessagesPage({
                             <button
                               type="button"
                               aria-label={"Remove " + item.originalName}
+                              disabled={sendingHere}
                               onClick={() => {
                                 setAttachments((values) =>
                                   values.filter(
@@ -720,7 +841,7 @@ export function MessagesPage({
                       accept="image/jpeg,image/png,image/webp,application/pdf,video/mp4"
                       onChange={(event) => {
                         const file = event.target.files?.[0];
-                        if (file) upload.mutate(file);
+                        if (file) upload.mutate({ file, scope: scope.current });
                         event.target.value = "";
                       }}
                     />
@@ -729,8 +850,8 @@ export function MessagesPage({
                       className="btn btn-secondary"
                       aria-label="Attach a file"
                       disabled={
-                        upload.isPending ||
-                        send.isPending ||
+                        uploadingHere ||
+                        sendingHere ||
                         attachments.length >= 10
                       }
                       onClick={() => fileInput.current?.click()}
@@ -742,13 +863,13 @@ export function MessagesPage({
                       value={text}
                       rows={1}
                       maxLength={5000}
-                      disabled={send.isPending}
+                      disabled={sendingHere}
                       onChange={(event) => {
                         setText(event.target.value);
                         draftId.current = crypto.randomUUID();
                       }}
                       placeholder={
-                        upload.isPending
+                        uploadingHere
                           ? "Uploading attachment…"
                           : "Write a message"
                       }
@@ -768,13 +889,13 @@ export function MessagesPage({
                       aria-label="Send message"
                       disabled={
                         (!text.trim() && !attachments.length) ||
-                        send.isPending ||
-                        upload.isPending
+                        sendingHere ||
+                        uploadingHere
                       }
                     >
                       <Send size={18} />
                       <span className="chat-action-label">
-                        {send.isPending ? "Sending…" : "Send"}
+                        {sendingHere ? "Sending…" : "Send"}
                       </span>
                     </button>
                   </form>

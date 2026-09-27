@@ -1,0 +1,7 @@
+.member-quick-actions { display: inline-flex; flex-direction: column; gap: .3rem; vertical-align: middle; }
+.member-quick-action-buttons { display: inline-flex; align-items: center; gap: .35rem; }
+.member-quick-action { display: inline-flex; align-items: center; justify-content: center; gap: .45rem; min-width: 44px; min-height: 44px; padding: .5rem; border: 1px solid var(--border); border-radius: .7rem; background: var(--surface); color: var(--text); text-decoration: none; cursor: pointer; }
+.member-quick-action:hover:not(:disabled) { background: var(--surface-hover, var(--bg)); }
+.member-quick-action:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px; }
+.member-quick-action:disabled { opacity: .5; cursor: not-allowed; }
+.member-quick-error { max-width: 220px; white-space: normal; font-size: .75rem; color: var(--danger); }

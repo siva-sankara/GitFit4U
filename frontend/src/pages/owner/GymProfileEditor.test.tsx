@@ -71,7 +71,7 @@ async function render(element: React.ReactNode) {
 async function until(check: () => boolean) {
   for (let i = 0; i < 80 && !check(); i++)
     await act(async () => {
-      await new Promise((r) => setTimeout(r, 15));
+      await new Promise((r) => { setTimeout(r, 15); });
     });
   expect(check()).toBe(true);
 }
@@ -281,13 +281,16 @@ it("lets the owner publish a membership directly from the gym profile", async ()
   );
   await until(() => host.textContent!.includes("No published memberships yet"));
   await act(async () => button("Add membership plan").click());
+  const dialog = document.querySelector<HTMLElement>('[role="dialog"]')!;
+  expect(dialog).not.toBeNull();
+  expect(host.contains(dialog)).toBe(false);
   for (const [label, value] of [
     ["Plan name", "Monthly"],
     ["Plan code", "MONTHLY"],
     ["Days", "30"],
     ["Price", "1500"],
   ]) {
-    const input = [...host.querySelectorAll("label")]
+    const input = [...dialog.querySelectorAll("label")]
       .find((el) => el.textContent?.startsWith(label))!
       .querySelector("input")!;
     await act(async () => {
@@ -299,7 +302,7 @@ it("lets the owner publish a membership directly from the gym profile", async ()
     });
   }
   await act(async () =>
-    host
+    dialog
       .querySelector("form")!
       .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })),
   );

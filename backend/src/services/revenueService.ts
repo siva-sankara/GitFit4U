@@ -4,8 +4,13 @@ import { Payment } from "../models/Commerce.js";
 import { Gym } from "../models/Gym.js";
 import { BankAccount, Settlement } from "../models/Business.js";
 import { AppError } from "../utils/AppError.js";
+import {
+  calendarDate,
+  shiftCalendarDate,
+  zonedDayStart,
+} from "../utils/gymCalendar.js";
 
-export function revenueRange(from?: unknown, to?: unknown) {
+export function revenueRange(from?: unknown, to?: unknown, timezone = "UTC") {
   const date = z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/)
@@ -15,9 +20,9 @@ export function revenueRange(from?: unknown, to?: unknown) {
         new Date(v).toISOString().startsWith(v),
       "Invalid calendar date",
     );
-  const start = from ? new Date(date.parse(from)) : undefined;
+  const start = from ? zonedDayStart(date.parse(from), timezone) : undefined;
   const end = to
-    ? new Date(new Date(date.parse(to)).getTime() + 86400000)
+    ? zonedDayStart(shiftCalendarDate(date.parse(to), 1), timezone)
     : undefined;
   if (start && end && start >= end)
     throw new AppError(
@@ -26,6 +31,60 @@ export function revenueRange(from?: unknown, to?: unknown) {
       "End date must be on or after start date.",
     );
   return { ...(start ? { $gte: start } : {}), ...(end ? { $lt: end } : {}) };
+}
+
+export function revenuePeriod(
+  period: unknown,
+  timezone: string,
+  now = new Date(),
+  from?: unknown,
+  to?: unknown,
+) {
+  const selected = z
+    .enum([
+      "all",
+      "today",
+      "7d",
+      "month",
+      "last-month",
+      "3m",
+      "6m",
+      "year",
+      "custom",
+    ])
+    .parse(period || (from || to ? "custom" : "all"));
+  const today = calendarDate(now, timezone),
+    month = today.slice(0, 7) + "-01";
+  let first: unknown = from,
+    last: unknown = to;
+  const monthShift = (count: number) => {
+    const date = new Date(month);
+    date.setUTCMonth(date.getUTCMonth() + count);
+    return date.toISOString().slice(0, 10);
+  };
+  if (selected !== "custom" && selected !== "all") {
+    last = today;
+    first =
+      selected === "today"
+        ? today
+        : selected === "7d"
+          ? shiftCalendarDate(today, -6)
+          : selected === "year"
+            ? `${today.slice(0, 4)}-01-01`
+            : selected === "3m"
+              ? monthShift(-2)
+              : selected === "6m"
+                ? monthShift(-5)
+                : selected === "last-month"
+                  ? monthShift(-1)
+                  : month;
+    if (selected === "last-month") last = shiftCalendarDate(month, -1);
+  } else if (selected === "all") {
+    first = undefined;
+    last = undefined;
+  }
+  const range = revenueRange(first, last, timezone);
+  return { range, period: selected, from: first || null, to: last || null };
 }
 
 // Refund states still represent captured receipts. Only completed refunds
@@ -115,10 +174,16 @@ export async function platformMonthlyReceipts(now = new Date()) {
 
 // Cohort accounting: membership receipts in the chosen UTC date range, less
 // processed refunds for those same receipts. Platform fees are not gym revenue.
-export async function gymRevenue(gymId: string, from?: unknown, to?: unknown) {
-  const range = revenueRange(from, to);
+export async function gymRevenue(
+  gymId: string,
+  from?: unknown,
+  to?: unknown,
+  period?: unknown,
+) {
   const gym = await Gym.findById(gymId).select("timezone").lean();
   const timezone = gym?.timezone || "Asia/Kolkata";
+  const selected = revenuePeriod(period, timezone, new Date(), from, to);
+  const range = selected.range;
   const parts = new Intl.DateTimeFormat("en", {
     timeZone: timezone,
     year: "numeric",
@@ -147,6 +212,7 @@ export async function gymRevenue(gymId: string, from?: unknown, to?: unknown) {
                 grossMinor: { $sum: "$amountMinor" },
                 refundMinor: { $sum: "$refunded" },
                 totalMinor: { $sum: "$net" },
+                transactionCount: { $sum: 1 },
                 offlineMinor: {
                   $sum: {
                     $cond: [{ $eq: ["$provider", "OFFLINE"] }, "$net", 0],
@@ -170,9 +236,22 @@ export async function gymRevenue(gymId: string, from?: unknown, to?: unknown) {
             },
           ],
           series: [
-            { $group: { _id: "$day", amountMinor: { $sum: "$net" } } },
+            {
+              $group: {
+                _id: "$day",
+                amountMinor: { $sum: "$net" },
+                transactionCount: { $sum: 1 },
+              },
+            },
             { $sort: { _id: 1 } },
-            { $project: { _id: 0, date: "$_id", amountMinor: 1 } },
+            {
+              $project: {
+                _id: 0,
+                date: "$_id",
+                amountMinor: 1,
+                transactionCount: 1,
+              },
+            },
           ],
         },
       },
@@ -196,6 +275,7 @@ export async function gymRevenue(gymId: string, from?: unknown, to?: unknown) {
     grossMinor: 0,
     refundMinor: 0,
     totalMinor: 0,
+    transactionCount: 0,
     monthMinor: 0,
     offlineMinor: 0,
     onlineMinor: 0,
@@ -208,7 +288,10 @@ export async function gymRevenue(gymId: string, from?: unknown, to?: unknown) {
     settlements,
     bankAccount,
     basis: "CAPTURED_MEMBERSHIP_COHORT_NET_OF_PROCESSED_REFUNDS",
-    dateRangeTimezone: "UTC",
+    period: selected.period,
+    from: selected.from,
+    to: selected.to,
+    dateRangeTimezone: timezone,
     groupingTimezone: timezone,
   };
 }

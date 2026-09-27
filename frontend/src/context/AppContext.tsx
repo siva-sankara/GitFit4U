@@ -13,6 +13,7 @@ import {
 } from "../services/apiClient";
 import type { Role } from "../types";
 import { useSession } from "../services/session";
+import { safeReturnTo } from "../services/authRedirect";
 import {
   savedTheme,
   resolveTheme,
@@ -22,6 +23,7 @@ import {
 import {
   createNotificationTracker,
   playNotificationSound,
+  setNotificationSoundEnabled,
   type InboxNotification,
 } from "../services/notificationAlerts";
 interface AppContextValue {
@@ -34,6 +36,8 @@ interface AppContextValue {
   favorites: string[];
   toggleFavorite: (gymId: string) => void;
   toast: string | null;
+  toastActionUrl: string | undefined;
+  dismissToast: () => void;
   notify: (message: string) => void;
 }
 const AppContext = createContext<AppContextValue | null>(null);
@@ -46,6 +50,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         window.matchMedia?.("(prefers-color-scheme: dark)").matches || false,
     ),
     [toast, setToast] = useState<string | null>(null),
+    [toastActionUrl, setToastActionUrl] = useState<string | undefined>(),
     [authenticated, setAuthenticated] = useState(!!getAccessToken());
   const session = useSession({ publicPage: true });
   const theme = resolveTheme(themePreference, systemDark);
@@ -73,7 +78,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         body: JSON.stringify({ preferences: { theme: preference } }),
       }),
     onError: (error) =>
-      setToast(
+      notify(
         `Theme changed on this device. Account preference could not be saved: ${error.message}`,
       ),
   });
@@ -110,12 +115,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
     enabled: authenticated,
     queryFn: () => apiRequest<ApiEnvelope<any[]>>("/api/v1/users/me/favorites"),
   });
-  const notify = (message: string) => setToast(message);
+  const notify = (message: string) => {
+    setToastActionUrl(undefined);
+    setToast(message);
+  };
+  const dismissToast = () => {
+    setToast(null);
+    setToastActionUrl(undefined);
+  };
   useEffect(() => {
-    if (!toast) return;
+    // Actionable alerts remain available for keyboard and assistive-technology
+    // users until opened or dismissed; informational notices still expire.
+    if (!toast || toastActionUrl) return;
     const timer = window.setTimeout(() => setToast(null), 4000);
     return () => clearTimeout(timer);
-  }, [toast]);
+  }, [toast, toastActionUrl]);
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
   }, [theme]);
@@ -124,6 +138,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const detail = (event as CustomEvent).detail;
       setAuthenticated(!!detail.token);
       if (detail.changedSession) {
+        dismissToast();
         client.clear();
       }
     };
@@ -133,15 +148,59 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!authenticated) return;
     let disposed = false,
-      unsubscribe = () => {};
+      unsubscribe = () => {},
+      stopRealtime = () => {};
     let fetching = false;
     const tracker = createNotificationTracker((alert) => {
       if (disposed || !getAccessToken()) return;
       setToast(alert.title);
+      setToastActionUrl(safeReturnTo(alert.actionUrl));
       void client.invalidateQueries({ queryKey: ["notifications"] });
       if (document.visibilityState === "visible" && document.hasFocus())
         void playNotificationSound();
     });
+    const receive = async (alert: { id?: string }) => {
+      if (!alert.id || !/^[a-f\d]{24}$/i.test(alert.id) || disposed) return;
+      try {
+        const result = await apiRequest<ApiEnvelope<InboxNotification>>(
+          "/api/v1/users/me/notifications/" + alert.id,
+        );
+        if (!disposed && !result.data.readAt)
+          tracker.receive({
+            id: result.data._id,
+            title: result.data.title,
+            message: result.data.message,
+            actionUrl: result.data.actionUrl,
+          });
+      } catch {
+        /* Removed/read notifications and expired sessions stay silent. */
+      }
+    };
+    void import("socket.io-client")
+      .then(({ io }) => {
+        if (disposed) return;
+        const socket = io(
+          (import.meta.env.VITE_API_URL || window.location.origin).replace(
+            /\/$/,
+            "",
+          ),
+          {
+            auth: (done) => done({ token: getAccessToken() }),
+            transports: ["websocket", "polling"],
+          },
+        );
+        socket.on("notification.created", receive);
+        const reconnect = () => {
+          socket.disconnect();
+          if (getAccessToken()) socket.connect();
+        };
+        window.addEventListener("gfu-auth", reconnect);
+        stopRealtime = () => {
+          window.removeEventListener("gfu-auth", reconnect);
+          socket.disconnect();
+        };
+      })
+      .catch(() => undefined);
     const refreshInbox = async () => {
       if (
         disposed ||
@@ -179,7 +238,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
     void import("../services/firebasePush")
       .then(async (push) => {
-        const stop = await push.listenForPush(tracker.receive);
+        const stop = await push.listenForPush(receive);
         if (disposed) stop();
         else unsubscribe = stop;
         if (!disposed) sync();
@@ -195,12 +254,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
       disposed = true;
       clearInterval(inboxTimer);
       unsubscribe();
+      stopRealtime();
       window.removeEventListener("focus", refreshInbox);
       document.removeEventListener("visibilitychange", refreshInbox);
       window.removeEventListener("focus", sync);
       window.removeEventListener("gfu-push-change", sync);
     };
-  }, [authenticated, client]);
+  }, [authenticated, client, session.data?.data.user._id]);
+  useEffect(() => {
+    setNotificationSoundEnabled(
+      Boolean(
+        authenticated && session.data?.data.user.notificationPreferences?.sound,
+      ),
+    );
+  }, [
+    authenticated,
+    session.data?.data.user._id,
+    session.data?.data.user.notificationPreferences?.sound,
+  ]);
   const ids = (favorites.data?.data || []).flatMap((row) =>
     row.gymId?.publicId ? [row.gymId.publicId] : [],
   );
@@ -231,6 +302,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
           if (!favorite.isPending) favorite.mutate(gymId);
         },
         toast,
+        toastActionUrl,
+        dismissToast,
         notify,
       }}
     >

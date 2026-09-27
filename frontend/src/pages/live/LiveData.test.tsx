@@ -34,7 +34,7 @@ async function render(element: React.ReactNode) {
 }
 async function flush() {
   await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 20));
+      await new Promise((resolve) => { setTimeout(resolve, 20); });
   });
 }
 it("renders accessible status labels with distinct success, pending and expired colors", async () => {

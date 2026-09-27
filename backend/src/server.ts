@@ -10,10 +10,10 @@ import { startMaintenance } from "./services/maintenanceService.js";
 async function start() {
   await connectDatabase();
   const stopMaintenance = startMaintenance();
-  const stopPush = startPushDelivery();
   const server = createServer(app);
   const io = createRealtimeGateway(server);
   app.set("io", io);
+  const stopPush = startPushDelivery(io);
   server.listen(env.PORT, () => {
     logger.info(
       { port: env.PORT, environment: env.NODE_ENV },

@@ -1,27 +1,11 @@
 # Media configuration and gym logos
 
-The previous implementation only read `OBJECT_STORAGE_*` values and generated S3 PUT links. Cloudinary variables were not read at all, so setting Cloudinary credentials could not make that upload path work.
+New uploads use **S3 only** through the existing authenticated `/api/v1/uploads` initiation, byte-upload and completion endpoints. Cloudinary configuration never selects a provider for new uploads. Existing completed Cloudinary attachments remain readable/deletable from their saved metadata; unfinished legacy uploads must be restarted.
 
-The existing `/api/v1/uploads` API now supports either provider. Configure server-only variables:
+See [Social profiles and S3 media](social-profile-and-s3.md) for server-only environment variable names, ownership checks, image decoding/metadata stripping, real thumbnails, private presigned downloads and retention behavior.
 
-```dotenv
-MEDIA_STORAGE_PROVIDER=cloudinary
-CLOUDINARY_CLOUD_NAME=your-cloud-name
-CLOUDINARY_API_KEY=your-api-key
-CLOUDINARY_API_SECRET=your-api-secret
-CLOUDINARY_FOLDER=getfit4u
-```
+Keep the bucket private. The browser sends bytes to the application API, not directly to S3, so API-origin/CORS configuration is relevant; browser-to-bucket PUT CORS is not required by this flow. The legacy `test:storage` diagnostic includes historical bucket-CORS checks and must not be treated as the current upload acceptance test.
 
-Keep these values out of frontend `.env` files. Signed Cloudinary uploads do not need an unsigned upload preset. To keep S3, set `MEDIA_STORAGE_PROVIDER=s3` with the existing `OBJECT_STORAGE_ENDPOINT`, `OBJECT_STORAGE_BUCKET`, `OBJECT_STORAGE_REGION`, `OBJECT_STORAGE_ACCESS_KEY`, and `OBJECT_STORAGE_SECRET_KEY`. If no provider is selected, configured S3 credentials keep precedence; otherwise a configured Cloudinary cloud is selected.
+From backend, `npx tsx src/scripts/verify-isolated-membership.ts --run-isolated --verify-media` verifies real generated image upload, thumbnail, persistence, owner/public reads, replacement, removal and cross-tenant rejection using an isolated database. It removes only its own generated media and temporary database. Proxy limits must permit the existing allowed video sizes/timeouts; logos and avatars accept still JPG/PNG/WebP up to 5 MB.
 
-The browser initiates an upload with name, MIME type, size and purpose, sends binary bytes to the authenticated API URL returned by initiation, then completes it. The backend checks ownership, gym scope, extension, declared size and file signature before it contacts the provider. The API uses raw binary parsing for this route; it constructs signed multipart data for Cloudinary on the server. Proxy request-size and request-timeout limits must permit 50 MB and at least 120 seconds for gallery videos. Gym logos accept JPG/PNG/WebP up to 5 MB. Gallery images allow 10 MB; MP4 videos allow 50 MB.
-
-Attachment records retain provider, object key, provider public ID, secure URL and image dimensions where returned. Gym records persist `logoAttachmentId`, and responses resolve the current logo URL. S3 read URLs are generated on read; expired links are not stored as logo fields. Replacing/removing a logo updates the gym reference and retains the old attachment for recovery; authenticated attachment deletion is refused while the file remains referenced by a gym.
-
-Gym profile, gallery and avatar assets use public delivery. Message, document and progress uploads use Cloudinary's authenticated delivery type with signed five-minute download links, or the existing private S3 bucket with presigned reads. Access checks run before download links are returned. Keep the S3 bucket private.
-
-Provider configuration errors, rejected credentials, invalid image bytes and request failures produce distinct safe user-facing errors. Server secrets and provider stack traces are never returned. Real S3 image upload, persistence, owner/public download, replacement, removal and cross-gym rejection passed the isolated verification, with both generated objects cleaned up. Repeat these checks after changing provider or deployment configuration; a live Cloudinary account was not tested in this session.
-
-The legacy `npm run test:storage` command remains an S3-only diagnostic, including its historical bucket-CORS checks. It does not validate Cloudinary. Current browser uploads reach the authenticated application API, so browser-to-bucket PUT CORS is no longer required for new uploads. Do not treat that legacy CORS result as a requirement for the new upload path.
-
-Provider API references: https://cloudinary.com/documentation/image_upload_api_reference and https://cloudinary.com/documentation/upload_images#generating_authentication_signatures
+The latest execution evidence and configuration blockers are recorded in [Enhancement verification](ENHANCEMENT_VERIFICATION.md).

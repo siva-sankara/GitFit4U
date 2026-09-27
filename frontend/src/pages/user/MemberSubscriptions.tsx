@@ -41,6 +41,7 @@ const statuses = [
   "GRACE",
   "EXPIRED",
   "CANCELLED",
+  "DEACTIVATED",
 ];
 const day = (value?: string) =>
   value && Number.isFinite(Date.parse(value))
@@ -493,6 +494,7 @@ export function MemberSubscriptions() {
                     period.
                   </p>
                 )}
+                {subscription.status === "DEACTIVATED" && <p className="subscription-payment-note">Gym access has been deactivated. Contact your gym to request reactivation of any remaining paid validity.</p>}
                 {subscription.status === "ACTIVE" && !started && (
                   <p className="subscription-payment-note">
                     Your membership starts on {day(subscription.startsAt)}. Your

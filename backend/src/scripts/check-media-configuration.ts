@@ -23,13 +23,7 @@ try {
       provider,
       configured: false,
       required:
-        provider === "cloudinary"
-          ? [
-              "CLOUDINARY_CLOUD_NAME",
-              "CLOUDINARY_API_KEY",
-              "CLOUDINARY_API_SECRET",
-            ]
-          : [
+        [
               "OBJECT_STORAGE_ENDPOINT",
               "OBJECT_STORAGE_ACCESS_KEY",
               "OBJECT_STORAGE_SECRET_KEY",

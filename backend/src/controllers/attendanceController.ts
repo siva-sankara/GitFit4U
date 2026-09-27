@@ -42,7 +42,7 @@ export async function getGymQr(req: Request, res: Response) {
         status: "ACTIVE",
       },
     },
-    { upsert: true, new: true },
+    { upsert: true, returnDocument: "after" },
   );
   res.json({
     success: true,
@@ -63,7 +63,7 @@ export async function rotateGymQr(req: Request, res: Response) {
   const identity = await GymScanner.findOneAndUpdate(
     { gymId: req.auth!.gymId, kind: "GYM_IDENTITY" },
     { $inc: { secretVersion: 1 }, $set: { status: "ACTIVE" } },
-    { new: true },
+    { returnDocument: "after" },
   );
   if (!identity)
     throw new AppError(

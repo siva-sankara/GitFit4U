@@ -89,12 +89,12 @@ describe("atomic password recovery", () => {
         expiresAt: { $gt: expect.any(Date) },
       },
       { $set: { consumedAt: expect.any(Date) } },
-      { session, new: true },
+      { session, returnDocument: "after" },
     );
     expect(mocks.userLock).toHaveBeenCalledWith(
       { _id: "user", status: "ACTIVE" },
       { $inc: { version: 1 } },
-      { session, new: true },
+      { session, returnDocument: "after" },
     );
     expect(mocks.identity).toHaveBeenCalledWith(
       { userId: "user", provider: "PASSWORD" },
@@ -105,7 +105,7 @@ describe("atomic password recovery", () => {
           verifiedAt: expect.any(Date),
         },
       },
-      { session, upsert: true, new: true, runValidators: true },
+      { session, upsert: true, returnDocument: "after", runValidators: true },
     );
     expect(mocks.revokeGrants).toHaveBeenCalledWith(
       { userId: "user", consumedAt: null },
@@ -211,7 +211,7 @@ describe("recovery grant issuance and administrative identity edits", () => {
     expect(mocks.userLock).toHaveBeenCalledWith(
       { phone: "+919876543210", status: "ACTIVE" },
       { $inc: { version: 1 } },
-      { session, new: true },
+      { session, returnDocument: "after" },
     );
     const issuedToken = res.json.mock.calls[0][0].data.resetToken;
     expect(mocks.createGrant).toHaveBeenCalledWith(

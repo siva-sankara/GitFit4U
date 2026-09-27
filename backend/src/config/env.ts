@@ -44,6 +44,7 @@ const schema = z
     OBJECT_STORAGE_BUCKET: z.string().default("getfit4u-media"),
     OBJECT_STORAGE_ACCESS_KEY: z.string().optional(),
     OBJECT_STORAGE_SECRET_KEY: z.string().optional(),
+    OBJECT_STORAGE_SESSION_TOKEN: z.string().optional(),
     OBJECT_STORAGE_REGION: z.string().default("ap-south-1"),
     MEDIA_STORAGE_PROVIDER: z.preprocess(
       (v) => v || undefined,
@@ -88,5 +89,16 @@ const schema = z
     }
   });
 
-export const env = schema.parse(process.env);
+// Existing names retain precedence; standard AWS names are supported server-side.
+const awsRegion = process.env.OBJECT_STORAGE_REGION || process.env.AWS_REGION;
+export const env = schema.parse({
+  ...process.env,
+  OBJECT_STORAGE_REGION: awsRegion,
+  OBJECT_STORAGE_BUCKET: process.env.OBJECT_STORAGE_BUCKET || process.env.AWS_S3_BUCKET_NAME,
+  OBJECT_STORAGE_ACCESS_KEY: process.env.OBJECT_STORAGE_ACCESS_KEY || process.env.AWS_ACCESS_KEY_ID,
+  OBJECT_STORAGE_SECRET_KEY: process.env.OBJECT_STORAGE_SECRET_KEY || process.env.AWS_SECRET_ACCESS_KEY,
+  OBJECT_STORAGE_SESSION_TOKEN: process.env.OBJECT_STORAGE_SESSION_TOKEN || process.env.AWS_SESSION_TOKEN,
+  OBJECT_STORAGE_ENDPOINT: process.env.OBJECT_STORAGE_ENDPOINT ||
+    (process.env.AWS_S3_BUCKET_NAME ? `https://s3.${awsRegion || "ap-south-1"}.amazonaws.com` : undefined),
+});
 export const isProduction = env.NODE_ENV === "production";

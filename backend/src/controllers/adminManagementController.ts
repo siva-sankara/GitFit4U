@@ -272,7 +272,7 @@ export async function editGym(req: Request, res: Response) {
   const gym = await Gym.findOneAndUpdate(
     { publicId: req.params.id, deletedAt: null },
     { $set: update },
-    { new: true, runValidators: true },
+    { returnDocument: "after", runValidators: true },
   );
   if (!gym) throw new AppError(404, "GYM_NOT_FOUND", "Gym not found.");
   await writeAudit(req, {
@@ -298,7 +298,7 @@ export async function savePlan(req: Request, res: Response) {
     plan = await MembershipPlan.findOneAndUpdate(
       { publicId: req.params.id },
       { $set: body },
-      { new: true, runValidators: true },
+      { returnDocument: "after", runValidators: true },
     );
   else {
     const gym = await Gym.findOne({
@@ -339,6 +339,7 @@ export async function membershipAction(req: Request, res: Response) {
   const data = await transitionMembership({
     publicId: String(req.params.id),
     actorId: req.auth!.userId,
+    actorRole: req.auth!.role,
     ...body,
   });
   await writeAudit(req, {
@@ -360,7 +361,7 @@ export async function updateMember(req: Request, res: Response) {
   const data = await MemberProfile.findOneAndUpdate(
     { publicId: req.params.id, status: { $ne: "JOIN_REQUESTED" } },
     { $set: body },
-    { new: true, runValidators: true },
+    { returnDocument: "after", runValidators: true },
   );
   if (!data) {
     if (
@@ -388,7 +389,7 @@ export async function archiveNotification(req: Request, res: Response) {
   const data = await Notification.findByIdAndUpdate(
     req.params.id,
     { $set: { archivedAt: new Date(), pushStatus: "SKIPPED" } },
-    { new: true },
+    { returnDocument: "after" },
   );
   if (!data)
     throw new AppError(
@@ -535,7 +536,7 @@ export async function settings(req: Request, res: Response) {
   const data = await PlatformSettings.findOneAndUpdate(
     { key: "platform" },
     { $set: { values, updatedBy: req.auth!.userId } },
-    { upsert: true, new: true, runValidators: true },
+    { upsert: true, returnDocument: "after", runValidators: true },
   );
   await writeAudit(req, {
     action: "platform.settings.updated",

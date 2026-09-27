@@ -1,0 +1,4 @@
+.review-photo-grid { display: flex; flex-wrap: wrap; gap: .75rem; margin-block: .75rem; }
+.review-photo-grid figure { display: grid; gap: .35rem; margin: 0; }
+.review-photo-grid img { display: block; object-fit: cover; border-radius: .65rem; border: 1px solid var(--border); }
+.member-identity-inline { display: inline-flex; align-items: center; gap: .55rem; }

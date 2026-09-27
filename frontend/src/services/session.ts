@@ -18,7 +18,9 @@ export interface SessionData {
     email?: string;
     phone?: string;
     avatarUrl?: string;
+    avatarThumbnailUrl?: string;
     preferences?: { theme?: "system" | "light" | "dark" };
+    notificationPreferences?: { sound?: boolean; push?: boolean; categories?: string[] };
     roles: ActiveRole[];
     activeRole: ActiveRole;
   };
@@ -73,6 +75,7 @@ export function useSession({
     retry: false,
     retryOnMount: false,
     staleTime: 60_000,
+    refetchInterval: 240_000,
     // Layouts and route guards share this result instead of checking on every navigation.
     refetchOnMount: false,
     refetchOnWindowFocus: true,

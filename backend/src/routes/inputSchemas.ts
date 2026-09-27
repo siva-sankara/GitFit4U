@@ -41,10 +41,10 @@ export const gymInput = z.object({
   amenities: z.array(text).max(30).optional(),
   contact: z
     .object({
-      phone: z.string().max(20).optional(),
-      email: z.string().email().optional(),
-      whatsapp: z.string().max(20).optional(),
-      website: z.string().url().optional(),
+      phone: z.string().max(20).nullable().optional(),
+      email: z.string().email().nullable().optional(),
+      whatsapp: z.string().max(20).nullable().optional(),
+      website: z.string().url().nullable().optional(),
     })
     .optional(),
   address: z
@@ -126,14 +126,21 @@ export const classInput = z
       "CARDIO",
       "OTHER",
     ]),
-    trainerId: id.optional(),
+    trainerId: z.preprocess(
+      (value) => (value === "" ? undefined : value),
+      id.nullable().optional(),
+    ),
     startsAt: z.coerce.date(),
     endsAt: z.coerce.date(),
     capacity: z.number().int().min(1).max(1000),
-    room: text.optional(),
+    room: z.string().trim().max(160).optional(),
+    description: z.string().trim().max(3000).optional(),
     status: z.enum(["SCHEDULED", "CANCELLED", "COMPLETED"]).optional(),
   })
-  .refine((v) => v.endsAt > v.startsAt, "Class end must follow start");
+  .refine((v) => v.endsAt > v.startsAt, {
+    message: "End time must be later than start time.",
+    path: ["endsAt"],
+  });
 export const trainerInput = z.object({
   name: text,
   email: z.string().trim().email(),
@@ -150,32 +157,7 @@ export const campaignInput = z.object({
   message: z.string().min(1).max(3000),
   templateId: text.optional(),
 });
-export const offerInput = z
-  .object({
-    name: text,
-    description: z.string().max(3000).optional(),
-    type: z.enum([
-      "DISCOUNT",
-      "NEW_MEMBER",
-      "FESTIVAL",
-      "REFERRAL",
-      "FIRST_MONTH",
-    ]),
-    startsAt: z.coerce.date(),
-    endsAt: z.coerce.date(),
-    discount: z.object({ amountMinor: money }),
-    status: z.enum(["DRAFT", "ACTIVE", "PAUSED", "ARCHIVED"]).optional(),
-  })
-  .refine((v) => v.endsAt > v.startsAt, "End must follow start");
-export const adInput = z
-  .object({
-    name: text,
-    description: z.string().max(3000).optional(),
-    startsAt: z.coerce.date(),
-    endsAt: z.coerce.date(),
-    budgetMinor: money,
-  })
-  .refine((v) => v.endsAt > v.startsAt, "End must follow start");
+export { offerInput, adInput } from "./promotionSchemas.js";
 export const platformInput = z.object({
   code: text,
   name: text,
@@ -211,6 +193,8 @@ export const progressInput = z.object({
 });
 export const reviewInput = z.object({
   rating: z.number().int().min(1).max(5),
-  title: text.optional(),
+  title: z.string().trim().max(160).optional(),
   body: z.string().max(3000).optional(),
-});
+  attachmentIds: z.array(id).max(8).refine(value => new Set(value).size === value.length, "Choose each image only once.").optional(),
+  removeLegacyPhotos: z.boolean().optional(),
+}).strict();

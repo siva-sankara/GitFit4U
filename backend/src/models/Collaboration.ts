@@ -76,9 +76,11 @@ const messageSchema = new Schema(
 );
 messageSchema.index({ conversationId: 1, createdAt: -1 });
 messageSchema.index({ senderId: 1, clientMessageId: 1 }, { unique: true });
+messageSchema.index({ "attachments.key": 1 });
 
 const deviceTokenSchema = new Schema(
   {
+    deviceId: { type: String, maxlength: 128, index: true },
     sessionId: { type: String, index: true },
     userId: {
       type: Schema.Types.ObjectId,
@@ -100,6 +102,7 @@ const deviceTokenSchema = new Schema(
   { timestamps: true },
 );
 deviceTokenSchema.index({ userId: 1, revokedAt: 1 });
+deviceTokenSchema.index({ userId: 1, sessionId: 1, revokedAt: 1 });
 
 export const Conversation =
   models.Conversation || model("Conversation", conversationSchema);

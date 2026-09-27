@@ -134,7 +134,7 @@ async function render(path: string, back = false) {
 async function until(check: () => boolean) {
   for (let n = 0; n < 80 && !check(); n++)
     await act(async () => {
-      await new Promise((r) => setTimeout(r, 15));
+      await new Promise((r) => { setTimeout(r, 15); });
     });
   expect(check()).toBe(true);
 }

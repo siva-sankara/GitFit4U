@@ -115,7 +115,7 @@ export async function reserveRefund(req: Request) {
           status: { $in: ["CAPTURED", "PARTIALLY_REFUNDED", "REFUND_PENDING"] },
         },
         { $inc: { __v: 1 } },
-        { new: true, session },
+        { returnDocument: "after", session },
       );
       if (!payment)
         throw new AppError(
@@ -236,7 +236,7 @@ export async function reconcileRefundEvent(event: string, entity: any) {
         },
       },
       { $inc: { __v: 1 } },
-      { new: true, session },
+      { returnDocument: "after", session },
     );
     if (!payment)
       throw new AppError(
@@ -371,7 +371,7 @@ export async function submitRefund(req: Request) {
         const payment = await Payment.findOneAndUpdate(
           { _id: result.payment._id },
           { $inc: { __v: 1 } },
-          { new: true, session },
+          { returnDocument: "after", session },
         );
         await Refund.updateOne(
           { _id: result.refund._id, status: "PROCESSING" },
@@ -397,7 +397,7 @@ export async function submitRefund(req: Request) {
             "Provider outcome pending. Await its webhook or reconcile the provider refund before retrying.",
         },
       },
-      { new: true },
+      { returnDocument: "after" },
     );
     return refund || (await Refund.findById(result.refund._id));
   }

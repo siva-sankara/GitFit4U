@@ -1,7 +1,9 @@
 import type { Request, Response } from "express";
 import mongoose from "mongoose";
 import { nanoid } from "nanoid";
+import { redeemPaymentOffer } from "../services/promotionService.js";
 import { env } from "../config/env.js";
+import { platformRenewalQuote, activatePlatformRenewal } from "../services/platformRenewalService.js";
 import {
   Payment,
   PlanQuote,
@@ -19,7 +21,8 @@ import {
 import { sha256 } from "../utils/crypto.js";
 import { AppError } from "../utils/AppError.js";
 import { paymentProvider } from "../integrations/payments/index.js";
-import { Refund, Invoice } from "../models/Business.js";
+import { Refund } from "../models/Business.js";
+import { ensurePaymentInvoice } from "../services/invoiceService.js";
 import {
   submitRefund,
   reconcileRefundEvent,
@@ -36,6 +39,11 @@ import {
 } from "../services/registrationService.js";
 
 export async function createPlatformQuote(req: Request, res: Response) {
+  if (req.body.renewal === true) {
+    if (req.auth?.role !== "GYM_OWNER" || !req.auth.gymId) throw new AppError(403, "RENEWAL_FORBIDDEN", "Select a gym you own before renewing.");
+    if (req.body.expectedGymId && req.body.expectedGymId !== req.auth.gymId) throw new AppError(409, "GYM_CONTEXT_CHANGED", "Your selected gym changed. Confirm the intended gym before renewing.");
+    return res.status(201).json({ success: true, data: await platformRenewalQuote(req.auth.userId, req.auth.gymId, req.body.planId) });
+  }
   const quote = await mongoose.connection.transaction(async (session) => {
     const registration = await GymRegistration.findOne({
       publicId: req.body.registrationId,
@@ -423,7 +431,7 @@ async function processProviderEvent(
               },
             },
             { $set: { status: "CAPTURED" } },
-            { session: dbSession, new: true },
+            { session: dbSession, returnDocument: "after" },
           );
           if (!claimed) return;
           payment = claimed;
@@ -433,7 +441,14 @@ async function processProviderEvent(
           payment.methodCategory = paymentEntity?.method;
           await payment.save({ session: dbSession });
 
+          await redeemPaymentOffer(payment, dbSession);
+
           if (quote.planSnapshot.type === "PLATFORM") {
+            if (quote.planSnapshot.renewal === true) {
+              const renewed = await activatePlatformRenewal(payment, quote, dbSession);
+              await ensurePaymentInvoice(payment, { session: dbSession, quote, subscription: renewed });
+              return;
+            }
             const registration = await GymRegistration.findOne({
               publicId: quote.planSnapshot.registrationId,
               ownerId: payment.payerId,
@@ -490,6 +505,7 @@ async function processProviderEvent(
               subscription,
               dbSession,
             );
+            await ensurePaymentInvoice(payment, { session: dbSession, quote, subscription });
             await SubscriptionEvent.create(
               [
                 {
@@ -574,43 +590,9 @@ async function processProviderEvent(
             ],
             { session: dbSession },
           );
-          const [gym, customer] = await Promise.all([
-            Gym.findById(quote.gymId).session(dbSession),
-            User.findById(payment.payerId).session(dbSession),
-          ]);
-          await Invoice.create(
-            [
-              {
-                publicId: nanoid(20),
-                number: `GFU-${payment.publicId}`,
-                gymId: quote.gymId,
-                userId: payment.payerId,
-                subscriptionId: subscription._id,
-                paymentId: payment._id,
-                supplierSnapshot: { name: gym?.name, address: gym?.address },
-                customerSnapshot: {
-                  name: customer?.name,
-                  email: customer?.email,
-                },
-                lines: [
-                  {
-                    description: quote.planSnapshot.name,
-                    quantity: 1,
-                    unitPriceMinor: quote.subtotalMinor - quote.discountMinor,
-                    taxMinor: quote.taxMinor,
-                    totalMinor: quote.totalMinor,
-                  },
-                ],
-                subtotalMinor: quote.subtotalMinor - quote.discountMinor,
-                taxMinor: quote.taxMinor,
-                totalMinor: quote.totalMinor,
-                currency: payment.currency,
-              },
-            ],
-            { session: dbSession },
-          );
+          await ensurePaymentInvoice(payment, { session: dbSession, quote, subscription });
           await emitDomainEvent({
-            event: "membership.activated",
+            event: previous ? "membership.renewed" : "membership.activated",
             userId: payment.payerId,
             gymId: quote.gymId,
             entityId: subscription.publicId,

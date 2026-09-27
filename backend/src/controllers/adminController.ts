@@ -264,11 +264,7 @@ export async function healthOverview(_req: Request, res: Response) {
       storage: {
         provider: storageProvider(),
         status: (
-          storageProvider() === "cloudinary"
-            ? env.CLOUDINARY_CLOUD_NAME &&
-              env.CLOUDINARY_API_KEY &&
-              env.CLOUDINARY_API_SECRET
-            : env.OBJECT_STORAGE_ENDPOINT &&
+          env.OBJECT_STORAGE_ENDPOINT &&
               env.OBJECT_STORAGE_ACCESS_KEY &&
               env.OBJECT_STORAGE_SECRET_KEY
         )

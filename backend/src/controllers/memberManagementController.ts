@@ -1,4 +1,5 @@
 import type { Request, Response } from "express";
+import { validatedImageAttachment } from "../services/userMediaService.js";
 import mongoose from "mongoose";
 import { nanoid } from "nanoid";
 import { MemberProfile } from "../models/Member.js";
@@ -16,8 +17,14 @@ import { TRAINER_DEFAULT_PERMISSIONS } from "../constants/domain.js";
 import { normalizePhone } from "../services/otpService.js";
 import { emitDomainEvent } from "../services/domainEventService.js";
 import { writeAudit } from "../services/auditService.js";
-import { applyMembershipTransition } from "../services/membershipLifecycleService.js";
+import { ensurePaymentInvoice } from "../services/invoiceService.js";
+import { transitionMemberAccess } from "../services/membershipLifecycleService.js";
 import { AppError } from "../utils/AppError.js";
+import {
+  calendarDate,
+  shiftCalendarDate,
+  zonedDayStart,
+} from "../utils/gymCalendar.js";
 import {
   ownerMemberCreateInput,
   ownerMemberUpdateInput,
@@ -32,6 +39,7 @@ export function offlinePlanQuote(
     durationDays: number;
   },
   startsAt: Date,
+  timezone?: string,
 ) {
   const discounted =
     plan.priceMinor - Math.min(plan.discountMinor || 0, plan.priceMinor);
@@ -39,23 +47,24 @@ export function offlinePlanQuote(
     totalMinor:
       discounted +
       Math.round((discounted * (plan.taxRateBasisPoints || 0)) / 10000),
-    endsAt: new Date(startsAt.getTime() + plan.durationDays * 86_400_000),
+    endsAt: timezone
+      ? zonedDayStart(
+          shiftCalendarDate(
+            calendarDate(startsAt, timezone),
+            plan.durationDays,
+          ),
+          timezone,
+        )
+      : new Date(startsAt.getTime() + plan.durationDays * 86_400_000),
   };
+}
+export function memberInputDate(value: string | Date, timezone: string) {
+  return typeof value === "string" ? zonedDayStart(value, timezone) : value;
 }
 export async function createMemberWithMembership(req: Request, res: Response) {
   const body = ownerMemberCreateInput.parse(req.body),
     gymId = req.auth!.gymId!;
   const now = new Date();
-  if (
-    body.startsAt.getTime() > now.getTime() + 365 * 86_400_000 ||
-    body.startsAt.getTime() < now.getTime() - 365 * 86_400_000 ||
-    body.payment.paidAt > now
-  )
-    throw new AppError(
-      422,
-      "INVALID_MEMBERSHIP_DATE",
-      "Choose a start date within one year and a payment date that is not in the future.",
-    );
   const result = await mongoose.connection.transaction(async (session) => {
     const gym = await Gym.findOne({ _id: gymId, status: "ACTIVE" }).session(
       session,
@@ -65,6 +74,26 @@ export async function createMemberWithMembership(req: Request, res: Response) {
         409,
         "GYM_NOT_ACTIVE",
         "Activate this gym before creating memberships.",
+      );
+    const timezone = gym.timezone || "Asia/Kolkata";
+    const startsAt = memberInputDate(body.startsAt, timezone);
+    const paidAt = memberInputDate(body.payment.paidAt, timezone);
+    if (
+      Math.abs(startsAt.getTime() - now.getTime()) > 365 * 86_400_000 ||
+      paidAt > now
+    )
+      throw new AppError(
+        422,
+        "INVALID_MEMBERSHIP_DATE",
+        "Choose a start date within one year and a payment date that is not in the future.",
+      );
+    if (body.avatarAttachmentId)
+      await validatedImageAttachment(
+        body.avatarAttachmentId,
+        req.auth!.userId,
+        "MEMBER_AVATAR",
+        gymId,
+        session,
       );
     const plan = await MembershipPlan.findOne({
       gymId,
@@ -77,7 +106,11 @@ export async function createMemberWithMembership(req: Request, res: Response) {
         "PLAN_NOT_AVAILABLE",
         "Select an active membership plan belonging to this gym.",
       );
-    const { totalMinor, endsAt } = offlinePlanQuote(plan, body.startsAt);
+    const { totalMinor, endsAt } = offlinePlanQuote(
+      plan,
+      startsAt,
+      typeof body.startsAt === "string" ? timezone : undefined,
+    );
     if (body.payment.amountMinor !== totalMinor)
       throw new AppError(
         409,
@@ -148,7 +181,19 @@ export async function createMemberWithMembership(req: Request, res: Response) {
     const details = {
       status: "ACTIVE",
       directAccess: false,
-      contact: { name: body.name, email, phone, avatarUrl: body.avatarUrl },
+      contact: {
+        name: body.name,
+        email,
+        phone,
+        avatarAttachmentId:
+          body.avatarAttachmentId === undefined
+            ? member?.contact?.avatarAttachmentId
+            : body.avatarAttachmentId,
+        avatarUrl:
+          body.avatarAttachmentId === undefined
+            ? member?.contact?.avatarUrl
+            : undefined,
+      },
       fitnessGoal: body.fitnessGoal,
       emergencyContact: body.emergencyContact,
       medicalNotes: body.medicalNotes,
@@ -178,7 +223,7 @@ export async function createMemberWithMembership(req: Request, res: Response) {
           gymId,
           memberProfileId: member._id,
           status: "ACTIVE",
-          startsAt: body.startsAt,
+          startsAt,
           endsAt,
           renewalAt: endsAt,
           planSnapshot: {
@@ -211,7 +256,7 @@ export async function createMemberWithMembership(req: Request, res: Response) {
           provider: "OFFLINE",
           methodCategory: body.payment.method,
           status: "CAPTURED",
-          capturedAt: body.payment.paidAt,
+          capturedAt: paidAt,
           metadata: {
             collectorId: req.auth!.userId,
             reference: body.payment.reference,
@@ -225,6 +270,7 @@ export async function createMemberWithMembership(req: Request, res: Response) {
     await subscription.save({ session });
     member.currentSubscriptionId = subscription._id;
     await member.save({ session });
+    await ensurePaymentInvoice(payment, { session, subscription });
     await SubscriptionEvent.create(
       [
         {
@@ -298,7 +344,30 @@ export async function updateMember(req: Request, res: Response) {
         "Select an active trainer from this gym.",
       );
     const previousTrainer = member.assignedTrainerId?.toString();
-    for (const key of ["name", "email", "phone", "avatarUrl"] as const)
+    if (
+      body.assignedTrainerId !== undefined &&
+      (body.assignedTrainerId || undefined) !== previousTrainer
+    )
+      member.trainerAssignedAt = body.assignedTrainerId
+        ? new Date()
+        : undefined;
+    if (body.avatarAttachmentId !== undefined) {
+      if (
+        body.avatarAttachmentId &&
+        String(member.contact?.avatarAttachmentId || "") !==
+          body.avatarAttachmentId
+      )
+        await validatedImageAttachment(
+          body.avatarAttachmentId,
+          req.auth!.userId,
+          "MEMBER_AVATAR",
+          req.auth!.gymId,
+          session,
+        );
+      member.set("contact.avatarAttachmentId", body.avatarAttachmentId);
+      member.set("contact.avatarUrl", undefined);
+    }
+    for (const key of ["name", "email", "phone"] as const)
       if (body[key] !== undefined)
         member.set(
           "contact." + key,
@@ -308,7 +377,6 @@ export async function updateMember(req: Request, res: Response) {
       "fitnessGoal",
       "emergencyContact",
       "medicalNotes",
-      "status",
       "assignedTrainerId",
     ] as const)
       if (body[key] !== undefined) member.set(key, body[key]);
@@ -318,41 +386,11 @@ export async function updateMember(req: Request, res: Response) {
         authorId: req.auth!.userId,
         createdAt: new Date(),
       });
-    if (["ARCHIVED", "INACTIVE"].includes(body.status || "")) {
-      member.directAccess = false;
-      const memberships = await Subscription.find({
-        gymId: member.gymId,
-        memberProfileId: member._id,
-        type: "GYM_MEMBERSHIP",
-        status: { $in: ["ACTIVE", "FROZEN", "GRACE", "PENDING_PAYMENT"] },
-      }).session(session);
-      for (const subscription of memberships) {
-        applyMembershipTransition(subscription, "deactivate", {
-          reason: body.note || "Member deactivated by gym management",
-        });
-        await subscription.save({ session });
-        const [event] = await SubscriptionEvent.create(
-          [
-            {
-              subscriptionId: subscription._id,
-              type: "DEACTIVATE",
-              actorId: req.auth!.userId,
-              payload: { memberStatus: body.status },
-            },
-          ],
-          { session },
-        );
-        await emitDomainEvent({
-          event: "membership.cancelled",
-          userId: member.userId,
-          gymId: member.gymId,
-          entityId: subscription.publicId,
-          occurrenceId: String(event._id),
-          actionUrl: "/app/subscriptions",
-          session,
-        });
-      }
-    }
+    if (body.status !== undefined)
+      await transitionMemberAccess(member, body.status, {
+        actorId: req.auth!.userId, actorRole: req.auth!.role,
+        reason: body.note || (body.status === "ACTIVE" ? "Access restored by gym management" : "Access deactivated by gym management"),
+      }, session);
     await member.save({ session });
     if (body.assignedTrainerId && body.assignedTrainerId !== previousTrainer)
       await emitDomainEvent({
@@ -403,7 +441,7 @@ export async function requestGymJoin(req: Request, res: Response) {
           directAccess: false,
         },
       },
-      { new: true, upsert: true, session },
+      { returnDocument: "after", upsert: true, session },
     );
     if (member.status !== "JOIN_REQUESTED")
       throw new AppError(
@@ -479,6 +517,14 @@ export async function saveTrainer(req: Request, res: Response) {
     req.body,
   );
   const data = await mongoose.connection.transaction(async (session) => {
+    if (body.photoAttachmentId)
+      await validatedImageAttachment(
+        body.photoAttachmentId,
+        req.auth!.userId,
+        "TRAINER_IMAGE",
+        req.auth!.gymId,
+        session,
+      );
     let trainer = update
       ? await Trainer.findOne({
           gymId: req.auth!.gymId,
@@ -527,6 +573,7 @@ export async function saveTrainer(req: Request, res: Response) {
       );
     const fields = {
       ...body,
+      ...(body.photoAttachmentId !== undefined ? { photoUrl: undefined } : {}),
       ...(body.phone ? { phone: normalizePhone(body.phone) } : {}),
     };
     if (trainer) {

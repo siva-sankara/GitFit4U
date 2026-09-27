@@ -89,13 +89,31 @@ describe("membership lifecycle rules", () => {
     ).toThrow(/2 freeze days/);
   });
   it("blocks reactivation of cancelled, expired, and unpaid memberships", () => {
-    for (const status of ["CANCELLED", "EXPIRED", "PENDING_PAYMENT"]) {
+    for (const status of ["CANCELLED", "DEACTIVATED", "EXPIRED", "PENDING_PAYMENT"]) {
       const member = membership();
       member.status = status;
       expect(() =>
         applyMembershipTransition(member, "activate", {}, now),
       ).toThrow();
     }
+  });
+  it("deactivates without cancelling paid time and restores only after entitlement validation", () => {
+    const member: any = membership(), originalEnd = member.endsAt.getTime();
+    applyMembershipTransition(member, "deactivate", { actorId: "owner", reason: "Temporary hold" }, now);
+    expect(member).toMatchObject({ status: "DEACTIVATED", deactivatedAt: now, deactivatedBy: "owner", deactivationReason: "Temporary hold" });
+    expect(member.cancelledAt).toBeUndefined();
+    expect(() => applyMembershipTransition(member, "reactivate", {}, now)).toThrow();
+    applyMembershipTransition(member, "reactivate", { allowRestore: true, actorId: "owner", reason: "Hold cleared" }, now);
+    expect(member).toMatchObject({ status: "ACTIVE", reactivatedAt: now, reactivatedBy: "owner", reactivationReason: "Hold cleared" });
+    expect(member.endsAt.getTime()).toBe(originalEnd);
+  });
+  it("closes unused freeze extension on deactivation instead of granting free frozen days", () => {
+    const member = membership();
+    applyMembershipTransition(member, "freeze", { endsAt: new Date(now.getTime() + 7 * day) }, now);
+    applyMembershipTransition(member, "deactivate", {}, new Date(now.getTime() + day));
+    expect(member.status).toBe("DEACTIVATED");
+    expect(member.endsAt.toISOString()).toBe("2026-10-02T10:00:00.000Z");
+    expect(member.freezePeriods[0].extendedDays).toBe(1);
   });
   it("requires current membership and valid freeze dates", () => {
     const member = membership();
