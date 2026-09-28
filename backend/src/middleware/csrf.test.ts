@@ -1,6 +1,7 @@
 import express from "express";
 import request from "supertest";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+vi.mock("../config/db.js", () => ({ connectDatabase: vi.fn().mockResolvedValue(undefined) }));
 import { env } from "../config/env.js";
 import { requireCsrfProtection } from "./csrf.js";
 import { errorHandler } from "./errorHandler.js";

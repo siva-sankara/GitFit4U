@@ -5,6 +5,8 @@
 **/.env
 **/.env.*
 !**/.env.example
+# This one file contains only the public production API origin.
+!frontend/.env.production
 node_modules/
 dist/
 coverage/

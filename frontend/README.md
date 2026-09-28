@@ -10,7 +10,11 @@ npm ci
 npm run dev
 ```
 
-Set `VITE_API_URL` to the public origin of the GETFIT4U Express API. When it is omitted, the deployed experience runs as an interaction-rich approved-requirements preview with seeded demonstration data.
+Set `VITE_API_URL` to the public origin of the GETFIT4U Express API. If omitted,
+requests use the frontend's own origin and require an API reverse proxy there.
+The checked-in `.env.production` selects the current public production API for
+production builds. Vercel project variables override that file; see
+[production domain setup](../docs/vercel-production.md) for the exact settings.
 
 ## Verify
 
