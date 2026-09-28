@@ -61,10 +61,24 @@ connect to any services.
 After pushing these configurations, redeploy without the existing build cache.
 Confirm that the installation log shows `npm ci --include=dev`.
 
-These settings address build dependency installation and type resolution. The
-current runtime also initializes MongoDB, Socket.IO, and recurring maintenance/push delivery in
-`src/server.ts`; a successful TypeScript build alone does not verify those
-services on Vercel.
+## Vercel runtime
+
+Vercel loads `src/app.ts` directly. Keep its default Express export as well as the
+named `app` export used by `src/server.ts`. A named export alone causes
+`Invalid export found in module` and `500 FUNCTION_INVOCATION_FAILED` on every
+request even after a successful build.
+
+`GET /health` returns a liveness response without requiring MongoDB. API requests
+under `/api/v1` (including the payment webhook) await a shared MongoDB connection
+before running their handlers. Set `MONGO_URI` and the other production variables
+in Vercel's environment settings. A healthy `/health` response does not verify
+database access. `/` and `/favicon.ico` have no routes and return the API's normal
+404 JSON response; the backend does not serve the frontend website.
+
+The standalone `src/server.ts` also starts Socket.IO and recurring maintenance/
+push delivery. Those processes are not started by Vercel's `app.ts` entry point;
+running the HTTP API alone does not provide them. They need a separately running
+server/worker or a dedicated adaptation to the deployment platform.
 
 ## Production prerequisites
 

@@ -1,10 +1,11 @@
-import express from "express";
+import express, { type RequestHandler } from "express";
 import cors from "cors";
 import helmet from "helmet";
 import compression from "compression";
 import cookieParser from "cookie-parser";
 import rateLimit from "express-rate-limit";
 import { env } from "./config/env.js";
+import { connectDatabase } from "./config/db.js";
 import { httpLogging } from "./middleware/httpLogging.js";
 import { razorpayWebhook } from "./controllers/checkoutController.js";
 import { apiRoutes } from "./routes/index.js";
@@ -15,6 +16,12 @@ import { rejectUnsafeKeys } from "./middleware/rejectUnsafeKeys.js";
 import { openapi } from "./docs/openapi.js";
 
 export const app = express();
+
+// Vercel invokes this app directly, without running the standalone server startup.
+const ensureDatabase: RequestHandler = async (_req, _res, next) => {
+  await connectDatabase();
+  next();
+};
 
 app.disable("x-powered-by");
 app.set("trust proxy", 1);
@@ -44,6 +51,7 @@ app.use(
 app.post(
   "/api/v1/webhooks/razorpay",
   express.raw({ type: "application/json", limit: "512kb" }),
+  ensureDatabase,
   razorpayWebhook,
 );
 
@@ -81,6 +89,8 @@ if (env.NODE_ENV !== "production") {
       ),
   );
 }
-app.use("/api/v1", apiRoutes);
+app.use("/api/v1", ensureDatabase, apiRoutes);
 app.use(notFound);
 app.use(errorHandler);
+
+export default app;
