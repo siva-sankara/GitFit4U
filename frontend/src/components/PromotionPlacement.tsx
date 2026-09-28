@@ -1,5 +1,7 @@
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
+import { useId, useRef, useState } from "react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { apiRequest, type ApiEnvelope } from "../services/apiClient";
 import "../styles/promotions.css";
 type Row = Record<string, any>;
@@ -21,15 +23,31 @@ export function GymOffers({ gymId, planId }: { gymId: string; planId?: string })
   </article>)}</div></section>;
 }
 export function PromotionPlacement({ placement, gymId }: { placement: "EXPLORE" | "DASHBOARD" | "GYM_PROFILE"; gymId?: string }) {
+  const track = useRef<HTMLDivElement>(null), trackId = useId();
+  const [active, setActive] = useState(0);
   const path = `/api/v1/public/promotions/ads?placement=${placement}${gymId ? `&gymId=${encodeURIComponent(gymId)}` : ""}`;
   const query = useQuery({ queryKey: ["promotions", path], queryFn: () => apiRequest<ApiEnvelope<Row[]>>(path), refetchInterval: 60_000, retry: false });
   // Promotions never block the primary page. An optional campaign outage is explicit and retryable.
   if (query.isError) return <aside className="promotion-notice">Promotions are unavailable. <button className="btn btn-ghost" onClick={() => void query.refetch()}>Retry promotions</button></aside>;
   if (!query.data?.data.length) return null;
-  return <section className="promotion-grid promotion-banners" aria-label="Gym promotions">{query.data.data.map(ad => <article className="panel promotion-banner" key={ad.publicId}>
+  const ads = query.data.data;
+  const selected = Math.min(active, ads.length - 1);
+  function move(index: number) {
+    const bounded = Math.max(0, Math.min(index, ads.length - 1));
+    setActive(bounded);
+    const element = track.current;
+    if (element) element.scrollTo({ left: bounded * element.clientWidth, behavior: "instant" });
+  }
+  return <section className="promotion-carousel" aria-label="Gym promotions" aria-roledescription={ads.length > 1 ? "carousel" : undefined}>
+    {ads.length > 1 && <div className="promotion-carousel-controls"><span aria-live="polite">Promotion {selected + 1} of {ads.length}</span>
+      <button type="button" className="icon-btn" aria-label="Previous promotion" aria-controls={trackId} disabled={selected === 0} onClick={() => move(selected - 1)}><ChevronLeft size={19} /></button>
+      <button type="button" className="icon-btn" aria-label="Next promotion" aria-controls={trackId} disabled={selected === ads.length - 1} onClick={() => move(selected + 1)}><ChevronRight size={19} /></button>
+    </div>}
+    <div className="promotion-carousel-track" id={trackId} ref={track} onScroll={event => { const element = event.currentTarget; if (element.clientWidth) setActive(Math.round(element.scrollLeft / element.clientWidth)); }}>
+    {ads.map((ad, index) => <article className="panel promotion-banner" key={ad.publicId} aria-label={`Promotion ${index + 1} of ${ads.length}`}>
     {ad.imageUrl && <img src={ad.imageUrl} alt="" loading="lazy" decoding="async" />}
     <div><span className="eyebrow">Sponsored · {ad.gymName}</span><h3>{ad.name}</h3><p>{ad.description}</p>
       {ad.external ? <a className="btn btn-secondary" href={ad.href} target="_blank" rel="noopener noreferrer">{ad.ctaLabel}</a> : <Link className="btn btn-secondary" to={ad.href}>{ad.ctaLabel}</Link>}
     </div>
-  </article>)}</section>;
+  </article>)}</div></section>;
 }

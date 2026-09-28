@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { acceptFixtureInvitation } from "./check-account-delivery.js";
 import mongoose from "mongoose";
 import request from "supertest";
 import { nanoid } from "nanoid";
@@ -42,6 +43,7 @@ export async function checkMembershipStreakEnhancements({ assertDatabase }: { as
   const plan = await MembershipPlan.create({ publicId: nanoid(), gymId: gym._id, name: "Paid lifecycle plan", code: nanoid(), durationDays: 30, priceMinor: 12000, freezeDaysAllowed: 7, status: "ACTIVE" });
   const today = new Date().toISOString().slice(0, 10);
   const paid = (await api("post", "/owner/members", ot, { name: user.name, email: user.email, planId: plan.publicId, startsAt: today, payment: { amountMinor: 12000, method: "CASH", paidAt: today } }, 201)).data;
+  await acceptFixtureInvitation(paid.member._id, String(user._id));
   const originalStart = paid.subscription.startsAt, originalEnd = paid.subscription.endsAt;
   const qr = (await api("get", "/owner/attendance/qr", ot)).data.token;
   await api("post", `/owner/subscriptions/${paid.subscription.publicId}/deactivate`, wrong, { reason: "Wrong tenant" }, 404);

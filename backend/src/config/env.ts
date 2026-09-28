@@ -29,6 +29,9 @@ const schema = z
     RAZORPAY_KEY_SECRET: z.string().optional(),
     RAZORPAY_WEBHOOK_SECRET: z.string().optional(),
     GOOGLE_CLIENT_ID: z.string().optional(),
+    RESEND_API_KEY: z.string().optional(),
+    EMAIL_FROM: z.string().optional(),
+    EMAIL_ENCRYPTION_KEY: z.preprocess((value) => value || undefined, z.string().min(32).optional()),
     // GOOGLE_MAPS_API_KEY: z.string().optional(), // Legacy Google geocoding is disabled.
     LOCATIONIQ_API_KEY: z.string().optional(),
     LOCATIONIQ_REGION: z.enum(["us1", "eu1"]).default("us1"),

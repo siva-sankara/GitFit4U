@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { MessageCircle, Phone } from "lucide-react";
+import { MessageCircle, Phone, MessageSquareText } from "lucide-react";
 import { apiRequest, type ApiEnvelope } from "../services/apiClient";
 import { normalizeContactPhone } from "../utils/contactPhone";
 import "../styles/member-quick-actions.css";
@@ -44,6 +44,12 @@ export function MemberQuickActions({ member, expanded = false }: {
         aria-label={pending ? "Opening conversation with " + name : "Message " + name}>
         <MessageCircle size={18} aria-hidden="true" />{expanded && <span>{pending ? "Opening…" : "Message"}</span>}
       </button>
+      {phone ? <a className="member-quick-action" href={"https://wa.me/" + phone.slice(1)} target="_blank" rel="noopener noreferrer"
+        title={"Open WhatsApp composer for " + name} aria-label={"WhatsApp " + name}>
+        <MessageSquareText size={18} aria-hidden="true" />{expanded && <span>WhatsApp</span>}
+      </a> : <button type="button" className="member-quick-action" disabled title="Registered phone number unavailable" aria-label={"WhatsApp " + name + ": registered phone number unavailable"}>
+        <MessageSquareText size={18} aria-hidden="true" />{expanded && <span>WhatsApp</span>}
+      </button>}
     </span>
     {error && <span className="member-quick-error" role="alert">{error}</span>}
   </span>;

@@ -63,6 +63,7 @@ import { updateMember } from "../controllers/memberManagementController.js";
 import { allowedContacts } from "../services/contactService.js";
 import { refreshGymRating } from "../services/gymProjectionService.js";
 import { withGymMedia } from "../services/gymMediaService.js";
+import { withClassMedia } from "../services/classMediaService.js";
 import { withMemberMedia, withUserMedia } from "../services/userMediaService.js";
 import {
   registrationStatus,
@@ -70,11 +71,16 @@ import {
 } from "../services/registrationService.js";
 import { env } from "../config/env.js";
 import rateLimit from "express-rate-limit";
-import { downloadPaymentInvoice } from "../controllers/invoiceController.js";
+import { downloadPaymentInvoice, invoiceEmailStatus, resendInvoiceEmail } from "../controllers/invoiceController.js";
+import { requireIdempotencyKey } from "../middleware/idempotency.js";
+import { privatePendingMember } from "../services/memberInvitationPrivacy.js";
+import { redactPendingAccountRows } from "../services/tenantAccountPrivacy.js";
 
 export const workspaceRoutes = Router();
 workspaceRoutes.use(requireAuth);
 workspaceRoutes.get("/payments/:id/invoice", rateLimit({ windowMs: 60000, limit: 15, keyGenerator: req => req.auth!.userId, standardHeaders: "draft-8", legacyHeaders: false }), downloadPaymentInvoice);
+workspaceRoutes.get("/payments/:id/invoice/email", rateLimit({ windowMs: 60000, limit: 30, keyGenerator: req => req.auth!.userId, standardHeaders: "draft-8", legacyHeaders: false }), invoiceEmailStatus);
+workspaceRoutes.post("/payments/:id/invoice/email", rateLimit({ windowMs: 15 * 60000, limit: 10, keyGenerator: req => req.auth!.userId, standardHeaders: "draft-8", legacyHeaders: false }), requireIdempotencyKey, resendInvoiceEmail);
 workspaceRoutes.get("/registration-options", (_req, res) =>
   res.json({
     success: true,
@@ -165,7 +171,7 @@ const resources: Record<string, Resource> = {
   members: {
     model: MemberProfile,
     select:
-      "publicId gymId userId contact memberCode status fitnessGoal currentSubscriptionId assignedTrainerId trainerAssignedAt joinedAt createdAt",
+      "publicId gymId userId contact invitation memberCode status fitnessGoal currentSubscriptionId assignedTrainerId trainerAssignedAt joinedAt createdAt",
     search: ["memberCode", "fitnessGoal"],
     populate: [
       { path: "gymId", select: "name publicId" },
@@ -205,7 +211,7 @@ const resources: Record<string, Resource> = {
       "publicId purpose payerId gymId subscriptionId amountMinor currency provider status methodCategory capturedAt failureDescription createdAt",
     populate: [
       { path: "payerId", select: "name publicId" },
-      { path: "gymId", select: "name" },
+      { path: "gymId", select: "name timezone" },
       { path: "subscriptionId", select: "planSnapshot.name" },
     ],
     permission: "finance:read",
@@ -225,7 +231,7 @@ const resources: Record<string, Resource> = {
   classes: {
     model: ClassSession,
     select:
-      "publicId gymId name category trainerId startsAt endsAt capacity bookedCount status room",
+      "publicId gymId name category trainerId startsAt endsAt capacity bookedCount status room imageUrl imageAttachmentId",
     search: ["name", "room"],
     populate: [
       { path: "trainerId", select: "name publicId" },
@@ -375,7 +381,7 @@ const resources: Record<string, Resource> = {
     model: ClassBooking,
     select: "sessionId status bookedAt",
     populate: [
-      { path: "sessionId", select: "publicId name startsAt endsAt gymId" },
+      { path: "sessionId", select: "publicId name startsAt endsAt gymId imageUrl imageAttachmentId category capacity bookedCount status" },
     ],
     sort: "bookedAt",
   },
@@ -522,8 +528,11 @@ workspaceRoutes.get("/records/:resource", async (req, res) => {
       (field) => config.model.schema.path(field)?.options?.ref === "User",
     );
     if (personFields.length) {
+      const pendingIds = ["GYM_OWNER", "GYM_STAFF", "TRAINER"].includes(req.auth!.role) && req.auth!.gymId
+        ? await MemberProfile.distinct("userId", { gymId: req.auth!.gymId, "invitation.status": "PENDING" }) : [];
       const userIds = await User.distinct("_id", {
         $or: [{ name: regex }, { email: regex }, { phone: regex }],
+        ...(pendingIds.length ? { _id: { $nin: pendingIds } } : {}),
       });
       alternatives.push(
         ...personFields.map((field) => ({ [field]: { $in: userIds } })),
@@ -618,6 +627,15 @@ workspaceRoutes.get("/records/:resource", async (req, res) => {
     }));
   }
   if (key === "members") memberRows = await withMemberMedia(memberRows);
+  if (["GYM_OWNER", "GYM_STAFF", "TRAINER"].includes(req.auth!.role)) {
+    if (key === "members") memberRows = memberRows.map(privatePendingMember);
+    if (["payments", "subscriptions"].includes(key)) memberRows = await redactPendingAccountRows(memberRows, req.auth!.gymId, key === "payments" ? "payerId" : "userId");
+  }
+  if (key === "classes") memberRows = await withClassMedia(memberRows);
+  if (key === "bookings") {
+    const sessions = await withClassMedia(data.map((row: any) => row.sessionId).filter(Boolean));
+    memberRows = data.map((row: any) => ({ ...row, sessionId: sessions.find((session) => String(session._id) === String(row.sessionId?._id)) || row.sessionId }));
+  }
   if (key === "attendance") {
     const people = await withUserMedia(data.map((row: any) => row.userId).filter(Boolean));
     const members = await withMemberMedia(data.map((row: any) => row.memberProfileId).filter(Boolean));
@@ -633,7 +651,7 @@ workspaceRoutes.get("/records/:resource", async (req, res) => {
         ? data.map((r: any) => ({ ...r, status: registrationStatus(r) }))
         : key === "subscriptions"
           ? await Promise.all(
-              data.map(async (row: any) => ({
+              memberRows.map(async (row: any) => ({
                 ...row,
                 gymId: row.gymId
                   ? (await withGymMedia([row.gymId]))[0]
@@ -743,6 +761,7 @@ workspaceRoutes.patch(
   async (req, res) => {
     const data = await saveGymClass({
       gymId: req.auth!.gymId!,
+      actorId: req.auth!.userId,
       publicId: String(req.params.id),
       body: req.body,
     });

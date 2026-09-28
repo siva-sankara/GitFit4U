@@ -1,25 +1,29 @@
-const CACHE_NAME = "getfit4u-shell-v2";
-const APP_SHELL = ["/", "/manifest.webmanifest", "/brand/favicon.svg", "/assets/gym-community-hero.webp", "/assets/strength-card.webp"];
-
-self.addEventListener("install", (event) => {
-  event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL)));
-  self.skipWaiting();
+// Cache only the public offline document. Never cache authenticated HTML,
+// API responses, uploads, signed media, invoices or conversation contents.
+const CACHE_NAME = "getfit4u-offline-v3";
+const OFFLINE_URL = "/offline.html";
+self.addEventListener("install", event => {
+  event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.add(OFFLINE_URL)));
+  // Updates wait until the user saves their work and explicitly reloads.
 });
-
-self.addEventListener("activate", (event) => {
-  event.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key)))));
-  self.clients.claim();
+self.addEventListener("message", event => {
+  if (event.data?.type === "GETFIT4U_APPLY_UPDATE") void self.skipWaiting();
 });
-
-self.addEventListener("fetch", (event) => {
-  if (new URL(event.request.url).pathname.startsWith("/api/")) return;
-  if (event.request.method !== "GET" || new URL(event.request.url).origin !== self.location.origin) return;
-  if (event.request.mode === "navigate") {
-    event.respondWith(fetch(event.request).catch(() => caches.match("/")));
-    return;
-  }
-  event.respondWith(caches.match(event.request).then((cached) => cached || fetch(event.request).then((response) => {
-    if (response.ok) caches.open(CACHE_NAME).then((cache) => cache.put(event.request, response.clone()));
-    return response;
-  })));
+self.addEventListener("activate", event => {
+  event.waitUntil(caches.keys().then(keys => Promise.all(keys
+    .filter(key => key !== CACHE_NAME && (key.startsWith("getfit4u-shell-") || key.startsWith("getfit4u-offline-")))
+    .map(key => caches.delete(key)))));
+  // Do not claim/reload other open tabs or touch Firebase's separate scope.
+});
+self.addEventListener("fetch", event => {
+  const url = new URL(event.request.url);
+  if (event.request.method !== "GET" || url.origin !== self.location.origin ||
+      event.request.mode !== "navigate" || url.pathname.startsWith("/api/")) return;
+  event.respondWith(fetch(event.request).catch(async () => {
+    const offline = await caches.match(OFFLINE_URL);
+    return new Response(offline ? await offline.text() : "GETFIT4U is offline. Reconnect and reload to continue.", {
+      status: 503,
+      headers: { "Content-Type": offline ? "text/html; charset=utf-8" : "text/plain; charset=utf-8", "Cache-Control": "no-store" },
+    });
+  }));
 });

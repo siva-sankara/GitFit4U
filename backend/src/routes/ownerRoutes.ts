@@ -1,4 +1,6 @@
 import { Router } from "express";
+import rateLimit from "express-rate-limit";
+import { resendMemberInvitation } from "../controllers/accountInvitationController.js";
 import { z } from "zod";
 import * as controller from "../controllers/ownerController.js";
 import * as members from "../controllers/memberManagementController.js";
@@ -52,6 +54,7 @@ ownerRoutes.use((req, _res, next) => {
     ["POST", "PATCH"].includes(req.method) &&
     schemas[base] &&
     !(base === "/members" && req.path.includes("/join/")) &&
+    !req.path.endsWith("/invitation/resend") &&
     !(base === "/classes" && req.path.endsWith("/cancel"))
   ) {
     const schema =
@@ -97,6 +100,7 @@ ownerRoutes.post(
 );
 
 ownerRoutes.use(requireRole("GYM_OWNER", "GYM_STAFF"), requireGymContext);
+ownerRoutes.post("/members/:id/invitation/resend", requirePermission("member:write"), rateLimit({ windowMs: 15 * 60_000, limit: 20, standardHeaders: true, legacyHeaders: false }), resendMemberInvitation);
 ownerRoutes.get(
   "/dashboard",
   requirePermission("gym:read"),
@@ -163,6 +167,7 @@ ownerRoutes.post(
       body: z
         .object({
           memberIdentifier: z.string().min(3).optional(),
+          reason: z.string().trim().max(500).optional(),
           qrToken: z.string().min(20).optional(),
           source: z.enum(["QR", "MANUAL"]).default("QR"),
           scannerId: z.string().optional(),

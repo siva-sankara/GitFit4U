@@ -38,8 +38,9 @@ const userSchema = new Schema(
     preferences: {
       theme: {
         type: String,
-        enum: ["system", "light", "dark"],
-        default: "system",
+        enum: ["light", "dark"],
+        default: "light",
+        set: (value: string) => value === "system" ? "light" : value,
       },
     },
     notificationPreferences: {
@@ -76,5 +77,10 @@ const userSchema = new Schema(
 );
 
 userSchema.index({ status: 1, "social.visibility": 1, name: 1, _id: 1 });
+
+// Existing hydrated accounts remain editable before the batch migration runs.
+userSchema.post("init", (user: any) => {
+  if (user.preferences?.theme === "system") user.set("preferences.theme", "light");
+});
 
 export const User = models.User || model("User", userSchema);

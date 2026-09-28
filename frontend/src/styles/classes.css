@@ -20,6 +20,9 @@
   justify-content: space-between;
   gap: 8px;
 }
+.class-image { width: 100%; height: auto; aspect-ratio: 16 / 9; object-fit: contain; border-radius: 10px; background: var(--bg-secondary, #edf1f3); }
+.class-image-fallback { display: grid; place-items: center; background: linear-gradient(135deg, #155e75, #0f766e); color: white; font-size: .78rem; letter-spacing: .15em; }
+.class-booking-image { width: 56px; height: 40px; object-fit: contain; border-radius: 6px; }
 .class-trainer {
   justify-content: flex-start;
   font-size: 0.85rem;

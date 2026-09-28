@@ -73,6 +73,13 @@ const gymSchema = new Schema(
     location: { type: locationSchema, required: true },
     timezone: { type: String, default: "Asia/Kolkata" },
     attendanceLocationRequired: { type: Boolean, default: false },
+    classReminders: {
+      enabled: { type: Boolean, default: true },
+      leadMinutes: { type: Number, min: 15, max: 1440, default: 60 },
+    },
+    membershipReminders: {
+      postExpiryDays: { type: Number, min: 0, max: 7, default: 7 },
+    },
     attendanceRadiusMeters: { type: Number, min: 25, max: 1000, default: 100 },
     openingHours: [
       {

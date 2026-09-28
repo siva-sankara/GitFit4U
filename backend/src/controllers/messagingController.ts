@@ -326,6 +326,8 @@ export async function sendMessage(req: Request, res: Response) {
     String(req.params.id),
     req.auth!,
   );
+  if (conversation.type === "SYSTEM" || req.body.type === "SYSTEM")
+    throw new AppError(403, "SYSTEM_CONVERSATION_READ_ONLY", "System receipts are read-only.");
   if (
     conversation.type === "SUPPORT" &&
     ["RESOLVED", "CLOSED"].includes(conversation.supportTicketId?.status)

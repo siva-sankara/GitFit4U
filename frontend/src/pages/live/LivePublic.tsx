@@ -889,6 +889,8 @@ export function LiveGymDetails() {
               }
               joinError={join.isError ? join.error.message : undefined}
               reviewDisabled={ownReview.isFetching || ownReview.isError}
+              offers={<GymOffers gymId={gym.publicId} />}
+              advertisements={<PromotionPlacement placement="GYM_PROFILE" gymId={gym.publicId} />}
               reviewsState={{
                 page: reviewPage,
                 pages: reviewsQuery.data?.meta?.pages || 1,
@@ -899,7 +901,6 @@ export function LiveGymDetails() {
                 onPage: setReviewPage,
               }}
             />
-            <div className="container page-stack"><GymOffers gymId={gym.publicId} /><PromotionPlacement placement="GYM_PROFILE" gymId={gym.publicId} /></div>
             <Modal
               open={!!plan}
               title="Membership checkout"

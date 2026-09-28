@@ -1,0 +1,11 @@
+.platform-summary-grid { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 16px; align-items: stretch; }
+.platform-summary-card { display: flex; flex-direction: column; align-items: flex-start; gap: 14px; padding: 20px; min-width: 0; }
+.platform-summary-card h2 { font-size: 1.2rem; margin: 0; }
+.platform-summary-card p { color: var(--text-muted); margin: 0; line-height: 1.5; font-size: .9rem; }
+.platform-summary-card dl { display: grid; gap: 10px; width: 100%; margin: 0; }
+.platform-summary-card dl > div { display: flex; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+.platform-summary-card dt { color: var(--text-muted); }
+.platform-summary-card dd { margin: 0; text-align: right; font-weight: 600; }
+.platform-summary-card progress { width: 100%; height: 10px; accent-color: var(--brand-strong); }
+#platform-renewal-plans { scroll-margin-top: 90px; }
+@media (max-width: 760px) { .platform-summary-grid { grid-template-columns: minmax(0, 1fr); } .platform-summary-card { padding: 16px; } }

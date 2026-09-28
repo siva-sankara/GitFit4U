@@ -7,7 +7,7 @@ export function safeReturnTo(value: unknown): string | undefined {
   )
     return;
   if (
-    !/^\/(?:gyms\/[^/?#]+|register-gym|platform-renewal|notifications|messages(?:\/[A-Za-z0-9_-]+)?|profile(?:\/[A-Za-z0-9_-]+)?|(?:app|owner|trainer|admin)\/[^?#]+)(?:[?#].*)?$/.test(
+    !/^\/(?:gyms\/[^/?#]+|activate-account|register-gym|platform-renewal|notifications|messages(?:\/[A-Za-z0-9_-]+)?|profile(?:\/[A-Za-z0-9_-]+)?|(?:app|owner|trainer|admin)\/[^?#]+)(?:[?#].*)?$/.test(
       value,
     )
   )
@@ -33,7 +33,7 @@ export function loginDestination(role: string, returnTo?: string): string {
           : "/app/home";
   const safe = safeReturnTo(returnTo);
   return safe &&
-    (/^\/(gyms\/|messages(?:\/|[?#]|$)|profile(?:\/|[?#]|$)|(?:register-gym|platform-renewal|notifications)(?:[?#]|$))/.test(
+    (/^\/(gyms\/|messages(?:\/|[?#]|$)|profile(?:\/|[?#]|$)|(?:activate-account|register-gym|platform-renewal|notifications)(?:[?#]|$))/.test(
       safe,
     ) ||
       safe.startsWith(`/${home.split("/")[1]}/`))

@@ -1,6 +1,6 @@
 import mongoose from "mongoose";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { ClassBooking, ClassSession, Trainer } from "../models/Engagement.js";
+import { ClassBooking, ClassSession, Trainer, Notification } from "../models/Engagement.js";
 import { MemberProfile } from "../models/Member.js";
 import { classInput } from "../routes/inputSchemas.js";
 import { saveGymClass } from "./classManagementService.js";
@@ -38,13 +38,14 @@ beforeEach(() => {
   vi.spyOn(ClassSession, "create").mockResolvedValue([existing] as any);
   vi.spyOn(Trainer, "exists").mockReturnValue(query({ _id: "trainer" }));
   vi.spyOn(ClassBooking, "find").mockReturnValue(
-    query([{ memberProfileId: "member-a" }]),
+    query([{ _id: "booking-a", memberProfileId: "member-a" }]),
   );
   vi.spyOn(ClassBooking, "updateMany").mockResolvedValue({
     modifiedCount: 1,
   } as any);
+  vi.spyOn(Notification, "updateMany").mockResolvedValue({ modifiedCount: 1 } as any);
   vi.spyOn(MemberProfile, "find").mockReturnValue({
-    select: vi.fn().mockReturnValue(query([{ userId: "member-user" }])),
+    select: vi.fn().mockReturnValue(query([{ _id: "member-a", userId: "member-user" }])),
   } as any);
 });
 afterEach(() => vi.restoreAllMocks());
@@ -139,7 +140,7 @@ it("cancels bookings and emits one centralized batch in the same transaction whi
     expect.objectContaining({
       event: "class.cancelled",
       userId: "member-user",
-      actionUrl: "/app/classes",
+      actionUrl: "/app/classes?booking=booking-a",
       session,
     }),
   ]);

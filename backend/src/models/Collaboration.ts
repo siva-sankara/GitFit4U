@@ -12,7 +12,7 @@ const conversationSchema = new Schema(
     gymId: { type: Schema.Types.ObjectId, ref: "Gym", index: true },
     type: {
       type: String,
-      enum: ["DIRECT", "GROUP", "SUPPORT"],
+      enum: ["DIRECT", "GROUP", "SUPPORT", "SYSTEM"],
       default: "DIRECT",
     },
     participants: [
@@ -52,10 +52,15 @@ const messageSchema = new Schema(
     senderId: {
       type: Schema.Types.ObjectId,
       ref: "User",
-      required: true,
+      required: function (this: any) {
+        const type = this.type || this.getUpdate?.()?.$setOnInsert?.type || this.getUpdate?.()?.$set?.type;
+        return type !== "SYSTEM";
+      },
       index: true,
     },
     clientMessageId: { type: String, required: true },
+    invoiceId: { type: Schema.Types.ObjectId, ref: "Invoice" },
+    actionUrl: { type: String, maxlength: 2000 },
     type: {
       type: String,
       enum: ["TEXT", "IMAGE", "FILE", "SYSTEM"],

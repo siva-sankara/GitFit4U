@@ -1,17 +1,22 @@
 {
+  "id": "/",
   "name": "GETFIT4U",
   "short_name": "GETFIT4U",
   "description": "Discover gyms, manage memberships, and build stronger fitness habits.",
-  "start_url": "/",
+  "start_url": "/app/home",
+  "scope": "/",
   "display": "standalone",
-  "background_color": "#06100d",
-  "theme_color": "#06100d",
+  "background_color": "#f5f8f5",
+  "theme_color": "#07110f",
   "icons": [
+    { "src": "/brand/app-icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/brand/app-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/brand/app-icon-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
     {
       "src": "/brand/app-icon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
-      "purpose": "any maskable"
+      "purpose": "any"
     }
   ]
 }

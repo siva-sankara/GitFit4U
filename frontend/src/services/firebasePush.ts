@@ -48,6 +48,7 @@ export function syncPushToken() {
     const session = getAccessToken();
     const registration = await navigator.serviceWorker.register(workerUrl, {
       type: "module",
+      scope: "/assets/",
     });
     // This worker has its own scope, preserving the existing offline service worker.
     if (!registration.active)

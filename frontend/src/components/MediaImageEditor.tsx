@@ -9,7 +9,7 @@ export function MediaImageEditor({
   gymId,
   disabled = false,
 }: {
-  purpose: "AVATAR" | "TRAINER_IMAGE" | "POST_IMAGE" | "STORY_IMAGE" | "MEMBER_AVATAR" | "REVIEW" | "AD";
+  purpose: "AVATAR" | "TRAINER_IMAGE" | "CLASS_IMAGE" | "POST_IMAGE" | "STORY_IMAGE" | "MEMBER_AVATAR" | "REVIEW" | "AD";
   previewUrl?: string;
   onChange: (id: string | null, url?: string) => void;
   onBusyChange?: (busy: boolean) => void;
@@ -80,7 +80,7 @@ export function MediaImageEditor({
           alt={`${label} preview`}
           width={96}
           height={96}
-          style={{ objectFit: "cover", borderRadius: 16 }}
+          style={{ objectFit: purpose === "CLASS_IMAGE" ? "contain" : "cover", borderRadius: 16 }}
         />
       )}
       <label>

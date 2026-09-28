@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import mongoose from "mongoose";
-import { Attachment, Advertisement } from "../models/Business.js";
+import { Attachment, Advertisement, Invoice } from "../models/Business.js";
 import { Gym } from "../models/Gym.js";
 import { User } from "../models/User.js";
 import { MemberProfile } from "../models/Member.js";
-import { Review, Trainer } from "../models/Engagement.js";
+import { Review, Trainer, ClassSession } from "../models/Engagement.js";
 import { SocialPost, SocialStory } from "../models/Social.js";
 import { Message } from "../models/Collaboration.js";
 
@@ -44,9 +44,11 @@ const references = [
   MemberProfile,
   Review,
   Trainer,
+  ClassSession,
   SocialPost,
   SocialStory,
   Advertisement,
+  Invoice,
   Message,
 ];
 const referenceSessions: ReturnType<typeof vi.fn>[] = [];
@@ -263,7 +265,7 @@ describe("upload lifecycle concurrency", () => {
     const res = response();
     await remove(request(), res);
     expect(row.status).toBe("DELETED");
-    expect(referenceSessions).toHaveLength(9);
+    expect(referenceSessions).toHaveLength(references.length);
     for (const session of referenceSessions)
       expect(session).toHaveBeenCalledWith(databaseSession);
     expect(Message.exists).toHaveBeenCalledWith({

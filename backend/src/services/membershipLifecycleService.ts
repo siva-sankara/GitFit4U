@@ -151,6 +151,8 @@ function requireManagement(input: { actorRole?: string; actorId?: string; gymId?
     throw new AppError(403, "ACCESS_MANAGEMENT_FORBIDDEN", "Only an authorized gym owner or administrator can restore or deactivate gym access.");
 }
 async function validAccessAccount(member: any, session: ClientSession) {
+  if (member.invitation?.status === "PENDING")
+    throw new AppError(409, "INVITATION_PENDING", "The member must accept their invitation before gym access can be restored.");
   if (member.status === "ARCHIVED")
     throw new AppError(409, "MEMBER_ARCHIVED", "Archived members cannot be reactivated. Contact an administrator.");
   if (!(await Gym.exists({ _id: member.gymId, status: "ACTIVE", deletedAt: null }).session(session)))

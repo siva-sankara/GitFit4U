@@ -31,7 +31,7 @@ export async function contactPipeline(req: Request, options: { q?: string; ids?:
     gyms = await MemberProfile.distinct("gymId", { userId: auth.userId, status: "ACTIVE" });
   }
   const memberAccess = admin || (["GYM_OWNER", "GYM_STAFF"].includes(auth.role) && auth.permissions.includes("member:read")) || Boolean(trainer);
-  const membership: any[] = [{ $match: { $expr: { $eq: ["$userId", "$$person"] }, ...(!admin ? { gymId: { $in: gyms } } : {}) } }];
+  const membership: any[] = [{ $match: { $expr: { $eq: ["$userId", "$$person"] }, ...(!admin ? { gymId: { $in: gyms }, "invitation.status": { $ne: "PENDING" } } : {}) } }];
   if (trainer) membership.push(
     { $lookup: { from: WorkoutAssignment.collection.name, let: { member: "$_id" }, pipeline: [{ $match: { trainerId: trainer._id, status: { $ne: "CANCELLED" }, $expr: { $eq: ["$memberProfileId", "$$member"] } } }, { $limit: 1 }], as: "assignedWorkouts" } },
     { $match: { $or: [{ assignedTrainerId: trainer._id }, { "assignedWorkouts.0": { $exists: true } }] } },

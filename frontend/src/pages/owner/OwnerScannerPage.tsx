@@ -4,7 +4,6 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { QRCodeSVG } from "qrcode.react";
 import { apiRequest, type ApiEnvelope } from "../../services/apiClient";
 import { Modal } from "../../components/Modal";
-import { deviceLocation } from "../../services/location";
 import "../../styles/member-management.css";
 
 type GymQr = {
@@ -17,7 +16,8 @@ export function OwnerScannerPage() {
   const session = useCurrentUser();
   const permissions = session.data?.data.context.permissions || [];
   const [replace, setReplace] = useState(false),
-    [memberCode, setMemberCode] = useState("");
+    [memberCode, setMemberCode] = useState(""),
+    [reason, setReason] = useState("");
   const qr = useQuery({
     queryKey: ["api", "/api/v1/owner/attendance/qr"],
     queryFn: () =>
@@ -37,15 +37,6 @@ export function OwnerScannerPage() {
   });
   const manual = useMutation({
     mutationFn: async () => {
-      let location;
-      if (qr.data?.data.locationRequired) {
-        const point = await deviceLocation();
-        location = {
-          coordinates: [point.longitude, point.latitude],
-          accuracyMeters: point.accuracyMeters,
-          capturedAt: point.capturedAt,
-        };
-      }
       return apiRequest<ApiEnvelope<{ duplicate: boolean }>>(
         "/api/v1/owner/scanner/check-in",
         {
@@ -54,7 +45,7 @@ export function OwnerScannerPage() {
           body: JSON.stringify({
             memberIdentifier: memberCode.trim(),
             source: "MANUAL",
-            location,
+            reason: reason.trim() || undefined,
           }),
         },
       );
@@ -142,7 +133,7 @@ export function OwnerScannerPage() {
         {permissions.includes("attendance:scan") && (
           <section className="panel attendance-manual-card">
             <h2>Manual attendance exception</h2>
-            <p>Use this when an eligible member cannot access their camera.</p>
+            <p>Record an eligible member's attendance now. Location permission is not required.</p>
             <form
               className="modal-form"
               onSubmit={(event) => {
@@ -159,6 +150,10 @@ export function OwnerScannerPage() {
                   value={memberCode}
                   onChange={(event) => setMemberCode(event.target.value)}
                 />
+              </label>
+              <label className="field">
+                <span>Reason (optional)</span>
+                <textarea className="input" maxLength={500} value={reason} onChange={event => setReason(event.target.value)} />
               </label>
               <button className="btn btn-secondary" disabled={manual.isPending}>
                 {manual.isPending ? "Recording..." : "Record check-in"}

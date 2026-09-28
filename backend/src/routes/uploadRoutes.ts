@@ -39,6 +39,7 @@ uploadRoutes.post(
           "AVATAR",
           "MEMBER_AVATAR",
           "TRAINER_IMAGE",
+          "CLASS_IMAGE",
           "POST_IMAGE",
           "STORY_IMAGE",
           "GYM_LOGO",

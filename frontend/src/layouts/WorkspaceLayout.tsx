@@ -14,7 +14,7 @@ import {
   ShieldCheck,
   Building2,
   LogOut,
-  Compass,
+  ScanLine,
   UserRound,
   LifeBuoy,
 } from "lucide-react";
@@ -25,6 +25,9 @@ import { Brand } from "../components/Brand";
 import { Avatar } from "../components/Avatar";
 import { GymIdentity } from "../components/GymIdentity";
 import { ThemePicker } from "../components/ThemePicker";
+import { WorkspaceBreadcrumbs } from "../components/WorkspaceBreadcrumbs";
+import { useMobileKeyboard } from "../services/useMobileKeyboard";
+import { navigationSessionScope } from "../services/navigationSession";
 import { useData, type Row } from "../pages/live/LiveData";
 import { useApp } from "../context/AppContext";
 import { useCurrentUser, useNotifications } from "../api/hooks";
@@ -102,6 +105,7 @@ const navigation: Record<string, Array<[string, string, string?]>> = {
   ],
 };
 export function WorkspaceLayout() {
+  const keyboardOpen = useMobileKeyboard();
   const [drawer, setDrawer] = useState(false),
     { toast, toastActionUrl, dismissToast } = useApp(),
     me = useCurrentUser(),
@@ -126,7 +130,7 @@ export function WorkspaceLayout() {
       ? "My profile"
       : "GETFIT4U");
   const mobileChoices = role === "USER"
-    ? [["Home", "home", LayoutDashboard], ["Explore", "explore", Compass], ["Attendance", "attendance", Activity], ["Messages", "messages", MessageCircle], ["Profile", "profile", UserRound]] as const
+    ? [["Home", "home", LayoutDashboard], ["Book", "classes", CalendarDays], ["Scan", "attendance/qr", ScanLine], ["Profile", "profile", UserRound], ["Messages", "messages", MessageCircle]] as const
     : role === "GYM_OWNER"
       ? [["Dashboard", "dashboard", LayoutDashboard], ["Members", "members", Users], ["Attendance", "attendance", Activity], ["Messages", "messages", MessageCircle]] as const
       : role === "TRAINER"
@@ -176,7 +180,7 @@ export function WorkspaceLayout() {
     },
   });
   return (
-    <div className="workspace">
+    <div className={keyboardOpen ? "workspace keyboard-open" : "workspace"}>
       <a href="#workspace-content" className="skip-link">
         Skip to content
       </a>
@@ -325,6 +329,7 @@ export function WorkspaceLayout() {
               aria-hidden="true"
             />
           )}
+          <WorkspaceBreadcrumbs role={activeRole} permissions={context?.permissions || []} navigationScope={navigationSessionScope(context)} />
           <Outlet />
         </main>
       </div>

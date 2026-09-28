@@ -12,6 +12,7 @@ import { logger } from "../config/logger.js";
 import type { Server } from "socket.io";
 import { notificationEvents } from "./domainEventService.js";
 import { reminderStillCurrent } from "./membershipReminderService.js";
+import { classReminderStillCurrent } from "./classReminderService.js";
 import { withNotificationLinks } from "./notificationLinkService.js";
 const firebase = new FirebaseProvider();
 export function allowsPush(user: any, category: string) {
@@ -56,7 +57,7 @@ export async function deliverPush(notificationId?: string) {
   if (!notification) return false;
   const filter = { _id: notification._id, pushLeaseId: lease };
   try {
-    if (!(await reminderStillCurrent(notification))) {
+    if (!(await reminderStillCurrent(notification)) || !(await classReminderStillCurrent(notification))) {
       await Notification.updateOne(filter, {
         $set: { pushStatus: "SKIPPED" },
         $unset: { pushLeaseId: 1, pushLeaseUntil: 1 },
@@ -126,6 +127,7 @@ export async function deliverPush(notificationId?: string) {
           )
             return;
           try {
+            if (!(await classReminderStillCurrent(notification)) || !(await reminderStillCurrent(notification))) return;
             await firebase.send({
               token: device.token,
               title:

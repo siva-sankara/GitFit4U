@@ -1,13 +1,13 @@
 ﻿import type { Request, Response } from "express";
 import { nanoid } from "nanoid";
 import mongoose, { type ClientSession } from "mongoose";
-import { Attachment, Advertisement } from "../models/Business.js";
+import { Attachment, Advertisement, Invoice } from "../models/Business.js";
 import { GymRegistration } from "../models/GymRegistration.js";
 import { presignedObjectUrl } from "../integrations/storage/s3ObjectStore.js";
 import { AppError } from "../utils/AppError.js";
 import { Gym } from "../models/Gym.js";
 import { User } from "../models/User.js";
-import { Trainer, Review } from "../models/Engagement.js";
+import { Trainer, Review, ClassSession } from "../models/Engagement.js";
 import { MemberProfile } from "../models/Member.js";
 import { assertTenantMediaAccess } from "../services/mediaAccessService.js";
 import { SocialPost, SocialStory } from "../models/Social.js";
@@ -65,6 +65,7 @@ export async function initiate(req: Request, res: Response) {
       "AVATAR",
       "MEMBER_AVATAR",
       "TRAINER_IMAGE",
+      "CLASS_IMAGE",
       "POST_IMAGE",
       "STORY_IMAGE",
       "REVIEW",
@@ -100,7 +101,7 @@ export async function initiate(req: Request, res: Response) {
       "FILE_TYPE_NOT_ALLOWED",
       "This file type is not allowed.",
     );
-  const max = ["GYM_LOGO", "AVATAR", "MEMBER_AVATAR", "TRAINER_IMAGE"].includes(
+  const max = ["GYM_LOGO", "AVATAR", "MEMBER_AVATAR", "TRAINER_IMAGE", "CLASS_IMAGE"].includes(
     req.body.purpose,
   )
     ? 5_000_000
@@ -136,7 +137,7 @@ export async function initiate(req: Request, res: Response) {
     gymId = registration?.gymId || selectedGymId;
   const tenantMedia =
     req.body.purpose.startsWith("GYM_") ||
-    ["TRAINER_IMAGE", "MEMBER_AVATAR", "AD"].includes(req.body.purpose);
+    ["TRAINER_IMAGE", "CLASS_IMAGE", "MEMBER_AVATAR", "AD"].includes(req.body.purpose);
   const key = `${tenantMedia ? `gyms/${gymId}` : `users/${req.auth!.userId}`}/${req.body.purpose.toLowerCase()}/${publicId}.${extensions[req.body.mimeType]}`;
   const provider = storageProvider();
   // Byte validation precedes storage. No browser-writable object URL survives completion.
@@ -410,6 +411,7 @@ export async function remove(req: Request, res: Response) {
       (await Trainer.exists({ photoAttachmentId: current._id }).session(
         session,
       )) ||
+      (await ClassSession.exists({ imageAttachmentId: current._id }).session(session)) ||
       (await SocialPost.exists({
         attachmentIds: current._id,
         deletedAt: null,
@@ -420,6 +422,7 @@ export async function remove(req: Request, res: Response) {
         expiresAt: { $gt: new Date() },
       }).session(session)) ||
       (await Advertisement.exists({ creativeAttachmentId: current._id, status: { $ne: "ARCHIVED" } }).session(session)) ||
+      (await Invoice.exists({ "supplierSnapshot.logoAttachmentId": current._id }).session(session)) ||
       (await Message.exists({
         deletedAt: null,
         "attachments.key": { $in: [current.publicId, current.objectKey] },

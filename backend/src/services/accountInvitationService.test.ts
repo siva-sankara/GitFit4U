@@ -1,0 +1,74 @@
+import mongoose from "mongoose";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { acceptMemberInvitation, issueMemberInvitation } from "./accountInvitationService.js";
+import { AccountInvitation, TransactionalEmail } from "../models/Delivery.js";
+import { User } from "../models/User.js";
+import { MemberProfile } from "../models/Member.js";
+import { AuthIdentity } from "../models/Auth.js";
+import { Gym } from "../models/Gym.js";
+import { Payment, Subscription } from "../models/Commerce.js";
+import { sha256 } from "../utils/crypto.js";
+import { decryptEmail } from "./transactionalEmailService.js";
+import { privatePendingMember } from "./memberInvitationPrivacy.js";
+vi.mock("./domainEventService.js", () => ({ emitDomainEvent: vi.fn() }));
+const session = {} as any;
+const query = (value: unknown): any => ({ session: vi.fn().mockResolvedValue(value) });
+beforeEach(() => { vi.spyOn(mongoose.connection, "transaction").mockImplementation(async (work: any) => work(session)); });
+afterEach(() => vi.restoreAllMocks());
+describe("secure account invitations", () => {
+  it("queues an encrypted, expiring token and preserves an existing account", async () => {
+    const member = { _id: "member", save: vi.fn(), invitation: undefined }, user = { _id: "user", email: "established@example.test", status: "ACTIVE", name: "Existing", roles: ["GYM_OWNER"] };
+    vi.spyOn(AccountInvitation, "findOne").mockReturnValue(query(null));
+    const update = vi.spyOn(AccountInvitation, "findOneAndUpdate").mockResolvedValue({ _id: "invitation" } as any);
+    vi.spyOn(TransactionalEmail, "updateMany").mockResolvedValue({} as any);
+    const queue = vi.spyOn(TransactionalEmail, "findOneAndUpdate").mockResolvedValue({} as any);
+    const original = JSON.stringify(user);
+    const result = await issueMemberInvitation(member, user, { _id: "gym", name: "<Gym & Fitness>" }, session, new Date("2026-01-01"));
+    expect(result).toEqual({ status: "PENDING", kind: "LINK", expiresAt: new Date("2026-01-03") });
+    const fields = update.mock.calls[0][1].$set;
+    expect(fields.tokenHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(fields).not.toHaveProperty("token");
+    const payload = queue.mock.calls[0][1].$setOnInsert.encryptedPayload;
+    expect(payload).not.toContain(user.email);
+    const email = decryptEmail(payload);
+    expect(email.html).toContain("&lt;Gym &amp; Fitness&gt;");
+    const token = new URL(email.text.match(/https?:\/\/\S+/)![0]).hash.match(/token=([^&]+)/)![1];
+    expect(sha256(decodeURIComponent(token))).toBe(fields.tokenHash);
+    expect(JSON.stringify(user)).toBe(original);
+  });
+  it("rejects expired/replaced/reused tokens through the atomic claim without writing credentials", async () => {
+    const claim = vi.spyOn(AccountInvitation, "findOneAndUpdate").mockReturnValue({ select: vi.fn().mockResolvedValue(null) } as any);
+    const identity = vi.spyOn(AuthIdentity, "create");
+    const now = new Date();
+    await expect(acceptMemberInvitation({ token: "used-token" }, now)).rejects.toMatchObject({ code: "INVITATION_INVALID" });
+    expect(claim).toHaveBeenCalledWith({ tokenHash: sha256("used-token"), consumedAt: null, expiresAt: { $gt: now } }, expect.anything(), expect.objectContaining({ session }));
+    expect(identity).not.toHaveBeenCalled();
+  });
+  it("requires the invited existing account to authenticate and never resets its password", async () => {
+    vi.spyOn(AccountInvitation, "findOneAndUpdate").mockReturnValue({ select: vi.fn().mockResolvedValue({ kind: "LINK", userId: "invited", memberId: "member", gymId: "gym", email: "member@example.test" }) } as any);
+    vi.spyOn(MemberProfile, "findOne").mockReturnValue(query({ invitation: { status: "PENDING" } }));
+    vi.spyOn(User, "findById").mockReturnValue(query({ _id: "invited", status: "ACTIVE", email: "member@example.test" }));
+    const identity = vi.spyOn(AuthIdentity, "create");
+    await expect(acceptMemberInvitation({ token: "correct-token", userId: "someone-else" })).rejects.toMatchObject({ code: "INVITATION_ACCOUNT_REQUIRED" });
+    expect(identity).not.toHaveBeenCalled();
+  });
+  it("acceptance does not restore ineligible or owner-suspended access", async () => {
+    const member = { userId: "invited", gymId: "gym", status: "INACTIVE", deactivatedAt: new Date(), invitation: { status: "PENDING" }, currentSubscriptionId: "subscription", save: vi.fn() };
+    vi.spyOn(AccountInvitation, "findOneAndUpdate").mockReturnValue({ select: vi.fn().mockResolvedValue({ kind: "LINK", userId: "invited", memberId: "member", gymId: "gym", email: "member@example.test" }) } as any);
+    vi.spyOn(MemberProfile, "findOne").mockReturnValue(query(member));
+    vi.spyOn(User, "findById").mockReturnValue(query({ _id: "invited", status: "ACTIVE", email: "member@example.test", roles: ["USER"] }));
+    const subscription = vi.spyOn(Subscription, "findOneAndUpdate").mockResolvedValue(null);
+    vi.spyOn(Gym, "exists").mockReturnValue(query({ _id: "gym" }));
+    const payment = vi.spyOn(Payment, "exists");
+    await expect(acceptMemberInvitation({ token: "correct-token", userId: "invited" })).resolves.toEqual({ linked: true, activated: false });
+    expect(member.status).toBe("INACTIVE");
+    expect(member.invitation.status).toBe("ACCEPTED");
+    expect(subscription).toHaveBeenCalledWith(expect.objectContaining({ type: "GYM_MEMBERSHIP", startsAt: { $lte: expect.any(Date) }, endsAt: { $gt: expect.any(Date) } }), { $inc: { version: 1 } }, expect.objectContaining({ session }));
+    expect(payment).not.toHaveBeenCalled();
+  });
+  it("withholds unrelated account details until the gym relationship is accepted", () => {
+    const member = { invitation: { status: "PENDING" }, contact: { name: "Gym-entered name" }, userId: { email: "private@example.test", profile: { weightKg: 90 } } };
+    expect(privatePendingMember(member)).toEqual({ ...member, userId: undefined });
+    expect(privatePendingMember({ ...member, invitation: { status: "ACCEPTED" } }).userId).toBe(member.userId);
+  });
+});

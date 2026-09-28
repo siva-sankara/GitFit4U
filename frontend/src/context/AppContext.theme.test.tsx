@@ -19,13 +19,14 @@ function Appearance() {
         {app.themePreference}:{app.theme}
       </output>
       <button onClick={() => app.setThemePreference("light")}>Light</button>
-      <button onClick={() => app.setThemePreference("system")}>System</button>
+      <button onClick={() => app.setThemePreference("dark")}>Dark</button>
     </>
   );
 }
-it("follows live operating system changes only when System is selected and releases its listener", async () => {
+it("migrates System to Light, preserves manual Dark and never subscribes to the OS theme", async () => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   localStorage.clear();
+  localStorage.setItem("gfu_theme_preference", "system");
   const listeners = new Set<() => void>();
   const media = {
     matches: false,
@@ -49,12 +50,12 @@ it("follows live operating system changes only when System is selected and relea
         </QueryClientProvider>,
       ),
     );
-    expect(host.textContent).toContain("system:light");
+    expect(host.textContent).toContain("light:light");
     await act(async () => {
       media.matches = true;
       listeners.forEach((listener) => listener());
     });
-    expect(document.documentElement.dataset.theme).toBe("dark");
+    expect(document.documentElement.dataset.theme).toBe("light");
     await act(async () => host.querySelector("button")!.click());
     expect(host.textContent).toContain("light:light");
     expect(localStorage.getItem("gfu_theme_preference")).toBe("light");
@@ -67,6 +68,8 @@ it("follows live operating system changes only when System is selected and relea
     expect(document.documentElement.dataset.theme).toBe("light");
     await act(async () => host.querySelectorAll("button")[1].click());
     expect(document.documentElement.dataset.theme).toBe("dark");
+    expect(localStorage.getItem("gfu_theme_preference")).toBe("dark");
+    expect(window.matchMedia).not.toHaveBeenCalled();
   } finally {
     await act(async () => root.unmount());
     client.clear();

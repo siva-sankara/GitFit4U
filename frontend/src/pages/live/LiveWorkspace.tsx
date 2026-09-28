@@ -854,7 +854,9 @@ export function LiveWorkspace() {
         }
         columns={
           page === "payments"
-            ? paymentCols
+            ? role === "owner"
+              ? [...paymentCols.slice(1, -1), { ...created, render: (row: Row) => membershipDate(row.createdAt, row.gymId?.timezone) }, paymentCols[0]]
+              : paymentCols
             : [
                 col("publicId", "Reference"),
                 col("amountMinor", "Amount", "money"),

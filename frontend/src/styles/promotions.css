@@ -3,11 +3,11 @@
 .promotion-card { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; padding: 18px; min-width: 0; overflow-wrap: anywhere; }
 .promotion-card h2, .promotion-card h3, .promotion-banner h3 { margin: 0; font-size: clamp(1rem, 1.5vw, 1.2rem); }
 .promotion-card p, .promotion-banner p { margin: 0; }
-.promotion-card small { color: var(--muted); }
+.promotion-card small { color: var(--text-muted); }
 .promotion-card-heading { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .promotion-code { padding: 3px 7px; border: 1px dashed var(--border); border-radius: 5px; }
 .promotion-banner { display: flex; gap: 16px; padding: 16px; min-width: 0; }
-.promotion-banner > img { width: 130px; aspect-ratio: 1; object-fit: cover; border-radius: 12px; align-self: center; }
+.promotion-banner > img { width: min(38%, 240px); max-height: 170px; height: auto; object-fit: contain; border-radius: 12px; align-self: center; }
 .promotion-banner > div { min-width: 0; display: grid; justify-items: start; gap: 8px; }
 .promotion-banner .btn { margin-top: 4px; }
 .promotion-preview { width: 100%; max-height: 180px; object-fit: cover; border-radius: 10px; }
@@ -19,5 +19,16 @@
 .promotion-form .promotion-check { display: flex; align-items: center; gap: 8px; }
 .promotion-check input { width: auto; }
 .promotion-pagination { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 12px; }
-.promotion-notice { margin: 8px 0; font-size: .85rem; color: var(--muted); }
+.promotion-notice { margin: 8px 0; font-size: .85rem; color: var(--text-muted); }
+.promotion-carousel { min-width: 0; max-width: 100%; }
+.promotion-carousel-controls { display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin-bottom: 8px; color: var(--text-muted); font-size: .8rem; }
+.promotion-carousel-controls span { margin-right: auto; }
+.promotion-carousel-track { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; overscroll-behavior-x: contain; scrollbar-width: thin; }
+.promotion-carousel-track > article { flex: 0 0 100%; scroll-snap-align: start; box-sizing: border-box; }
+.gd-membership-offers { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(230px, 1fr); gap: 18px; align-items: start; }
+.gd-membership-offers:has(.gd-offers-column:empty), .gd-membership-offers:not(:has(.gd-offers-column)) { grid-template-columns: minmax(0, 1fr); }
+.gd-offers-column { min-width: 0; padding: 20px 0; }
+.gd-offers-column:empty { display: none; }
+.gd-offers-column .promotion-grid { grid-template-columns: minmax(0, 1fr); }
+@media(max-width:1000px) { .gd-membership-offers { grid-template-columns: minmax(0,1fr); } .gd-offers-column { padding-top: 0; } }
 @media(max-width:560px) { .promotion-form { grid-template-columns: minmax(0,1fr); } .promotion-banner { flex-direction: column; } .promotion-banner > img { width: 100%; max-height: 180px; aspect-ratio: 2; } }

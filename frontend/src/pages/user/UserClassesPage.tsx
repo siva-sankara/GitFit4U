@@ -1,8 +1,14 @@
 import { useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { ClassCard } from "../../components/ClassCard";
+import { StatusBadge } from "../../components/StatusBadge";
 import { Action, QueryState, Table, useData, type Row } from "../live/LiveData";
 
 export function UserClassesPage() {
+  const [search, setSearch] = useSearchParams();
+  const bookingId = search.get("booking") || "";
+  const validBookingId = /^[a-f\d]{24}$/i.test(bookingId);
+  const selectedBooking = useData<Row>(`/api/v1/users/classes/bookings/${encodeURIComponent(bookingId)}`, validBookingId);
   const [day, setDay] = useState(""), [page, setPage] = useState(1), [bookingPage, setBookingPage] = useState(1);
   const sessions = useData<Row[]>(
     `/api/v1/users/classes?${new URLSearchParams({ day, page: String(page), limit: "12" })}`,
@@ -18,6 +24,16 @@ export function UserClassesPage() {
           <p>Find a session and book using your eligible gym membership.</p>
         </div>
       </header>
+      {bookingId && <section className="panel form-section page-stack" aria-label="Selected booking">
+        <header className="page-heading"><h2>Your booking details</h2><button className="btn btn-secondary" onClick={() => setSearch((current) => { current.delete("booking"); return current; })}>Close details</button></header>
+        {!validBookingId ? <p role="alert">This booking link is invalid.</p> : <QueryState query={selectedBooking}>
+          {selectedBooking.data?.data && <><StatusBadge status={selectedBooking.data.data.status} />
+            {selectedBooking.data.data.sessionId ? <ClassCard session={selectedBooking.data.data.sessionId} /> : <p>This class is no longer available.</p>}
+            {selectedBooking.data.data.sessionId?.publicId && ["BOOKED", "WAITLISTED"].includes(selectedBooking.data.data.status) && new Date(selectedBooking.data.data.sessionId.startsAt) > new Date() &&
+              <Action method="DELETE" path={`/api/v1/users/classes/${selectedBooking.data.data.sessionId.publicId}/bookings/${bookingId}`} confirmMessage="Cancel your place in this class?">Cancel booking</Action>}
+          </>}
+        </QueryState>}
+      </section>}
       <label className="field class-status-filter">
         <span>Filter by gym-local date</span>
         <input
@@ -73,7 +89,7 @@ export function UserClassesPage() {
           <Table
             rows={bookings.data?.data || []}
             columns={[
-              { key: "sessionId.name", title: "Class" },
+              { key: "sessionId.name", title: "Class", render: (booking) => <span>{booking.sessionId?.imageUrl && <img className="class-booking-image" src={booking.sessionId.imageUrl} alt="" loading="lazy" decoding="async" />} {booking.sessionId?.name || "Unavailable class"} <Link to={`?booking=${booking._id}`}>View booking</Link></span> },
               { key: "sessionId.startsAt", title: "Starts", format: "date" },
               { key: "status", title: "Status", format: "status" },
             ]}

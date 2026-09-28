@@ -4,6 +4,7 @@ import { Gym } from "../models/Gym.js";
 import { withGymMedia } from "../services/gymMediaService.js";
 import { withUserMedia, withTrainerMedia } from "../services/userMediaService.js";
 import { withReviewMedia } from "../services/reviewMediaService.js";
+import { withClassMedia } from "../services/classMediaService.js";
 import { MembershipPlan } from "../models/Commerce.js";
 import { ClassSession, Review, Trainer } from "../models/Engagement.js";
 import { paginationFromQuery, pageMeta } from "../utils/pagination.js";
@@ -140,7 +141,7 @@ export async function gymDetails(req: Request, res: Response) {
     data: {
       gym: (await withGymMedia([gym]))[0],
       plans,
-      classes,
+      classes: await withClassMedia(classes),
       trainers: await withTrainerMedia(trainers),
       reviews: await reviewsWithAvatars(reviews),
     },

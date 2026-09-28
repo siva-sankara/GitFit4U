@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Avatar } from "./Avatar";
 import { StatusBadge } from "./StatusBadge";
 import "../styles/classes.css";
@@ -15,8 +15,13 @@ export function ClassCard({
   const start = new Date(session.startsAt),
     end = new Date(session.endsAt);
   const slots = Math.max(0, session.capacity - session.bookedCount);
+  const [failedImage, setFailedImage] = useState<string>();
   return (
     <article className="class-card panel">
+      {session.imageUrl && failedImage !== session.imageUrl ? <img className="class-image" src={session.imageUrl}
+        alt={`${session.name} class`} loading="lazy" decoding="async" width={640} height={360}
+        referrerPolicy="no-referrer" onError={() => setFailedImage(session.imageUrl)} />
+        : <div className="class-image class-image-fallback" aria-hidden="true"><span>{session.category || "FITNESS"}</span></div>}
       <header>
         <span className="eyebrow">{session.category || "Fitness"}</span>
         <StatusBadge status={session.status} />

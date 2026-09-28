@@ -6,6 +6,7 @@ import { Modal } from "../../components/Modal";
 import { MediaImageEditor } from "../../components/MediaImageEditor";
 import { apiRequest, type ApiEnvelope } from "../../services/apiClient";
 import { ProfileEditor } from "./ProfileEditor";
+import { AccountAppSettings } from "../../components/PwaSettings";
 import { useCurrentUser } from "../../api/hooks";
 import { workspacePrefix } from "../../services/authRedirect";
 import "../../styles/social-profile.css";
@@ -423,6 +424,7 @@ function ProfileContent({ id }: { id: string }) {
           </small>
         </div>
         <div className="profile-actions">
+          {person.own && <AccountAppSettings />}
           {person.own && (
             <Link
               className="btn btn-secondary"

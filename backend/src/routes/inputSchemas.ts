@@ -59,6 +59,11 @@ export const gymInput = z.object({
     })
     .optional(),
   attendanceLocationRequired: z.boolean().optional(),
+  classReminders: z.object({
+    enabled: z.boolean(),
+    leadMinutes: z.number().int().min(15).max(1440),
+  }).strict().optional(),
+  membershipReminders: z.object({ postExpiryDays: z.number().int().min(0).max(7) }).strict().optional(),
   attendanceRadiusMeters: z.number().int().min(25).max(1000).optional(),
   openingHours: z
     .array(
@@ -133,6 +138,7 @@ export const classInput = z
     startsAt: z.coerce.date(),
     endsAt: z.coerce.date(),
     capacity: z.number().int().min(1).max(1000),
+    imageAttachmentId: id.nullable().optional(),
     room: z.string().trim().max(160).optional(),
     description: z.string().trim().max(3000).optional(),
     status: z.enum(["SCHEDULED", "CANCELLED", "COMPLETED"]).optional(),

@@ -1,6 +1,8 @@
 import type { Request, Response } from "express";
 import { z } from "zod";
 import { transitionMembership } from "../services/membershipLifecycleService.js";
+import { privatePendingMember } from "../services/memberInvitationPrivacy.js";
+import { redactPendingAccountRows } from "../services/tenantAccountPrivacy.js";
 import mongoose, { type ClientSession } from "mongoose";
 import { lockAttachments } from "../services/mediaBindingService.js";
 import { nanoid } from "nanoid";
@@ -45,6 +47,7 @@ import {
   withMemberMedia,
 } from "../services/userMediaService.js";
 import { saveGymClass } from "../services/classManagementService.js";
+import { withClassMedia } from "../services/classMediaService.js";
 
 export {
   createRegistration,
@@ -58,7 +61,7 @@ export async function dashboard(req: Request, res: Response) {
   const canReadFinance = req.auth!.permissions.includes("finance:read");
   const now = new Date();
   const gym = await Gym.findById(gymId)
-    .select("status timezone platformSubscriptionStatus")
+    .select("publicId name logoUrl logoAttachmentId status timezone platformSubscriptionStatus")
     .lean();
   const timezone = gym?.timezone || "Asia/Kolkata";
   const today = calendarDate(now, timezone);
@@ -110,6 +113,7 @@ export async function dashboard(req: Request, res: Response) {
     success: true,
     data: {
       gymStatus: gym?.status || "INACTIVE",
+      gym: gym ? (await withGymMedia([gym]))[0] : null,
       timezone,
       platformSubscription: platform
         ? {
@@ -215,7 +219,7 @@ export async function listMembers(req: Request, res: Response) {
     req.auth!.permissions.includes("finance:read") ||
     req.auth!.role === "ADMIN";
   const filter: Record<string, unknown> = { gymId: req.auth!.gymId };
-  const gym = await Gym.findById(req.auth!.gymId).select("timezone").lean();
+  const gym = await Gym.findById(req.auth!.gymId).select("timezone publicId").lean();
   const timezone = gym?.timezone || "Asia/Kolkata",
     now = new Date();
   const filters = z
@@ -392,7 +396,7 @@ export async function listMembers(req: Request, res: Response) {
   res.json({
     success: true,
     data: resolvedMembers.map((member: any) => ({
-      ...member,
+      ...privatePendingMember(member),
       assignedTrainerId:
         trainers.find(
           (trainer: any) =>
@@ -454,6 +458,7 @@ export async function getMember(req: Request, res: Response) {
           gymId: req.auth!.gymId,
         })
           .sort({ createdAt: -1 })
+          .limit(50)
           .lean()
       : Promise.resolve([]),
   ]);
@@ -461,11 +466,12 @@ export async function getMember(req: Request, res: Response) {
     member.assignedTrainerId = (
       await withTrainerMedia([member.assignedTrainerId])
     )[0];
-  const gym = await Gym.findById(req.auth!.gymId).select("timezone").lean();
+  const gym = await Gym.findById(req.auth!.gymId).select("timezone publicId").lean();
   res.json({
     success: true,
     data: {
-      member: (await withMemberMedia([member]))[0],
+      member: privatePendingMember((await withMemberMedia([member]))[0]),
+      gymPublicId: gym?.publicId,
       attendance,
       payments,
       timezone: gym?.timezone || "Asia/Kolkata",
@@ -515,8 +521,9 @@ export async function scanMember(req: Request, res: Response) {
     gymId: req.auth!.gymId!,
     memberIdentifier: req.body.memberIdentifier,
     actorId: req.auth!.userId,
+    actorRole: req.auth!.role,
+    reason: req.body.reason,
     source: "MANUAL",
-    location: req.body.location,
     idempotencyKey: req.idempotencyKey,
   });
   res
@@ -556,7 +563,7 @@ export async function listClasses(req: Request, res: Response) {
   );
   res.json({
     success: true,
-    data: data.map((row: any) => ({
+    data: (await withClassMedia(data)).map((row: any) => ({
       ...row,
       trainerId:
         trainers.find(
@@ -568,7 +575,7 @@ export async function listClasses(req: Request, res: Response) {
 }
 
 export async function createClass(req: Request, res: Response) {
-  const data = await saveGymClass({ gymId: req.auth!.gymId!, body: req.body });
+  const data = await saveGymClass({ gymId: req.auth!.gymId!, actorId: req.auth!.userId, body: req.body });
   await writeAudit(req, {
     action: "class.created",
     entityType: "ClassSession",
@@ -640,7 +647,7 @@ export async function listSubscriptions(req: Request, res: Response) {
       .lean(),
     Subscription.countDocuments(filter),
   ]);
-  res.json({ success: true, data, meta: pageMeta(page, limit, total) });
+  res.json({ success: true, data: await redactPendingAccountRows(data, req.auth!.gymId, "userId"), meta: pageMeta(page, limit, total) });
 }
 export async function subscriptionAction(req: Request, res: Response) {
   const body = z

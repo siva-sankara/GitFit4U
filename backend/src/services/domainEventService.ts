@@ -5,6 +5,7 @@ import { User } from "../models/User.js";
 // Copy belongs here, not in controllers or browser event handlers. Messages
 // intentionally exclude amounts, diagnoses, message contents and contact data.
 export const notificationEvents = {
+  "invoice.ready": ["PAYMENT", "Invoice ready", "Your invoice is available. Sign in to view or download it."],
   "membership.renewed": [
     "MEMBERSHIP",
     "Membership renewed",
@@ -35,6 +36,8 @@ export const notificationEvents = {
     "Class schedule updated",
     "A class you booked has changed. Review the updated schedule.",
   ],
+  "class.trainer_changed": ["SYSTEM", "Class trainer updated", "The trainer for your booked class has changed. View your booking for details."],
+  "class.reminder": ["SYSTEM", "Upcoming class", "Your booked class starts soon. View your booking for details."],
   "account.registered": [
     "SYSTEM",
     "Welcome to GETFIT4U",

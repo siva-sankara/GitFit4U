@@ -5,6 +5,7 @@ import * as controller from "../controllers/authController.js";
 import { requireAuth } from "../middleware/auth.js";
 import { validate } from "../middleware/validate.js";
 import { requireCsrfProtection } from "../middleware/csrf.js";
+import { activateAccount, acceptInvitation } from "../controllers/accountInvitationController.js";
 
 export const authRoutes = Router();
 authRoutes.use(requireCsrfProtection);
@@ -13,6 +14,9 @@ const otpLimiter = rateLimit({ windowMs: 15 * 60_000, limit: 20, standardHeaders
 const loginLimiter = rateLimit({ windowMs: 15 * 60_000, limit: 10, standardHeaders: true, legacyHeaders: false });
 
 const password = z.string().min(10).max(128).regex(/[A-Z]/, "One uppercase letter is required").regex(/[a-z]/, "One lowercase letter is required").regex(/\d/, "One number is required");
+const invitationToken = z.string().regex(/^[A-Za-z0-9_-]{24}\.[A-Za-z0-9_-]{43}$/);
+authRoutes.post("/activate-account", loginLimiter, validate(z.object({ body: z.object({ token: invitationToken, password }).strict(), params: z.object({}), query: z.object({}) })), activateAccount);
+authRoutes.post("/accept-invitation", loginLimiter, requireAuth, validate(z.object({ body: z.object({ token: invitationToken }).strict(), params: z.object({}), query: z.object({}) })), acceptInvitation);
 authRoutes.post("/register", loginLimiter, validate(z.object({ body: z.object({ name: z.string().trim().min(2).max(120), email: z.string().trim().email(), phone: z.string().trim().min(8).max(20).optional(), password }), params:z.object({}), query:z.object({}) })), controller.register);
 authRoutes.post("/login", loginLimiter, validate(z.object({ body: z.object({ identifier: z.string().min(3).max(160), password: z.string().min(1).max(128) }), params:z.object({}), query:z.object({}) })), controller.passwordLogin);
 authRoutes.post("/forgot-password", otpLimiter, validate(z.object({ body: z.object({ phone: z.string().min(8).max(20) }), params:z.object({}), query:z.object({}) })), controller.forgotPassword);

@@ -45,27 +45,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const client = useQueryClient(),
     [role, setRole] = useState<Role>("USER"),
     [themePreference, updateTheme] = useState<ThemePreference>(savedTheme),
-    [systemDark, setSystemDark] = useState(
-      () =>
-        window.matchMedia?.("(prefers-color-scheme: dark)").matches || false,
-    ),
     [toast, setToast] = useState<string | null>(null),
     [toastActionUrl, setToastActionUrl] = useState<string | undefined>(),
     [authenticated, setAuthenticated] = useState(!!getAccessToken());
   const session = useSession({ publicPage: true });
-  const theme = resolveTheme(themePreference, systemDark);
-  useEffect(() => {
-    const media = window.matchMedia?.("(prefers-color-scheme: dark)");
-    const change = () => setSystemDark(media?.matches || false);
-    media?.addEventListener?.("change", change);
-    return () => media?.removeEventListener?.("change", change);
-  }, []);
+  const theme = themePreference;
   useEffect(() => {
     const preference = session.data?.data.user.preferences?.theme;
     if (preference) {
-      updateTheme(preference);
+      const migrated = resolveTheme(preference);
+      updateTheme(migrated);
       try {
-        localStorage.setItem(themeStorageKey, preference);
+        localStorage.setItem(themeStorageKey, migrated);
       } catch {
         /* Browser storage may be disabled. Account preference remains available. */
       }

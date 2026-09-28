@@ -23,6 +23,7 @@ import { emitDomainEvent } from "../services/domainEventService.js";
 import { withGymMedia } from "../services/gymMediaService.js";
 import { shiftCalendarDate, zonedDayStart } from "../utils/gymCalendar.js";
 import { withTrainerMedia } from "../services/userMediaService.js";
+import { withClassMedia } from "../services/classMediaService.js";
 import {
   validateReviewImages,
   withReviewMedia,
@@ -276,7 +277,7 @@ export async function classes(req: Request, res: Response) {
     : [];
   res.json({
     success: true,
-    data: data.map((row: any) => ({
+    data: (await withClassMedia(data)).map((row: any) => ({
       ...row,
       myBooking:
         ownBookings.find(
@@ -325,24 +326,25 @@ export async function bookClass(req: Request, res: Response) {
           "GYM_UNAVAILABLE",
           "This gym is not accepting class bookings.",
         );
-      const member = await MemberProfile.findOne({
+      const member = await MemberProfile.findOneAndUpdate({
         gymId: classSession.gymId,
         userId: req.auth!.userId,
         status: "ACTIVE",
-      }).session(session);
+      }, { $inc: { version: 1 } }, { session, returnDocument: "after" });
       if (!member)
         throw new AppError(
           403,
           "ACTIVE_MEMBERSHIP_REQUIRED",
           "An active gym membership is required.",
         );
-      const active = await Subscription.exists({
+      const active = await Subscription.findOneAndUpdate({
+        type: "GYM_MEMBERSHIP",
         memberProfileId: member._id,
         gymId: classSession.gymId,
         status: "ACTIVE",
         startsAt: { $lte: classSession.startsAt },
         endsAt: { $gte: classSession.endsAt },
-      }).session(session);
+      }, { $inc: { version: 1 } }, { session, returnDocument: "after" });
       if (!active)
         throw new AppError(
           403,
@@ -377,7 +379,7 @@ export async function bookClass(req: Request, res: Response) {
         gymId: classSession.gymId,
         entityId: String(booking._id),
         occurrenceId: booking.bookedAt.toISOString(),
-        actionUrl: "/app/classes",
+        actionUrl: `/app/classes?booking=${booking._id}`,
         session,
       });
     });
@@ -429,13 +431,15 @@ export async function cancelBooking(req: Request, res: Response) {
         );
       data.status = "CANCELLED";
       data.cancelledAt = cancelledAt;
+      await Notification.updateMany({ userId: req.auth!.userId, entityId: String(data._id), event: "class.reminder", pushStatus: "QUEUED" },
+        { $set: { pushStatus: "SKIPPED" }, $unset: { pushLeaseId: 1, pushLeaseUntil: 1 } }, { session });
       await emitDomainEvent({
         event: "class.cancelled",
         userId: req.auth!.userId,
         gymId: classSession.gymId,
         entityId: String(data._id),
         occurrenceId: data.cancelledAt.toISOString(),
-        actionUrl: "/app/classes",
+        actionUrl: `/app/classes?booking=${data._id}`,
         session,
       });
     });
@@ -443,6 +447,21 @@ export async function cancelBooking(req: Request, res: Response) {
     await session.endSession();
   }
   res.json({ success: true, data });
+}
+export async function bookingDetails(req: Request, res: Response) {
+  if (!mongoose.isValidObjectId(req.params.bookingId))
+    throw new AppError(404, "BOOKING_NOT_FOUND", "Booking not found.");
+  const members = await MemberProfile.distinct("_id", { userId: req.auth!.userId });
+  const booking = await ClassBooking.findOne({ _id: req.params.bookingId, memberProfileId: { $in: members } })
+    .select("sessionId status bookedAt cancelledAt")
+    .populate({ path: "sessionId", populate: [
+      { path: "gymId", select: "name publicId timezone" },
+      { path: "trainerId", select: "name photoUrl photoAttachmentId" },
+    ] }).lean();
+  if (!booking) throw new AppError(404, "BOOKING_NOT_FOUND", "Booking not found.");
+  const [classSession] = await withClassMedia(booking.sessionId ? [booking.sessionId] : []);
+  if (classSession?.trainerId) [classSession.trainerId] = await withTrainerMedia([classSession.trainerId]);
+  res.json({ success: true, data: { ...booking, sessionId: classSession || null } });
 }
 export async function subscriptionCommand(req: Request, res: Response) {
   const command = String(req.params.command);

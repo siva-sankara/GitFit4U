@@ -24,6 +24,16 @@ it("disables unavailable calls and messages without generating invalid links", a
   expect(host.textContent).toContain("Call");
   expect(host.textContent).toContain("Message");
 });
+it("opens only the WhatsApp composer using the authorized normalized phone", async () => {
+  const rowClick = vi.fn();
+  await act(async () => { root.render(<div onClick={rowClick}><MemberQuickActions member={member} expanded /></div>); });
+  const link = host.querySelector<HTMLAnchorElement>('a[aria-label="WhatsApp Jane"]')!;
+  expect(link.href).toBe("https://wa.me/919876543210");
+  expect(link.rel).toContain("noopener");
+  await act(async () => { link.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true })); });
+  expect(rowClick).not.toHaveBeenCalled();
+  expect(mocks.request).not.toHaveBeenCalled();
+});
 it("deduplicates fast clicks, stops row navigation, and opens the exact existing conversation", async () => {
   let resolve!: (value: any) => void;
   mocks.request.mockReturnValue(new Promise(value => { resolve = value; }));

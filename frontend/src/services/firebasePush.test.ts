@@ -74,6 +74,7 @@ it("requests permission only on explicit opt-in and registers the browser token"
   });
   expect(mocks.register).toHaveBeenCalledWith("/assets/firebase-worker.js", {
     type: "module",
+    scope: "/assets/",
   });
 });
 it("handles denied permission without registering a device", async () => {

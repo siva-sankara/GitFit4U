@@ -202,10 +202,11 @@ it("shows honest empty states and avoids a purchase CTA when no plans exist", as
   expect(host.querySelector(".gd-gallery-count")).toBeNull();
 });
 
-it("shows membership choices before the overview and explains payment activation", async () => {
+it("shows gym details before adjacent membership choices and explains payment activation", async () => {
   await render(data());
-  const sections = [...host.querySelectorAll(".gd-content > section")];
-  expect(sections[0].id).toBe("gym-plans");
-  expect(sections[0].textContent).toContain("Subscribe & join");
-  expect(sections[0].textContent).toContain("after payment is verified");
+  const sections = [...host.querySelectorAll(".gd-content section")];
+  expect(sections[0].id).toBe("gym-overview");
+  const plans = host.querySelector("#gym-plans")!;
+  expect(plans.textContent).toContain("Subscribe & join");
+  expect(plans.textContent).toContain("after payment is verified");
 });

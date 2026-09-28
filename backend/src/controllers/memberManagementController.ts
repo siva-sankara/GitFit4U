@@ -18,6 +18,7 @@ import { normalizePhone } from "../services/otpService.js";
 import { emitDomainEvent } from "../services/domainEventService.js";
 import { writeAudit } from "../services/auditService.js";
 import { ensurePaymentInvoice } from "../services/invoiceService.js";
+import { issueMemberInvitation } from "../services/accountInvitationService.js";
 import { transitionMemberAccess } from "../services/membershipLifecycleService.js";
 import { AppError } from "../utils/AppError.js";
 import {
@@ -141,12 +142,14 @@ export async function createMemberWithMembership(req: Request, res: Response) {
         "MEMBER_ACCOUNT_UNAVAILABLE",
         "This account is not available for membership creation.",
       );
-    if (!user && !phone)
+    if (!user && !email)
       throw new AppError(
         422,
-        "MEMBER_PHONE_REQUIRED",
-        "A new member needs a phone number to verify their account with an OTP.",
+        "MEMBER_EMAIL_REQUIRED",
+        "A new member needs an email address to activate their account securely.",
       );
+    if (user && (!user.email || (email && user.email !== email)))
+      throw new AppError(409, "CONTACT_ACCOUNT_CONFLICT", "Verify the member's existing account email before inviting them.");
     if (!user)
       [user] = await User.create(
         [
@@ -165,6 +168,9 @@ export async function createMemberWithMembership(req: Request, res: Response) {
       gymId,
       userId: user._id,
     }).session(session);
+    const needsInvitation = !member || member.invitation?.status === "PENDING";
+    if (needsInvitation && !email)
+      throw new AppError(422, "MEMBER_EMAIL_REQUIRED", "Enter the member's existing account email to send their secure invitation.");
     if (
       member &&
       (await Subscription.exists({
@@ -179,7 +185,7 @@ export async function createMemberWithMembership(req: Request, res: Response) {
         "This member already has a current membership. Use their membership controls.",
       );
     const details = {
-      status: "ACTIVE",
+      status: needsInvitation ? "INACTIVE" : "ACTIVE",
       directAccess: false,
       contact: {
         name: body.name,
@@ -270,6 +276,7 @@ export async function createMemberWithMembership(req: Request, res: Response) {
     await subscription.save({ session });
     member.currentSubscriptionId = subscription._id;
     await member.save({ session });
+    if (needsInvitation) await issueMemberInvitation(member, user, gym, session);
     await ensurePaymentInvoice(payment, { session, subscription });
     await SubscriptionEvent.create(
       [

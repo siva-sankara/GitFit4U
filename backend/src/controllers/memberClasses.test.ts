@@ -1,7 +1,7 @@
 import mongoose from "mongoose";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { Gym } from "../models/Gym.js";
-import { ClassBooking, ClassSession } from "../models/Engagement.js";
+import { ClassBooking, ClassSession, Notification } from "../models/Engagement.js";
 import { MemberProfile } from "../models/Member.js";
 import { classes, cancelBooking } from "./memberFeatureController.js";
 vi.mock("../services/domainEventService.js", () => ({ emitDomainEvent: vi.fn() }));
@@ -34,6 +34,7 @@ it.each(["BOOKED", "WAITLISTED"])("cancels an owned %s booking without decrement
   vi.spyOn(ClassSession, "findOne").mockReturnValue({ session: vi.fn().mockResolvedValue({ _id: classId, gymId }) } as any);
   vi.spyOn(ClassBooking, "findOneAndUpdate").mockResolvedValue({ _id: "booking", status });
   vi.spyOn(ClassSession, "updateOne").mockResolvedValue({ acknowledged: true } as any);
+  vi.spyOn(Notification, "updateMany").mockResolvedValue({ acknowledged: true } as any);
   const res = { json: vi.fn() };
   await cancelBooking({ params: { id: "class-two", bookingId: "booking" }, auth: { userId: "user-one" } } as any, res as any);
   expect(ClassBooking.findOneAndUpdate).toHaveBeenCalledWith(expect.objectContaining({ memberProfileId: { $in: [memberId] } }), expect.anything(), { returnDocument: "before", session });
