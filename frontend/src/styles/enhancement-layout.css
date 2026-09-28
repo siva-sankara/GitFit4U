@@ -1,0 +1,9 @@
+.gym-identity-logo.has-image { width: auto; height: auto; min-width: 28px; max-width: 110px; flex: 0 1 auto; padding: 4px; overflow: visible; border-radius: 8px; }
+.gym-identity-logo.has-image img { width: auto; height: auto; max-width: 100px; max-height: 48px; object-fit: contain; }
+.gym-logo-preview .gym-identity-logo.has-image { max-width: 200px; }
+.gym-logo-preview .gym-identity-logo.has-image img { max-width: 185px; max-height: 100px; }
+.gd-heading .gym-identity-logo.has-image img { max-width: 120px; max-height: 64px; }
+select, option, optgroup { color: var(--text); background-color: var(--surface-solid); }
+select:disabled { color: var(--text-muted); }
+.member-quick-action-buttons { flex-wrap: wrap; }
+@media (max-width: 520px) { .gym-identity-logo.has-image img { max-width: 76px; max-height: 42px; } }

@@ -19,19 +19,20 @@ export function localDateKey(date: Date, timeZone: string) {
     .map((type) => parts.find((part) => part.type === type)!.value)
     .join("-");
 }
-/** One reminder per gym-local calendar date, expiry -7 through expiry +7. */
-export function reminderWindow(now: Date, endsAt: Date, timeZone: string) {
+/** Seven days before expiry, then the gym's bounded calendar-day follow-up window. */
+export function reminderWindow(now: Date, endsAt: Date, timeZone: string, postExpiryDays = 7) {
+  const followupDays = Number.isInteger(postExpiryDays) ? Math.max(0, Math.min(7, postExpiryDays)) : 7;
   const date = localDateKey(now, timeZone),
     expiryDate = localDateKey(endsAt, timeZone);
   const daysRemaining = Math.round(
     (Date.parse(expiryDate) - Date.parse(date)) / dayMs,
   );
-  return daysRemaining < -7 || daysRemaining > 7
+  return daysRemaining < -followupDays || daysRemaining > 7 || (endsAt <= now && followupDays === 0)
     ? null
     : { date, expiryDate, daysRemaining, expired: endsAt <= now };
 }
 
-export async function reminderStillCurrent(notification: any) {
+export async function reminderStillCurrent(notification: any, now = new Date()) {
   const meta = notification.metadata;
   if (!meta?.reminderCycle) return true;
   const subscription = await Subscription.findOne({
@@ -48,11 +49,11 @@ export async function reminderStillCurrent(notification: any) {
         : "ACTIVE",
     deletedAt: null,
   })
-    .select("timezone")
+    .select("timezone membershipReminders")
     .lean();
   if (
     !gym ||
-    !reminderWindow(new Date(), subscription.endsAt, gym.timezone || "UTC")
+    !reminderWindow(now, subscription.endsAt, gym.timezone || "UTC", subscription.type === "GYM_MEMBERSHIP" ? gym.membershipReminders?.postExpiryDays ?? 7 : 7)
   )
     return false;
   if (subscription.type === "GYM_MEMBERSHIP")
@@ -97,11 +98,11 @@ export async function scheduleMembershipReminders(now = new Date()) {
             : "ACTIVE",
         deletedAt: null,
       })
-        .select("publicId slug name timezone")
+        .select("publicId slug name timezone membershipReminders")
         .lean();
       if (!gym) continue;
       const timeZone = gym.timezone || "UTC",
-        window = reminderWindow(now, candidate.endsAt, timeZone);
+        window = reminderWindow(now, candidate.endsAt, timeZone, candidate.type === "GYM_MEMBERSHIP" ? gym.membershipReminders?.postExpiryDays ?? 7 : 7);
       if (!window) continue;
       const event =
         candidate.type === "PLATFORM"

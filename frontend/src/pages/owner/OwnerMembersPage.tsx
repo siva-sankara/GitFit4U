@@ -15,6 +15,8 @@ import {
 } from "../../components/MembershipStatusDot";
 import "../../styles/member-management.css";
 import { MemberQuickActions } from "../../components/MemberQuickActions";
+import { MemberInvitationStatus } from "../../components/MemberInvitationStatus";
+import { navigationSessionScope, useMemberListState } from "../../services/navigationSession";
 
 export type MemberRow = Record<string, any>;
 export const memberName = (row: MemberRow) =>
@@ -127,7 +129,7 @@ export function MemberEditor({
         <p className="full-width">
           {edit
             ? "These details are stored in this gym's member record. Account sign-in details remain managed by the member."
-            : "The selected plan, membership and offline receipt are saved together. New members verify their phone with an OTP to access their account."}
+            : "The selected plan, membership and offline receipt are saved together. New members receive an email to set their own password; existing members sign in and accept a secure gym invitation."}
         </p>
         {(
           [
@@ -143,7 +145,7 @@ export function MemberEditor({
               className="input"
               name={key}
               type={type}
-              required={key === "name" || (!edit && key === "phone")}
+              required={key === "name" || (!edit && key === "email")}
               maxLength={200}
               defaultValue={
                 member?.contact?.[key] ||
@@ -304,17 +306,15 @@ export function OwnerMembersPage() {
     session.data?.data.context.permissions.includes("finance:read");
   const canManage =
     session.data?.data.context.permissions.includes("member:write");
-  const [page, setPage] = useState(1),
-    [search, setSearch] = useState(""),
-    [debouncedSearch, setDebouncedSearch] = useState(""),
-    [status, setStatus] = useState(""),
-    [planId, setPlanId] = useState(""),
-    [trainerId, setTrainerId] = useState(""),
-    [create, setCreate] = useState(false);
+  const listScope = navigationSessionScope(session.data?.data.context);
+  const [{ page, search, status, planId, trainerId }, setList] = useMemberListState(listScope);
+  const [debounced, setDebounced] = useState({ scope: listScope, search });
+  const debouncedSearch = debounced.scope === listScope ? debounced.search : search;
+  const [create, setCreate] = useState(false);
   useEffect(() => {
-    const timer = window.setTimeout(() => setDebouncedSearch(search), 300);
+    const timer = window.setTimeout(() => setDebounced({ scope: listScope, search }), 300);
     return () => window.clearTimeout(timer);
-  }, [search]);
+  }, [search, listScope]);
   const plans = useQuery({
     queryKey: ["api", "/api/v1/owner/plans"],
     enabled: session.data?.data.context.permissions.includes("gym:read"),
@@ -369,8 +369,7 @@ export function OwnerMembersPage() {
             placeholder="Search name, phone or member code"
             value={search}
             onChange={(e) => {
-              setSearch(e.target.value);
-              setPage(1);
+              setList({ search: e.target.value, page: 1 });
             }}
           />
         </label>
@@ -379,8 +378,7 @@ export function OwnerMembersPage() {
           aria-label="Membership status"
           value={status}
           onChange={(e) => {
-            setStatus(e.target.value);
-            setPage(1);
+            setList({ status: e.target.value, page: 1 });
           }}
         >
           <option value="">All statuses</option>
@@ -404,8 +402,7 @@ export function OwnerMembersPage() {
           aria-label="Membership plan"
           value={planId}
           onChange={(event) => {
-            setPlanId(event.target.value);
-            setPage(1);
+            setList({ planId: event.target.value, page: 1 });
           }}
         >
           <option value="">All plans</option>
@@ -420,8 +417,7 @@ export function OwnerMembersPage() {
           aria-label="Assigned trainer"
           value={trainerId}
           onChange={(event) => {
-            setTrainerId(event.target.value);
-            setPage(1);
+            setList({ trainerId: event.target.value, page: 1 });
           }}
         >
           <option value="">All trainers</option>
@@ -490,6 +486,7 @@ export function OwnerMembersPage() {
                       />
                       <strong>{memberName(row)}</strong>
                     </div>
+                    <MemberInvitationStatus member={row} canManage={canManage} />
                     <small>
                       Trainer: {row.assignedTrainerId?.name || "Not assigned"}
                     </small>
@@ -556,13 +553,13 @@ export function OwnerMembersPage() {
       <footer className="table-footer panel">
         <span>{query.data?.meta?.total || 0} members</span>
         <div>
-          <button disabled={page <= 1} onClick={() => setPage(page - 1)}>
+          <button disabled={page <= 1} onClick={() => setList({ page: page - 1 })}>
             Previous
           </button>
           <span>Page {page}</span>
           <button
             disabled={page >= (query.data?.meta?.pages || 1)}
-            onClick={() => setPage(page + 1)}
+            onClick={() => setList({ page: page + 1 })}
           >
             Next
           </button>

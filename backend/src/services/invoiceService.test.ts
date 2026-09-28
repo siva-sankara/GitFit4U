@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { invoicePaymentScope, invoicePricing } from "./invoiceService.js";
+import { invoicePaymentScope, invoicePricing, invoiceCustomerSnapshot } from "./invoiceService.js";
 import { renderInvoicePdf } from "./invoicePdfService.js";
 
 describe("invoice authorization and immutable pricing", () => {
+  it("withholds global account contact details from invoices until a new gym invitation is accepted", () => {
+    const customer = { name: "Private account name", email: "private@example.test", phone: "+919999999999" };
+    expect(invoiceCustomerSnapshot({ invitation: { status: "PENDING" }, contact: { name: "Entered by gym", email: "entered@example.test" }, memberCode: "MEMBER-1" }, customer)).toEqual({ name: "Entered by gym", email: "entered@example.test", phone: undefined, memberCode: "MEMBER-1" });
+  });
   const user = { role: "USER", userId: "member-a", permissions: [] as string[] };
   it("scopes members to their payments, owners to their active gym, and platform admins globally", () => {
     expect(invoicePaymentScope(user)).toEqual({ payerId: "member-a" });

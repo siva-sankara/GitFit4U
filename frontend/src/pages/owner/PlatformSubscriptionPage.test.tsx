@@ -54,6 +54,13 @@ it("does not load or switch an unassigned reminder gym", async () => {
   expect(mocks.request).not.toHaveBeenCalled();
   expect(mocks.checkout).not.toHaveBeenCalled();
 });
+it("shows separate platform and capacity cards with the remaining member allowance", async () => {
+  session.context.gymId = gymA._id;
+  await render("/owner/platform-subscription");
+  expect(host.querySelectorAll(".platform-summary-grid > section").length).toBe(2);
+  expect(host.querySelector('[aria-label="Member capacity"]')?.textContent).toContain("Remaining capacity16");
+  expect(host.querySelector("progress")?.getAttribute("max")).toBe("20");
+});
 it("confirms even a reminder for the current gym, without unnecessary role mutation", async () => {
   session.context.gymId = gymA._id;
   await render();

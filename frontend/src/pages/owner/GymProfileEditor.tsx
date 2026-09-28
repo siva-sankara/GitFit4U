@@ -189,12 +189,42 @@ export function GymProfileEditor({
               canWrite={permissions.includes("class:write")}
               canRead={permissions.includes("gym:read")}
             />
+            <ClassReminderSettings gym={gym.data.data} disabled={!canEdit} />
+            <MembershipReminderSettings gym={gym.data.data} disabled={!canEdit} />
             <GymTermsEditor terms={gym.data.data.terms} disabled={!canEdit} />
           </>
         )}
       </QueryState>
     </div>
   );
+}
+export function MembershipReminderSettings({ gym, disabled }: { gym: Row; disabled: boolean }) {
+  const save = useSaveGym();
+  return <section className="panel form-section page-stack"><h2>Membership renewal reminders</h2>
+    <p>Daily reminders begin seven days before a member's gym membership expires. Choose how long to follow up after expiry; member notification preferences still apply.</p>
+    <form onSubmit={(event) => {
+      event.preventDefault(); const values = new FormData(event.currentTarget);
+      save.mutate({ membershipReminders: { postExpiryDays: Number(values.get("postExpiryDays")) } });
+    }}><fieldset className="profile-fieldset" disabled={disabled || save.isPending}>
+      <label className="field"><span>Days after membership expiry</span><input className="input" name="postExpiryDays" type="number" min={0} max={7} step={1} required defaultValue={gym.membershipReminders?.postExpiryDays ?? 7} /></label>
+      <small>0 stops reminders at expiry; the maximum is 7 days. Platform subscription reminders are managed separately.</small>
+      <button className="btn btn-primary">Save renewal reminders</button>
+    </fieldset><SaveResult save={save} /></form>
+  </section>;
+}
+function ClassReminderSettings({ gym, disabled }: { gym: Row; disabled: boolean }) {
+  const save = useSaveGym();
+  return <section className="panel form-section page-stack"><h2>Class reminders</h2>
+    <p>Remind confirmed attendees before their class. Their notification preferences still apply.</p>
+    <form onSubmit={(event) => {
+      event.preventDefault(); const values = new FormData(event.currentTarget);
+      save.mutate({ classReminders: { enabled: values.get("enabled") === "on", leadMinutes: Number(values.get("leadMinutes")) } });
+    }}><fieldset className="profile-fieldset" disabled={disabled || save.isPending}>
+      <label><input type="checkbox" name="enabled" defaultChecked={gym.classReminders?.enabled !== false} /> Enable class reminders</label>
+      <label className="field"><span>Minutes before class</span><input className="input" name="leadMinutes" type="number" min={15} max={1440} required defaultValue={gym.classReminders?.leadMinutes ?? 60} /></label>
+      <button className="btn btn-primary">Save reminder settings</button>
+    </fieldset><SaveResult save={save} /></form>
+  </section>;
 }
 export function GymMediaEditor({
   gym,

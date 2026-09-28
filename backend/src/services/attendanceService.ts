@@ -34,6 +34,8 @@ export async function checkIn(input: {
   gymId: string;
   memberIdentifier: string;
   actorId: string;
+  actorRole?: string;
+  reason?: string;
   memberUserId?: string;
   source: "QR" | "MANUAL";
   scannerId?: string;
@@ -72,7 +74,7 @@ export async function checkIn(input: {
         );
       const now = new Date();
       let locationEvidence;
-      if (gym.attendanceLocationRequired) {
+      if (input.source === "QR" && gym.attendanceLocationRequired) {
         const point = input.location;
         if (!point)
           throw new AppError(
@@ -163,6 +165,8 @@ export async function checkIn(input: {
               : undefined,
             dailyKey,
             createdBy: input.actorId,
+            createdByRole: input.actorRole,
+            reason: input.source === "MANUAL" ? input.reason : undefined,
             locationEvidence,
           },
         ],

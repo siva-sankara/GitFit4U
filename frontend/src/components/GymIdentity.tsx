@@ -14,7 +14,7 @@ export function GymIdentity({
   useEffect(() => setFailed(false), [logoUrl]);
   return (
     <span className={`gym-identity ${className}`}>
-      <span className="gym-identity-logo">
+      <span className={`gym-identity-logo${logoUrl && !failed ? " has-image" : ""}`}>
         {logoUrl && !failed ? (
           <img
             src={logoUrl}

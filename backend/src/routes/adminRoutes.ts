@@ -21,6 +21,7 @@ import { requireIdempotencyKey } from "../middleware/idempotency.js";
 import { validate } from "../middleware/validate.js";
 import { platformInput } from "./inputSchemas.js";
 import * as promotions from "../controllers/promotionController.js";
+import { adminManualCheckIn } from "../controllers/attendanceController.js";
 
 export const adminRoutes = Router();
 adminRoutes.use(
@@ -29,6 +30,7 @@ adminRoutes.use(
   requirePermission("admin:platform"),
 );
 adminRoutes.get("/dashboard", controller.dashboard);
+adminRoutes.post("/gyms/:gymId/attendance", requireIdempotencyKey, adminManualCheckIn);
 adminRoutes.get("/promotions/offers", promotions.listOffers);
 adminRoutes.post("/promotions/offers", promotions.createOffer);
 adminRoutes.patch("/promotions/offers/:id", promotions.updateOffer);

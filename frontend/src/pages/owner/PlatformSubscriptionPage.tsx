@@ -4,6 +4,9 @@ import { Link, useSearchParams } from "react-router-dom";
 import { useCurrentUser } from "../../api/hooks";
 import { apiRequest, setAccessToken, type ApiEnvelope } from "../../services/apiClient";
 import { Modal } from "../../components/Modal";
+import { GymIdentity } from "../../components/GymIdentity";
+import { StatusBadge } from "../../components/StatusBadge";
+import "../../styles/platform-subscription.css";
 import { PaymentCheckout } from "../live/LivePublic";
 import { useData, QueryState, money, type Row } from "../live/LiveData";
 export function PlatformSubscriptionPage() {
@@ -76,28 +79,33 @@ export function PlatformSubscriptionPage() {
         This gym is {target.status.toLowerCase()}. Contact support about its status. Renewal does not remove administrative restrictions.
       </p>}
       <QueryState query={dashboard}>
-        <section className="panel form-section">
-          <h2>{sub?.plan?.name || "No platform subscription"}</h2>
-          <p>
-            {sub?.status || "Complete gym registration first"}
-            {sub?.endsAt
-              ? ` · Expires ${new Date(sub.endsAt).toLocaleDateString()}`
-              : ""}
-          </p>
-          {sub?.usage && (
-            <p>
-              {sub.usage.members} / {sub.usage.memberLimit ?? "unlimited"}{" "}
-              members
-            </p>
-          )}
-          <p>
-            Unused active days are preserved. Renewals do not enable automatic
-            charging.
-          </p>
-        </section>
+        <div className="platform-summary-grid">
+          <section className="panel platform-summary-card">
+            <GymIdentity name={target.name} logoUrl={dashboard.data?.data.gym?.logoUrl || target.logoUrl} subtitle="GETFIT4U platform subscription" />
+            <div className="heading-actions"><h2>{sub?.plan?.name || "No platform subscription"}</h2>{sub?.status && <StatusBadge status={sub.status} />}</div>
+            <dl>
+              <div><dt>Starts</dt><dd>{sub?.startsAt ? new Date(sub.startsAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: dashboard.data?.data.timezone || "Asia/Kolkata" }) : "—"}</dd></div>
+              <div><dt>Expires</dt><dd>{sub?.endsAt ? new Date(sub.endsAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: dashboard.data?.data.timezone || "Asia/Kolkata" }) : "—"}</dd></div>
+              {sub?.plan?.priceMinor != null && <div><dt>Plan price</dt><dd>{money(sub.plan.priceMinor)}</dd></div>}
+            </dl>
+            {!!sub?.plan?.features?.length && <ul>{sub.plan.features.map((feature: string) => <li key={feature}>{feature}</li>)}</ul>}
+            <p>Unused active days are preserved. Renewals do not enable automatic charging.</p>
+            {sub?.canRenew && <a className="btn btn-primary" href="#platform-renewal-plans">Renew platform subscription</a>}
+          </section>
+          <section className="panel platform-summary-card" aria-label="Member capacity">
+            <span className="eyebrow">Member capacity</span>
+            <h2>{sub?.usage ? `${sub.usage.members} active members` : "Usage unavailable"}</h2>
+            {sub?.usage && <>
+              <dl><div><dt>Plan limit</dt><dd>{sub.usage.memberLimit == null ? "Unlimited" : sub.usage.memberLimit}</dd></div>
+              <div><dt>Remaining capacity</dt><dd>{sub.usage.memberLimit == null ? "Unlimited" : Math.max(0, sub.usage.memberLimit - sub.usage.members)}</dd></div></dl>
+              {sub.usage.memberLimit != null && sub.usage.memberLimit > 0 && <progress aria-label="Member capacity used" max={sub.usage.memberLimit} value={Math.min(sub.usage.members, sub.usage.memberLimit)} />}
+              <p>This limit covers active gym members. Individual membership dates and fees are managed separately.</p>
+            </>}
+          </section>
+        </div>
       </QueryState>
       <QueryState query={plans}>
-        <div className="plans-grid">
+        <div className="plans-grid" id="platform-renewal-plans">
           {plans.data?.data.map((item) => (
             <article className="panel plan-card" key={item._id}>
               <h2>{item.name}</h2>

@@ -7,6 +7,7 @@ import { StatusBadge } from "../../components/StatusBadge";
 import { Modal } from "../../components/Modal";
 import { Avatar } from "../../components/Avatar";
 import { MemberQuickActions } from "../../components/MemberQuickActions";
+import { MemberInvitationStatus } from "../../components/MemberInvitationStatus";
 import { gymDate } from "../../components/MembershipStatusDot";
 import {
   MemberEditor,
@@ -134,6 +135,7 @@ export function OwnerMemberDetailsPage({ id }: { id: string }) {
       <div className="member-detail-grid">
         <section className="panel">
           <h2>Profile and contact</h2>
+          <MemberInvitationStatus member={member} canManage={canManage} />
           <dl className="member-summary-grid">
             <div>
               <Avatar
@@ -407,6 +409,7 @@ export function OwnerMemberDetailsPage({ id }: { id: string }) {
         {canReadFinance && (
           <section className="panel member-management-scroll">
             <h2>Payment history</h2>
+            <p>Latest 50 payments. The Payments page contains the full history.</p>
             <table className="member-management-table">
               <thead>
                 <tr>

@@ -32,7 +32,8 @@ export const profileUpdateInput = z
       .strict()
       .optional(),
     preferences: z
-      .object({ theme: z.enum(["system", "light", "dark"]).optional() })
+      // Accept old clients during rollout, but never persist System again.
+      .object({ theme: z.enum(["system", "light", "dark"]).transform(value => value === "system" ? "light" : value).optional() })
       .strict()
       .optional(),
     notificationPreferences: z

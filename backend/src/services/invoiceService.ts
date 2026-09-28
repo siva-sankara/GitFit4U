@@ -1,11 +1,12 @@
 import mongoose, { type ClientSession } from "mongoose";
 import { nanoid } from "nanoid";
-import { Invoice } from "../models/Business.js";
+import { Attachment, Invoice } from "../models/Business.js";
 import { Payment, Subscription } from "../models/Commerce.js";
 import { Gym } from "../models/Gym.js";
 import { User } from "../models/User.js";
 import { MemberProfile } from "../models/Member.js";
 import { AppError } from "../utils/AppError.js";
+import { queueInvoiceDelivery } from "./invoiceDeliveryService.js";
 
 export const invoicedPaymentStates = ["CAPTURED", "PARTIALLY_REFUNDED", "REFUNDED", "REFUND_PENDING", "DISPUTED"];
 export function invoicePaymentScope(auth: { role: string; userId: string; gymId?: string; permissions: string[] }) {
@@ -34,6 +35,10 @@ export function invoicePricing(payment: any, subscription?: any, quote?: any) {
   return { totalMinor: payment.amountMinor, currency: payment.currency, breakdownUnavailable: true };
 }
 
+export function invoiceCustomerSnapshot(member: any, customer: any) {
+  const pending = member?.invitation?.status === "PENDING";
+  return { name: member?.contact?.name || (!pending && customer?.name) || "Member", email: pending ? member?.contact?.email : customer?.email, phone: pending ? member?.contact?.phone : customer?.phone, memberCode: member?.memberCode };
+}
 type InvoiceOptions = { session?: ClientSession; quote?: any; subscription?: any };
 export async function ensurePaymentInvoice(payment: any, options: InvoiceOptions = {}): Promise<any> {
   if (!invoicedPaymentStates.includes(payment.status) || !payment.capturedAt)
@@ -42,20 +47,21 @@ export async function ensurePaymentInvoice(payment: any, options: InvoiceOptions
     return mongoose.connection.transaction(session => ensurePaymentInvoice(payment, { ...options, session }));
   const session = options.session;
   const existing = await Invoice.findOne({ paymentId: payment._id }).session(session);
-  if (existing) return existing;
+  if (existing) { await queueInvoiceDelivery(existing, session); return existing; }
   const subscription = options.subscription || (payment.subscriptionId ? await Subscription.findById(payment.subscriptionId).session(session) : null);
   const gym = payment.gymId ? await Gym.findById(payment.gymId).session(session) : null;
   const customer = await User.findById(payment.payerId).session(session);
   const owner = gym?.ownerId ? await User.findById(gym.ownerId).select("name").session(session) : null;
-  const member = subscription?.memberProfileId ? await MemberProfile.findById(subscription.memberProfileId).select("memberCode contact").session(session) : null;
+  const member = subscription?.memberProfileId ? await MemberProfile.findById(subscription.memberProfileId).select("memberCode contact invitation").session(session) : null;
   const pricing = invoicePricing(payment, subscription, options.quote);
   const plan = subscription?.planSnapshot || options.quote?.planSnapshot;
   const platform = payment.purpose === "PLATFORM_PLAN";
+  const logo = !platform && gym?.logoAttachmentId ? await Attachment.findOneAndUpdate({ _id: gym.logoAttachmentId, gymId: gym._id, status: "READY", deletedAt: null }, { $inc: { bindingVersion: 1 } }, { session, returnDocument: "after" }).select("_id") : null;
   const fields = {
-    publicId: nanoid(24), number: `GFU-${payment.publicId}`, snapshotVersion: 2,
+    publicId: nanoid(24), number: `GFU-${payment.publicId}`, snapshotVersion: 2, purpose: payment.purpose,
     paymentId: payment._id, subscriptionId: subscription?._id, gymId: payment.gymId, userId: payment.payerId,
-    supplierSnapshot: { name: platform ? "GETFIT4U" : gym?.name || "Gym", ownerName: platform ? undefined : owner?.name, address: platform ? undefined : gym?.address, contact: platform ? undefined : gym?.contact, logoAttachmentId: platform ? undefined : gym?.logoAttachmentId, gymName: gym?.name, timezone: gym?.timezone || "Asia/Kolkata" },
-    customerSnapshot: { name: member?.contact?.name || customer?.name || "Member", email: customer?.email, phone: customer?.phone, memberCode: member?.memberCode },
+    supplierSnapshot: { name: platform ? "GETFIT4U" : gym?.name || "Gym", ownerName: platform ? undefined : owner?.name, address: platform ? undefined : gym?.address, contact: platform ? undefined : gym?.contact, logoAttachmentId: logo?._id, gymName: gym?.name, timezone: gym?.timezone || "Asia/Kolkata" },
+    customerSnapshot: invoiceCustomerSnapshot(member, customer),
     membershipSnapshot: subscription ? { name: plan?.name, startsAt: subscription.startsAt, endsAt: subscription.endsAt, durationDays: plan?.durationDays, status: subscription.status } : undefined,
     paymentSnapshot: { reference: payment.publicId, transactionReference: payment.providerPaymentId || payment.metadata?.reference, provider: payment.provider, method: payment.methodCategory, paidAt: payment.capturedAt, status: payment.status },
     pricingSnapshot: pricing,
@@ -64,7 +70,9 @@ export async function ensurePaymentInvoice(payment: any, options: InvoiceOptions
     totalMinor: payment.amountMinor, currency: payment.currency, issuedAt: new Date(), status: "ISSUED",
   };
   // The existing unique invoice number provides idempotency without a new collection.
-  return Invoice.findOneAndUpdate({ number: fields.number }, { $setOnInsert: fields }, { upsert: true, returnDocument: "after", session, runValidators: true });
+  const invoice = await Invoice.findOneAndUpdate({ number: fields.number }, { $setOnInsert: fields }, { upsert: true, returnDocument: "after", session, runValidators: true });
+  await queueInvoiceDelivery(invoice, session);
+  return invoice;
 }
 
 export async function paymentInvoice(publicId: string, auth: Parameters<typeof invoicePaymentScope>[0]) {

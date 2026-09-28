@@ -1,5 +1,6 @@
 ﻿import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
+import type { ReactNode } from "react";
 import { Avatar } from "../../components/Avatar";
 import {
   ArrowLeft,
@@ -87,6 +88,8 @@ export function GymDetailsView({
   joinError,
   reviewsState,
   reviewDisabled,
+  offers,
+  advertisements,
 }: {
   data: Row;
   saved: boolean;
@@ -105,6 +108,8 @@ export function GymDetailsView({
     onPage: (page: number) => void;
   };
   reviewDisabled?: boolean;
+  offers?: ReactNode;
+  advertisements?: ReactNode;
 }) {
   const gym = data.gym,
     plans: Row[] = data.plans || [],
@@ -290,6 +295,103 @@ export function GymDetailsView({
       </nav>
       <div className="gd-layout">
         <div className="gd-content">
+          <section id="gym-overview" className="gd-section">
+            <span className="gd-kicker">GET TO KNOW THE SPACE</span>
+            <h2>A place for your next chapter</h2>
+            <p className="gd-description">
+              {gym.description ||
+                "Explore the membership options and contact the gym to find the right fit for your routine."}
+            </p>
+            {!!facilityItems.length && (
+              <>
+                <h3>Everything you need</h3>
+                <div className="gd-facilities">
+                  {facilityItems.map((f) => (
+                    <div key={f}>
+                      <Check size={17} />
+                      <span>{f}</span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+            {!!gym.benefits?.length && (
+              <div className="gd-benefits">
+                <h3>More with your membership</h3>
+                <ul>
+                  {gym.benefits.map((b: string) => (
+                    <li key={b}>
+                      <Check size={17} />
+                      <span>{b}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </section>
+          <section id="gym-visit" className="gd-section">
+            <span className="gd-kicker">PLAN YOUR FIRST VISIT</span>
+            <h2>Find your way here</h2>
+            <p className="gd-address">
+              <MapPin size={20} />
+              {address || "Contact the gym for the full address."}
+            </p>
+            {validCoordinates(point) && <GymLocation point={point} />}
+            <div className="gd-visit-contact">
+              {gym.contact?.phone && (
+                <a
+                  className="btn btn-secondary"
+                  href={`tel:${gym.contact.phone}`}
+                >
+                  <Phone size={17} />
+                  Call the gym
+                </a>
+              )}
+              {gym.contact?.whatsapp && (
+                <a
+                  className="btn btn-secondary"
+                  href={`https://wa.me/${gym.contact.whatsapp.replace(/\D/g, "")}`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Chat on WhatsApp <ArrowUpRight size={16} />
+                </a>
+              )}
+            </div>
+            <div className="gd-hours">
+              <div>
+                <Clock3 size={24} />
+                <h3>Opening hours</h3>
+                <p>{timezone.replaceAll("_", " ")}</p>
+              </div>
+              <dl>
+                {days.map((day) => {
+                  const h = gym.openingHours?.find(
+                    (v: Row) => v.day === days.indexOf(day),
+                  );
+                  return (
+                    <div key={day} className={today === day ? "is-today" : ""}>
+                      <dt>
+                        {day}
+                        {today === day && <small>Today</small>}
+                      </dt>
+                      <dd>
+                        {!h
+                          ? "Not provided"
+                          : h.closed
+                            ? "Closed"
+                            : `${h.opensAt} – ${h.closesAt}`}
+                        {h && !h.closed && h.closesAt < h.opensAt && (
+                          <small>Next day</small>
+                        )}
+                      </dd>
+                    </div>
+                  );
+                })}
+              </dl>
+            </div>
+          </section>
+          <div className="gd-membership-offers">
           <section id="gym-plans" className="gd-section">
             <div className="gd-section-heading">
               <div>
@@ -387,40 +489,10 @@ export function GymDetailsView({
               </div>
             )}
           </section>
-          <section id="gym-overview" className="gd-section">
-            <span className="gd-kicker">GET TO KNOW THE SPACE</span>
-            <h2>A place for your next chapter</h2>
-            <p className="gd-description">
-              {gym.description ||
-                "Explore the membership options and contact the gym to find the right fit for your routine."}
-            </p>
-            {!!facilityItems.length && (
-              <>
-                <h3>Everything you need</h3>
-                <div className="gd-facilities">
-                  {facilityItems.map((f) => (
-                    <div key={f}>
-                      <Check size={17} />
-                      <span>{f}</span>
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
-            {!!gym.benefits?.length && (
-              <div className="gd-benefits">
-                <h3>More with your membership</h3>
-                <ul>
-                  {gym.benefits.map((b: string) => (
-                    <li key={b}>
-                      <Check size={17} />
-                      <span>{b}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </section>
+          {offers && <aside className="gd-offers-column">{offers}</aside>}
+          </div>
+
+          {advertisements}
           <section id="gym-classes" className="gd-section">
             <div className="gd-section-heading">
               <div>
@@ -470,68 +542,7 @@ export function GymDetailsView({
               </div>
             </section>
           )}
-          <section id="gym-visit" className="gd-section">
-            <span className="gd-kicker">PLAN YOUR FIRST VISIT</span>
-            <h2>Find your way here</h2>
-            <p className="gd-address">
-              <MapPin size={20} />
-              {address || "Contact the gym for the full address."}
-            </p>
-            {validCoordinates(point) && <GymLocation point={point} />}
-            <div className="gd-visit-contact">
-              {gym.contact?.phone && (
-                <a
-                  className="btn btn-secondary"
-                  href={`tel:${gym.contact.phone}`}
-                >
-                  <Phone size={17} />
-                  Call the gym
-                </a>
-              )}
-              {gym.contact?.whatsapp && (
-                <a
-                  className="btn btn-secondary"
-                  href={`https://wa.me/${gym.contact.whatsapp.replace(/\D/g, "")}`}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Chat on WhatsApp <ArrowUpRight size={16} />
-                </a>
-              )}
-            </div>
-            <div className="gd-hours">
-              <div>
-                <Clock3 size={24} />
-                <h3>Opening hours</h3>
-                <p>{timezone.replaceAll("_", " ")}</p>
-              </div>
-              <dl>
-                {days.map((day) => {
-                  const h = gym.openingHours?.find(
-                    (v: Row) => v.day === days.indexOf(day),
-                  );
-                  return (
-                    <div key={day} className={today === day ? "is-today" : ""}>
-                      <dt>
-                        {day}
-                        {today === day && <small>Today</small>}
-                      </dt>
-                      <dd>
-                        {!h
-                          ? "Not provided"
-                          : h.closed
-                            ? "Closed"
-                            : `${h.opensAt} – ${h.closesAt}`}
-                        {h && !h.closed && h.closesAt < h.opensAt && (
-                          <small>Next day</small>
-                        )}
-                      </dd>
-                    </div>
-                  );
-                })}
-              </dl>
-            </div>
-          </section>
+
           <section id="gym-reviews" className="gd-section">
             <div className="gd-section-heading">
               <div>

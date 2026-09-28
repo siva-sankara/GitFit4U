@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft,
   Archive,
@@ -689,14 +689,14 @@ export function MessagesPage({
                           mine
                             ? "Your message"
                             : "Message from " +
-                              (message.senderId?.name || "Member")
+                              (message.type === "SYSTEM" ? "GETFIT4U" : message.senderId?.name || "Member")
                         }
                       >
                         {!mine && (
                           <div className="chat-sender">
                             <Avatar user={message.senderId} size={24} />
                             <strong>
-                              {message.senderId?.name || "Member"}
+                              {message.type === "SYSTEM" ? "GETFIT4U" : message.senderId?.name || "Member"}
                             </strong>
                           </div>
                         )}
@@ -705,6 +705,7 @@ export function MessagesPage({
                             ? "This message was deleted."
                             : message.text}
                         </p>
+                        {message.type === "SYSTEM" && ["/app/profile/payments", "/owner/payments"].includes(message.actionUrl) && <Link className="chat-attachment" to={message.actionUrl}>View / Download Invoice</Link>}
                         {!message.deletedAt &&
                           message.attachments?.map(
                             (attachment: Row, index: number) => (
@@ -778,7 +779,7 @@ export function MessagesPage({
                     {mutation.error?.message}
                   </p>
                 ))}
-                {closed ? (
+                {details.data?.data?.type === "SYSTEM" ? <p className="chat-closed">GETFIT4U receipts are read-only. Contact your gym through a separate conversation.</p> : closed ? (
                   <div className="chat-closed">
                     <span>
                       This support conversation is {ticket.status.toLowerCase()}

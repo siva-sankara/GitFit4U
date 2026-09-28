@@ -6,6 +6,7 @@ import { AuditLog } from "../models/Operations.js";
 import * as events from "./domainEventService.js";
 import { MemberProfile } from "../models/Member.js";
 import { Gym } from "../models/Gym.js";
+import { gymInput } from "../routes/inputSchemas.js";
 import {
   localDateKey,
   reminderWindow,
@@ -35,6 +36,7 @@ it.each([
   },
 );
 function scheduledSetup() {
+  const gym = { _id: "gym", publicId: "gym-public", slug: "real-gym", name: "Actual Gym", timezone: "Asia/Kolkata", membershipReminders: { postExpiryDays: 7 } };
   const record = {
     _id: "subscription",
     publicId: "membership-public",
@@ -56,13 +58,7 @@ function scheduledSetup() {
   vi.spyOn(Subscription, "find").mockReturnValue(cursorQuery);
   vi.spyOn(Gym, "findOne").mockReturnValue({
     select: () => ({
-      lean: async () => ({
-        _id: "gym",
-        publicId: "gym-public",
-        slug: "real-gym",
-        name: "Actual Gym",
-        timezone: "Asia/Kolkata",
-      }),
+      lean: async () => gym,
     }),
   } as never);
   const duplicate = vi.spyOn(Notification, "exists").mockResolvedValue(null);
@@ -92,7 +88,7 @@ function scheduledSetup() {
     .spyOn(events, "emitDomainEvent")
     .mockResolvedValue({ upsertedCount: 1 } as never);
   const audit = vi.spyOn(AuditLog, "create").mockResolvedValue([] as never);
-  return { record, duplicate, member, emit, audit, lock };
+  return { record, gym, duplicate, member, emit, audit, lock };
 }
 it("records a daily, cycle-specific reminder and audit with real plan details", async () => {
   const { emit, audit } = scheduledSetup();
@@ -220,4 +216,41 @@ it("suppresses an old subscription after renewal replaced the member's current p
   expect(pointer.mock.calls[0][0]).toMatchObject({
     currentSubscriptionId: "old-sub",
   });
+});
+it("accepts only typed, bounded follow-up settings, including zero", () => {
+  for (const postExpiryDays of [-1, 8, 2.5, "3"]) expect(gymInput.partial().safeParse({ membershipReminders: { postExpiryDays } }).success).toBe(false);
+  for (const postExpiryDays of [0, 3, 7]) expect(gymInput.partial().safeParse({ membershipReminders: { postExpiryDays } }).success).toBe(true);
+  expect(gymInput.partial().safeParse({ membershipReminders: { postExpiryDays: 3, enabled: false } }).success).toBe(false);
+});
+it("shortens follow-ups without changing the seven-day pre-expiry schedule", () => {
+  expect(reminderWindow(new Date("2026-10-13T10:00:00Z"), expiry, "UTC", 3)).not.toBeNull();
+  expect(reminderWindow(new Date("2026-10-14T10:00:00Z"), expiry, "UTC", 3)).toBeNull();
+  expect(reminderWindow(new Date("2026-10-03T10:00:00Z"), expiry, "UTC", 0)).not.toBeNull();
+  expect(reminderWindow(new Date("2026-10-10T09:59:59Z"), expiry, "UTC", 0)).not.toBeNull();
+  expect(reminderWindow(expiry, expiry, "UTC", 0)).toBeNull();
+  expect(reminderWindow(new Date("2026-10-18T10:00:00Z"), expiry, "UTC", 99)).toBeNull();
+});
+it("does not queue reminders outside the gym setting while leaving platform reminders independent", async () => {
+  const { gym, emit, record } = scheduledSetup();
+  gym.membershipReminders.postExpiryDays = 3;
+  await scheduleMembershipReminders(new Date("2026-10-14T10:00:00Z"));
+  expect(emit).not.toHaveBeenCalled();
+  gym.membershipReminders.postExpiryDays = 0;
+  await scheduleMembershipReminders(expiry);
+  expect(emit).not.toHaveBeenCalled();
+  record.type = "PLATFORM";
+  vi.spyOn(Gym, "updateOne").mockResolvedValue({ modifiedCount: 1 } as never);
+  vi.spyOn(Subscription, "exists").mockReturnValue({ session: async () => null } as never);
+  await scheduleMembershipReminders(new Date("2026-10-14T10:00:00Z"));
+  expect(emit).toHaveBeenCalledWith(expect.objectContaining({ event: "platform.expiring" }));
+});
+it("suppresses a queued renewal reminder when the gym shortens its follow-up window", async () => {
+  vi.spyOn(Subscription, "findOne").mockReturnValue({ lean: async () => ({ _id: "sub", type: "GYM_MEMBERSHIP", gymId: "gym", memberProfileId: "member", endsAt: expiry }) } as never);
+  const settings = { postExpiryDays: 7 };
+  vi.spyOn(Gym, "findOne").mockReturnValue({ select: () => ({ lean: async () => ({ timezone: "UTC", membershipReminders: settings }) }) } as never);
+  vi.spyOn(MemberProfile, "exists").mockResolvedValue({ _id: "member" } as never);
+  const note = { metadata: { reminderCycle: true, subscriptionId: "sub", cycleEndsAt: expiry.toISOString() } }, now = new Date("2026-10-14T10:00:00Z");
+  expect(await reminderStillCurrent(note, now)).toBe(true);
+  settings.postExpiryDays = 3;
+  expect(await reminderStillCurrent(note, now)).toBe(false);
 });

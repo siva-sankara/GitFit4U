@@ -1,13 +1,16 @@
 import mongoose from "mongoose";
 import { nanoid } from "nanoid";
-import { ClassBooking, ClassSession, Trainer } from "../models/Engagement.js";
+import { ClassBooking, ClassSession, Trainer, Notification } from "../models/Engagement.js";
 import { MemberProfile } from "../models/Member.js";
+import { Attachment } from "../models/Business.js";
 import { classInput } from "../routes/inputSchemas.js";
 import { AppError } from "../utils/AppError.js";
 import { emitDomainEvents } from "./domainEventService.js";
+import { validatedImageAttachment } from "./userMediaService.js";
 
 export async function saveGymClass(input: {
   gymId: string;
+  actorId?: string;
   publicId?: string;
   body: unknown;
   cancel?: boolean;
@@ -43,6 +46,17 @@ export async function saveGymClass(input: {
         "Create the class as scheduled before cancelling it.",
       );
     if (body) {
+      // Detachment begins a fresh 24-hour cleanup grace period and shares the
+      // attachment write lock with binding/deletion across API instances.
+      if (existing?.imageAttachmentId && body.imageAttachmentId !== undefined &&
+          String(existing.imageAttachmentId) !== String(body.imageAttachmentId || "")) {
+        await Attachment.updateOne({ _id: existing.imageAttachmentId, gymId: input.gymId, purpose: "CLASS_IMAGE", status: "READY" },
+          { $inc: { bindingVersion: 1 } }, { session });
+      }
+      if (body.imageAttachmentId && String(existing?.imageAttachmentId || "") !== body.imageAttachmentId) {
+        if (!input.actorId) throw new AppError(403, "MEDIA_OWNER_REQUIRED", "Sign in to attach a class image.");
+        await validatedImageAttachment(body.imageAttachmentId, input.actorId, "CLASS_IMAGE", input.gymId, session);
+      }
       if (
         body.trainerId &&
         !(await Trainer.exists({
@@ -98,13 +112,13 @@ export async function saveGymClass(input: {
           { fieldErrors: { startsAt: ["Choose a future start time."] } },
         );
     }
+    const changedTrainer = existing && body && body.trainerId !== undefined &&
+      String(existing.trainerId || "") !== String(body.trainerId || "");
     const changedSchedule =
       existing &&
       body &&
       (existing.startsAt.getTime() !== body.startsAt.getTime() ||
-        existing.endsAt.getTime() !== body.endsAt.getTime() ||
-        (body.trainerId !== undefined &&
-          String(existing.trainerId || "") !== String(body.trainerId || "")));
+        existing.endsAt.getTime() !== body.endsAt.getTime());
     let data = existing;
     if (!data)
       [data] = await ClassSession.create(
@@ -112,7 +126,10 @@ export async function saveGymClass(input: {
         { session },
       );
     else {
-      if (body) Object.assign(data, body);
+      if (body) {
+        Object.assign(data, body);
+        if (body.imageAttachmentId === null) data.imageUrl = undefined;
+      }
       if (cancelling)
         Object.assign(data, {
           status: "CANCELLED",
@@ -122,7 +139,7 @@ export async function saveGymClass(input: {
         });
       await data.save({ session });
     }
-    if (existing && (cancelling || changedSchedule)) {
+    if (existing && (cancelling || changedSchedule || changedTrainer)) {
       const bookings = await ClassBooking.find({
         sessionId: data._id,
         status: { $in: ["BOOKED", "WAITLISTED"] },
@@ -137,18 +154,25 @@ export async function saveGymClass(input: {
         _id: { $in: bookings.map((booking) => booking.memberProfileId) },
         gymId: input.gymId,
       })
-        .select("userId")
+        .select("_id userId")
         .session(session);
+      if (cancelling || changedSchedule) await Notification.updateMany({
+        gymId: input.gymId, entityId: { $in: bookings.map((booking) => String(booking._id)) },
+        event: "class.reminder", pushStatus: "QUEUED",
+      }, { $set: { pushStatus: "SKIPPED" }, $unset: { pushLeaseId: 1, pushLeaseUntil: 1 } }, { session });
       await emitDomainEvents(
-        members.map((member) => ({
-          event: cancelling ? "class.cancelled" : "class.updated",
+        bookings.flatMap((booking) => {
+          const member = members.find((member) => String(member._id) === String(booking.memberProfileId));
+          if (!member) return [];
+          return [{
+          event: cancelling ? "class.cancelled" as const : changedSchedule ? "class.updated" as const : "class.trainer_changed" as const,
           userId: member.userId,
           gymId: input.gymId,
-          entityId: data.publicId,
+          entityId: String(booking._id),
           occurrenceId: String(data.version),
-          actionUrl: "/app/classes",
+          actionUrl: `/app/classes?booking=${booking._id}`,
           session,
-        })),
+        }]; }),
       );
     }
     return data;

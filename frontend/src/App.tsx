@@ -11,6 +11,7 @@ import {
 import { PublicLayout } from "./layouts/PublicLayout";
 import { WorkspaceLayout } from "./layouts/WorkspaceLayout";
 import { ProtectedRoute } from "./routes/ProtectedRoute";
+import { profileSections, ProfileSectionRedirect } from "./routes/ProfileSectionRedirect";
 const LiveWorkspace = lazy(() =>
   import("./pages/live/LiveWorkspace").then((m) => ({
     default: m.LiveWorkspace,
@@ -23,6 +24,7 @@ import {
 } from "./pages/live/LivePublic";
 import { InfoPage } from "./pages/public/InfoPage";
 import { RegisterGymPage } from "./pages/public/RegisterGymPage";
+import { ActivateAccountPage } from "./pages/public/ActivateAccountPage";
 const Auth = lazy(() =>
   import("./pages/public/AuthDesktopPage").then((m) => ({
     default: m.AuthDesktopPage,
@@ -30,6 +32,7 @@ const Auth = lazy(() =>
 );
 const PlatformSubscription = lazy(() => import("./pages/owner/PlatformSubscriptionPage").then(module => ({ default: module.PlatformSubscriptionPage })));
 const router = createBrowserRouter([
+  { path: "/activate-account", element: <ActivateAccountPage /> },
   {
     path: "/platform-renewal",
     element: <ProtectedRoute><WorkspaceLayout /></ProtectedRoute>,
@@ -151,6 +154,7 @@ const router = createBrowserRouter([
         ),
       },
       { path: "explore", element: <LiveExplore /> },
+      ...(role === "USER" ? profileSections.map(section => ({ path: `profile/${section}`, element: <ProfileSectionRedirect section={section} /> })) : []),
       { path: "gyms/:slug", element: <LiveGymDetails /> },
       { path: "help", element: <InfoPage type="help" /> },
       { path: "contact", element: <InfoPage type="contact" /> },

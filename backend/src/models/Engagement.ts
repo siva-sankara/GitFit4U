@@ -34,6 +34,9 @@ const classSessionSchema = new Schema(
       default: "SCHEDULED",
     },
     room: String,
+    imageUrl: String,
+    imageAttachmentId: { type: Schema.Types.ObjectId, ref: "Attachment" },
+    reminderLock: { type: Number, default: 0 },
     description: { type: String, maxlength: 3000 },
     cancelledAt: Date,
     cancellationReason: { type: String, maxlength: 500 },
@@ -42,6 +45,8 @@ const classSessionSchema = new Schema(
 );
 classSessionSchema.index({ gymId: 1, startsAt: 1 });
 classSessionSchema.index({ gymId: 1, status: 1, startsAt: -1 });
+classSessionSchema.index({ imageAttachmentId: 1 });
+classSessionSchema.index({ status: 1, startsAt: 1 });
 
 const classBookingSchema = new Schema(
   {

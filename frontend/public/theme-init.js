@@ -1,14 +1,10 @@
 (function () {
-  var preference = "system";
+  var preference = "light";
   try {
-    preference = localStorage.getItem("gfu_theme_preference") || "system";
+    preference = localStorage.getItem("gfu_theme_preference") === "dark" ? "dark" : "light";
+    localStorage.setItem("gfu_theme_preference", preference);
   } catch (_) {
     /* Storage is optional. */
   }
-  var dark =
-    preference === "dark" ||
-    (preference !== "light" &&
-      window.matchMedia &&
-      window.matchMedia("(prefers-color-scheme: dark)").matches);
-  document.documentElement.dataset.theme = dark ? "dark" : "light";
+  document.documentElement.dataset.theme = preference;
 })();

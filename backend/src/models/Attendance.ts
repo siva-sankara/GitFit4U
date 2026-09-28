@@ -60,6 +60,7 @@ const attendanceEventSchema = new Schema(
     supersedesEventId: { type: Schema.Types.ObjectId, ref: "AttendanceEvent" },
     reason: String,
     createdBy: { type: Schema.Types.ObjectId, ref: "User", required: true },
+    createdByRole: { type: String, enum: ["USER", "GYM_OWNER", "GYM_STAFF", "TRAINER", "ADMIN"] },
     locationEvidence: {
       point: {
         type: { type: String, enum: ["Point"] },

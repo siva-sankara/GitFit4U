@@ -1,6 +1,8 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
+import { PwaStatus } from "./components/PwaSettings";
+import { startPwaLifecycle } from "./services/pwa";
 import { AppProvider } from "./context/AppContext";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import "./styles/global.css";
@@ -9,6 +11,9 @@ import "./styles/pages.css";
 import "./styles/product-polish.css";
 import "./styles/dialog.css";
 import "./styles/workspace-navigation.css";
+import "./styles/enhancement-layout.css";
+
+startPwaLifecycle();
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -22,13 +27,8 @@ createRoot(document.getElementById("root")!).render(
     <QueryClientProvider client={queryClient}>
       <AppProvider>
         <App />
+        <PwaStatus />
       </AppProvider>
     </QueryClientProvider>
   </StrictMode>,
 );
-
-if (import.meta.env.PROD && "serviceWorker" in navigator) {
-  window.addEventListener("load", () =>
-    navigator.serviceWorker.register("/sw.js").catch(() => undefined),
-  );
-}

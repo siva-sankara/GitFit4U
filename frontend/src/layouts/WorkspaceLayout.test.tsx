@@ -106,8 +106,9 @@ it("uses the session role, removes role switching and duplicate/hidden owner ite
   expect(
     host.querySelector('[role="group"][aria-label="Appearance"]'),
   ).not.toBeNull();
-  for (const label of ["System theme", "Light theme", "Dark theme"])
+  for (const label of ["Light theme", "Dark theme"])
     expect(host.querySelector(`button[aria-label="${label}"]`)).not.toBeNull();
+  expect(host.querySelector('button[aria-label="System theme"]')).toBeNull();
   expect(
     host
       .querySelector('button[aria-label="Light theme"]')
@@ -164,6 +165,15 @@ it("closes mobile navigation using Escape", async () => {
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })),
   );
   expect(host.querySelector(".drawer-open")).toBeNull();
+});
+it("keeps User mobile tabs in the exact required order and account features inside Profile", async () => {
+  session("USER", []);
+  await render();
+  const tabs = [...host.querySelectorAll('.mobile-bottom-nav a')];
+  expect(tabs.map(tab => tab.textContent)).toEqual(["Home", "Book", "Scan", "Profile", "Messages"]);
+  expect(tabs.map(tab => tab.getAttribute("href"))).toEqual(["/app/home", "/app/classes", "/app/attendance/qr", "/app/profile", "/app/messages"]);
+  const nav = host.querySelector('[aria-label="Workspace navigation"]')!;
+  for (const removed of ["Favorites", "Payments", "Invoices", "Workouts", "Subscriptions", "Referrals"]) expect(nav.textContent).not.toContain(removed);
 });
 it("clears the authenticated token only after successful logout and replaces with login", async () => {
   mocks.request.mockResolvedValue(undefined);

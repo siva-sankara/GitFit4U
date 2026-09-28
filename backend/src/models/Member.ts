@@ -17,6 +17,11 @@ const memberProfileSchema = new Schema(
       index: true,
     },
     memberCode: { type: String, required: true },
+    invitation: {
+      status: { type: String, enum: ["PENDING", "ACCEPTED"] },
+      kind: { type: String, enum: ["ACTIVATE", "LINK"] },
+      expiresAt: Date, lastQueuedAt: Date, acceptedAt: Date,
+    },
     status: {
       type: String,
       enum: ["JOIN_REQUESTED", "ACTIVE", "INACTIVE", "SUSPENDED", "ARCHIVED"],

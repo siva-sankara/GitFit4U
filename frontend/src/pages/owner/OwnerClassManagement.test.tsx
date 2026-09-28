@@ -82,3 +82,14 @@ it("displays a field-specific backwards-time error and does not submit invalid c
     mocks.request.mock.calls.some(([path]) => path === "/api/v1/owner/classes"),
   ).toBe(false);
 });
+it("removes a class image with an explicit null while preserving typed class details", async () => {
+  await act(async () => root.render(<QueryClientProvider client={client}><ClassEditor value={{
+    publicId: "yoga", name: "Morning yoga", category: "YOGA", startsAt: "2099-01-01T10:00:00Z", endsAt: "2099-01-01T11:00:00Z", capacity: 10, status: "SCHEDULED", imageAttachmentId: "507f1f77bcf86cd799439011", imageUrl: "https://media.test/yoga.webp",
+  }} onSaved={vi.fn()} onClose={vi.fn()} /></QueryClientProvider>));
+  const dialog = document.querySelector('[role="dialog"]')!;
+  expect(dialog.querySelector('img[alt="Class image preview"]')).not.toBeNull();
+  await act(async () => Array.from(dialog.querySelectorAll("button")).find(button => button.textContent === "Remove image")!.click());
+  await act(async () => dialog.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+  const submitted = mocks.request.mock.calls.find(([path]) => path === "/api/v1/workspace/classes/yoga");
+  expect(JSON.parse(submitted![1].body)).toMatchObject({ imageAttachmentId: null, name: "Morning yoga", capacity: 10 });
+});

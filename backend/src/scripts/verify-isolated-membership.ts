@@ -24,6 +24,7 @@ import {
 import { Conversation, Message } from "../models/Collaboration.js";
 import { deliverCampaignBatch } from "../services/campaignDeliveryService.js";
 import { logger } from "../config/logger.js";
+import { acceptFixtureInvitation, checkAccountDelivery } from "./check-account-delivery.js";
 import { checkProductEnhancements } from "./check-product-enhancements.js";
 import { checkSocialProfileRegressions } from "./check-social-profile-regressions.js";
 import { checkOwnerRegressions } from "./check-owner-regressions.js";
@@ -31,6 +32,7 @@ import { checkReviewMediaRegressions } from "./check-review-media-regressions.js
 import { checkNotificationEnhancements } from "./check-notification-enhancements.js";
 import { checkMembershipStreakEnhancements } from "./check-membership-streak-enhancements.js";
 import { checkPromotionRegressions } from "./check-promotion-regressions.js";
+import { checkClassBookingEnhancements } from "./check-class-booking-enhancements.js";
 import { prepareImage } from "../services/imageProcessingService.js";
 import { attachmentUrl } from "../integrations/storage/mediaStore.js";
 
@@ -45,6 +47,10 @@ const runId = randomUUID().replaceAll("-", "");
 const databaseName = `gfv_${runId}`;
 const databasePattern = /^gfv_[a-f0-9]{32}$/;
 const verifyMedia = process.argv.includes("--verify-media");
+const sectionIndex = process.argv.indexOf("--section");
+const section = sectionIndex === -1 ? "all" : process.argv[sectionIndex + 1];
+if (!["all", "account"].includes(section || "")) throw new Error("Use --section account or omit --section for the full isolated suite.");
+if (section === "account" && verifyMedia) throw new Error("The account-only section does not run media verification; omit --verify-media.");
 type VerificationMedia = {
   publicId: string;
   attachmentId: string;
@@ -347,6 +353,9 @@ try {
   for (const model of Object.values(mongoose.models))
     await model.createIndexes();
 
+  if (section === "account") {
+    results.push(...await checkAccountDelivery());
+  } else {
   const owner = await createUser("Verification Owner", "GYM_OWNER");
   const otherOwner = await createUser("Other Verification Owner", "GYM_OWNER");
   const admin = await createUser("Verification Administrator", "ADMIN");
@@ -411,6 +420,7 @@ try {
 
   const created = await call("post", "/api/v1/owner/members", ownerToken, body);
   status(created, 201);
+  await acceptFixtureInvitation(created.body.data.member._id, String(member._id));
   const memberId = created.body.data.member.publicId,
     subscriptionId = created.body.data.subscription.publicId;
   assert.equal(created.body.data.payment.provider, "OFFLINE");
@@ -1069,16 +1079,23 @@ try {
   results.push(...await checkProductEnhancements());
   results.push(...await checkSocialProfileRegressions({ assertDatabase }));
   results.push(...await checkOwnerRegressions());
+  results.push(...await checkAccountDelivery());
   results.push(...await checkReviewMediaRegressions({ assertDatabase }));
   results.push(...await checkNotificationEnhancements({ app, owner, gym, member, ownerToken, memberToken }));
   results.push(...await checkMembershipStreakEnhancements({ assertDatabase }));
   results.push(...await checkPromotionRegressions({ assertDatabase }));
+  results.push(...await checkClassBookingEnhancements({ assertDatabase }));
+  }
   console.log(JSON.stringify({ success: true, checks: results }, null, 2));
 } catch (error) {
   console.error(
     "Isolated membership verification failed:",
     error instanceof Error ? error.message : "Unknown failure",
   );
+  if (error instanceof Error) {
+    const sourceLocations = [...(error.stack || "").matchAll(/(?:[A-Za-z]:)?[\\/][^\s()]*[\\/]backend[\\/]src[\\/][^\s()]+:\d+:\d+/g)].map(match => match[0]);
+    if (sourceLocations.length) console.error("Verification source locations:", [...new Set(sourceLocations)].join(", "));
+  }
   process.exitCode = 1;
 } finally {
   if (ownsDatabase && mongoose.connection.readyState === 1) {

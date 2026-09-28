@@ -1,0 +1,8 @@
+.workspace-breadcrumb-header { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; min-width: 0; }
+.workspace-breadcrumb-header .btn { flex-shrink: 0; min-height: 40px; }
+.workspace-breadcrumb-header ol { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; font-size: .82rem; color: var(--text-muted); }
+.workspace-breadcrumb-header li { display: inline-flex; align-items: center; gap: 8px; }
+.workspace-breadcrumb-header a { color: var(--text-muted); }
+.workspace-breadcrumb-header a:hover, .workspace-breadcrumb-header a:focus-visible { color: var(--text); text-decoration: underline; }
+.workspace-breadcrumb-header [aria-current] { color: var(--text); }
+@media (max-width: 520px) { .workspace-breadcrumb-header { gap: 6px; } .workspace-breadcrumb-header ol { gap: 4px; font-size: .75rem; } }

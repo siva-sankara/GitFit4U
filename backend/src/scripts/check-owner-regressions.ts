@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { acceptFixtureInvitation } from "./check-account-delivery.js";
 import mongoose from "mongoose";
 import request from "supertest";
 import { nanoid } from "nanoid";
@@ -61,6 +62,8 @@ export async function checkOwnerRegressions() {
   }, 201)).data;
   const gold = await create(goldUser, plans[0]);
   const silver = await create(silverUser, plans[1]);
+  await acceptFixtureInvitation(gold.member._id, String(goldUser._id));
+  await acceptFixtureInvitation(silver.member._id, String(silverUser._id));
   const filtered = await api("get", `/owner/members?planId=${plans[0].publicId}`);
   assert.equal(filtered.meta.total, 1);
   assert.equal(filtered.data[0].publicId, gold.member.publicId);

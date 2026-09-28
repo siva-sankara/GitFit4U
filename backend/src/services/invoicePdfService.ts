@@ -27,7 +27,7 @@ export async function invoiceLogo(invoice: any): Promise<Buffer | undefined> {
   const file = await Attachment.findOne({ _id: id, gymId: invoice.gymId, purpose: "GYM_LOGO", storageProvider: "s3", status: "READY", deletedAt: null }).lean();
   if (!file) return;
   try {
-    const response = await fetch(presignedObjectUrl("GET", file.thumbnailObjectKey || file.objectKey, 120), { signal: AbortSignal.timeout(3500), redirect: "error" });
+    const response = await fetch(presignedObjectUrl("GET", file.objectKey, 120), { signal: AbortSignal.timeout(3500), redirect: "error" });
     if (!response.ok || !response.body || Number(response.headers.get("content-length")) > 1_000_000) throw new Error("Logo unavailable");
     const chunks: Buffer[] = []; let size = 0;
     const reader = response.body.getReader();

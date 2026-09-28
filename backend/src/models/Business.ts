@@ -44,6 +44,7 @@ const invoiceSchema = new Schema(
   {
     publicId: { type: String, required: true, unique: true },
     number: { type: String, required: true, unique: true },
+    purpose: { type: String, enum: ["PLATFORM_PLAN", "MEMBERSHIP", "ADVERTISEMENT"], immutable: true },
     gymId: { type: Schema.Types.ObjectId, ref: "Gym", index: true },
     userId: {
       type: Schema.Types.ObjectId,
@@ -82,11 +83,13 @@ const invoiceSchema = new Schema(
     },
     issuedAt: { type: Date, default: Date.now },
     pdfObjectKey: String,
+    emailLastRequestedAt: Date,
   },
   { timestamps: true },
 );
 invoiceSchema.index({ gymId: 1, issuedAt: -1 });
 invoiceSchema.index({ paymentId: 1 }, { unique: true });
+invoiceSchema.index({ "supplierSnapshot.logoAttachmentId": 1 });
 
 const attachmentSchema = new Schema(
   {
@@ -109,6 +112,7 @@ const attachmentSchema = new Schema(
         "AVATAR",
         "MEMBER_AVATAR",
         "TRAINER_IMAGE",
+        "CLASS_IMAGE",
         "POST_IMAGE",
         "STORY_IMAGE",
         "GYM_LOGO",
@@ -155,6 +159,8 @@ const attachmentSchema = new Schema(
   },
   { timestamps: true },
 );
+
+attachmentSchema.index({ purpose: 1, status: 1, updatedAt: 1 });
 
 const promotionFields = {
   publicId: { type: String, required: true, unique: true },

@@ -191,3 +191,5 @@
   .mobile-bottom-nav svg{flex-shrink:0}
 }
 @media(min-width:768px){.mobile-bottom-nav{display:none}}
+@media(max-width:767px){.keyboard-open .mobile-bottom-nav{display:none}.workspace.keyboard-open{padding-bottom:16px}.keyboard-open .workspace-content{padding-bottom:16px}}
+@media(max-width:767px){.keyboard-open .modern-chat.message-shell{height:calc(100dvh - 180px);min-height:220px;max-height:none}}

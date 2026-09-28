@@ -4,6 +4,7 @@ import { useCurrentUser } from "../../api/hooks";
 import { apiRequest, ApiError } from "../../services/apiClient";
 import { Modal } from "../../components/Modal";
 import { ClassCard } from "../../components/ClassCard";
+import { MediaImageEditor } from "../../components/MediaImageEditor";
 import { QueryState, useData, type Row } from "../live/LiveData";
 
 const localInput = (value?: string) => {
@@ -23,6 +24,9 @@ export function ClassEditor({
 }) {
   const trainers = useData<Row[]>("/api/v1/owner/trainers");
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [imageAttachmentId, setImageAttachmentId] = useState<string | null | undefined>(value?.imageAttachmentId);
+  const [imageUrl, setImageUrl] = useState<string | undefined>(value?.imageUrl);
+  const [uploading, setUploading] = useState(false);
   const attempt = useRef({ signature: "", key: "" });
   const save = useMutation({
     mutationFn: (body: Row) => {
@@ -60,6 +64,7 @@ export function ClassEditor({
   });
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (uploading) return;
     const form = new FormData(event.currentTarget),
       text = (name: string) => String(form.get(name) || "").trim();
     const start = new Date(text("startsAt")),
@@ -89,6 +94,7 @@ export function ClassEditor({
       room: text("room"),
       description: text("description"),
       status: text("status") || "SCHEDULED",
+      ...(imageAttachmentId !== undefined ? { imageAttachmentId } : {}),
     });
   }
   const fieldError = (name: string) =>
@@ -102,12 +108,12 @@ export function ClassEditor({
       open
       title={value ? "Edit class" : "Create class"}
       onClose={() => {
-        if (!save.isPending) onClose();
+        if (!save.isPending && !uploading) onClose();
       }}
       wide
     >
       <form className="class-editor" onSubmit={submit}>
-        <fieldset>
+        <fieldset disabled={save.isPending}>
           <legend>Basic information</legend>
           <div className="class-form-grid">
             <label className="field">
@@ -153,6 +159,10 @@ export function ClassEditor({
               />
             </label>
           </div>
+          <MediaImageEditor purpose="CLASS_IMAGE" label="Class image" previewUrl={imageUrl}
+            disabled={save.isPending} onBusyChange={setUploading}
+            onChange={(id, url) => { setImageAttachmentId(id); setImageUrl(url); }} />
+          {fieldError("imageAttachmentId")}
         </fieldset>
         <fieldset>
           <legend>Schedule</legend>
@@ -271,13 +281,13 @@ export function ClassEditor({
           </p>
         )}
         <footer className="heading-actions">
-          <button className="btn btn-primary" disabled={save.isPending}>
+          <button className="btn btn-primary" disabled={save.isPending || uploading}>
             {save.isPending ? "Saving…" : value ? "Save class" : "Create class"}
           </button>
           <button
             className="btn btn-secondary"
             type="button"
-            disabled={save.isPending}
+            disabled={save.isPending || uploading}
             onClick={onClose}
           >
             Cancel

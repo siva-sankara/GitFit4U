@@ -2,7 +2,7 @@ import type { Request } from "express";
 import { Gym } from "../models/Gym.js";
 import { AppError } from "../utils/AppError.js";
 export async function assertTenantMediaAccess(req: Request, purpose: string, gymId: unknown = req.auth?.gymId) {
-  const permission = purpose.startsWith("GYM_") ? "gym:update" : purpose === "TRAINER_IMAGE" ? "class:write" : purpose === "MEMBER_AVATAR" ? "member:write" : purpose === "AD" ? "campaign:write" : undefined;
+  const permission = purpose.startsWith("GYM_") ? "gym:update" : ["TRAINER_IMAGE", "CLASS_IMAGE"].includes(purpose) ? "class:write" : purpose === "MEMBER_AVATAR" ? "member:write" : purpose === "AD" ? "campaign:write" : undefined;
   if (!permission) return;
   const admin = req.auth?.role === "ADMIN" && req.auth.permissions.includes("admin:platform");
   if (!gymId || (!admin && (!req.auth?.gymId || String(gymId) !== req.auth.gymId || !req.auth.permissions.includes(permission))))

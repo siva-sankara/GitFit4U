@@ -362,6 +362,7 @@ export function AdminMembers() {
   );
 }
 function AdminMemberDetails({ id }: { id: string }) {
+  const [attendanceReason, setAttendanceReason] = useState(""), [recorded, setRecorded] = useState(false);
   const query = useData<Row>(`/api/v1/admin/members/${id}`);
   const value = query.data?.data,
     member = value?.member;
@@ -385,7 +386,15 @@ function AdminMemberDetails({ id }: { id: string }) {
           </p>
           <h3>Recent attendance</h3>
           <p>{value?.attendance?.length || 0} recorded events returned</p>
+          {member.status === "ACTIVE" && value?.gymPublicId && <section className="panel form-section">
+            <h3>Record manual attendance</h3>
+            <p>Records attendance now without requesting location. Membership eligibility and daily duplicate checks still apply.</p>
+            <label className="field"><span>Reason</span><input className="input" value={attendanceReason} maxLength={500} onChange={event => { setAttendanceReason(event.target.value); setRecorded(false); }} /></label>
+            {attendanceReason.trim().length >= 3 && <Action path={`/api/v1/admin/gyms/${value.gymPublicId}/attendance`} body={{ memberIdentifier: member.publicId, reason: attendanceReason.trim() }} onDone={() => setRecorded(true)}>Record check-in</Action>}
+            {recorded && <p role="status">Attendance recorded or already present for today.</p>}
+          </section>}
           <h3>Payment history</h3>
+          <p>Latest 50 payments. The Payments page contains the full history.</p>
           <ul>
             {value?.payments?.map((payment: Row) => (
               <li key={payment.publicId}>

@@ -1,6 +1,7 @@
 import "dotenv/config";
 import mongoose from "mongoose";
 import { connectDatabase, disconnectDatabase } from "../config/db.js";
+import "../models/Delivery.js";
 
 // Run during a maintenance window before starting upgraded API instances.
 // This changes index definitions only; it never removes notification records.

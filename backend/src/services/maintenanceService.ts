@@ -1,4 +1,5 @@
 import { Gym } from "../models/Gym.js";
+import { deliverTransactionalEmails } from "./transactionalEmailService.js";
 import { Subscription } from "../models/Commerce.js";
 import { logger } from "../config/logger.js";
 import { WorkoutAssignment } from "../models/Fitness.js";
@@ -7,6 +8,8 @@ import { cleanupExpiredStories } from "./socialService.js";
 import { cleanupOrphanedFollows } from "./socialRelationshipService.js";
 import { deliverCampaignBatch } from "./campaignDeliveryService.js";
 import { scheduleMembershipReminders } from "./membershipReminderService.js";
+import { scheduleClassReminders } from "./classReminderService.js";
+import { cleanupUnusedClassImages } from "./classMediaCleanupService.js";
 let running = false;
 let followCleanupCursor: string | undefined;
 export async function maintainRecords() {
@@ -14,6 +17,7 @@ export async function maintainRecords() {
   running = true;
   try {
     const now = new Date();
+    await deliverTransactionalEmails();
     await WorkoutAssignment.updateMany(
       { status: "SCHEDULED", startsAt: { $lte: now } },
       { $set: { status: "ACTIVE" } },
@@ -60,6 +64,8 @@ export async function maintainRecords() {
       }
     }
     await scheduleMembershipReminders(now);
+    await scheduleClassReminders(now);
+    await cleanupUnusedClassImages({ now });
     await Subscription.updateMany(
       {
         type: "PLATFORM",

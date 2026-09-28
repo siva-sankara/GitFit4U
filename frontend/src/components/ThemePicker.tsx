@@ -1,4 +1,4 @@
-import { Monitor, Moon, Sun } from "lucide-react";
+import { Moon, Sun } from "lucide-react";
 import { useApp } from "../context/AppContext";
 export function ThemePicker() {
   const { themePreference, setThemePreference } = useApp();
@@ -6,7 +6,6 @@ export function ThemePicker() {
     <div className="theme-icon-picker" role="group" aria-label="Appearance">
       {(
         [
-          { value: "system", label: "System theme", Icon: Monitor },
           { value: "light", label: "Light theme", Icon: Sun },
           { value: "dark", label: "Dark theme", Icon: Moon },
         ] as const
@@ -17,7 +16,7 @@ export function ThemePicker() {
           className="icon-btn"
           aria-label={label}
           title={label}
-          aria-pressed={(themePreference || "system") === value}
+          aria-pressed={(themePreference || "light") === value}
           onClick={() => setThemePreference(value)}
         >
           <Icon size={17} />

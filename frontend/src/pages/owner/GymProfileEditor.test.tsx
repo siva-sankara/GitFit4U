@@ -30,6 +30,7 @@ import {
   GymProfilePlans,
   GymHoursEditor,
   GymLocationEditor,
+  MembershipReminderSettings,
 } from "./GymProfileEditor";
 import { GymLogoEditor } from "./GymLogoEditor";
 let host: HTMLDivElement, root: Root, client: QueryClient;
@@ -90,6 +91,21 @@ async function choose(file: File) {
     input.dispatchEvent(new Event("change", { bubbles: true }));
   });
 }
+it("saves zero post-expiry days as a number and defaults legacy gyms to seven", async () => {
+  await render(<MembershipReminderSettings gym={{}} disabled={false} />);
+  const input = host.querySelector<HTMLInputElement>('[name="postExpiryDays"]')!;
+  expect(input.value).toBe("7");
+  expect(input.min).toBe("0"); expect(input.max).toBe("7");
+  input.value = "0";
+  await act(async () => host.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+  const call = mocks.request.mock.calls.find(([path]) => path === "/api/v1/owner/gym");
+  expect(JSON.parse(call![1].body)).toEqual({ membershipReminders: { postExpiryDays: 0 } });
+});
+it("keeps reminder settings read-only without gym update permission", async () => {
+  await render(<MembershipReminderSettings gym={{ membershipReminders: { postExpiryDays: 2 } }} disabled />);
+  expect(host.querySelector("fieldset")?.disabled).toBe(true);
+  expect(host.querySelector<HTMLInputElement>('[name="postExpiryDays"]')?.value).toBe("2");
+});
 it("uploads bytes and confirms storage before linking a photo to the gym", async () => {
   await render(
     <GymMediaEditor gym={{ mediaAttachmentIds: ["existing"], media: [] }} />,
