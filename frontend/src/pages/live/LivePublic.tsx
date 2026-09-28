@@ -1,5 +1,9 @@
+import { PageHeader } from "../../components/PageHeader";
+import { CompactFilters } from "../../components/CompactFilters";
+import { RoutineIllustration } from "../../components/RoutineIllustration";
 import { ArrowRight, Building2, Heart } from "lucide-react";
-import { authPath } from "../../services/authRedirect";
+import { authPath, canRegisterGym } from "../../services/authRedirect";
+import { useSession } from "../../services/session";
 import { LocationPicker } from "../../components/LocationPicker";
 import { GymDetailsView } from "../public/GymDetailsView";
 import { deviceLocation, validCoordinates } from "../../services/location";
@@ -101,6 +105,8 @@ export function DatabaseGymCard({ gym }: { gym: Row }) {
   );
 }
 export function LiveLanding() {
+  const me = useSession({ publicPage: true });
+  const showOwnerLink = !getAccessToken() || Boolean(me.data && canRegisterGym(me.data.data));
   const query = useData<Row[]>("/api/v1/public/gyms?limit=6"),
     navigate = useNavigate();
   const [search, setSearch] = useState("");
@@ -166,8 +172,9 @@ export function LiveLanding() {
         id="how-it-works"
       >
         <h2>Build your routine</h2>
-        <div className="live-card-grid">
-          {[
+        <div className="routine-section">
+          <RoutineIllustration />
+          <ol className="routine-steps">{[
             [
               "Find a gym",
               "Compare locations, facilities and available plans.",
@@ -178,18 +185,18 @@ export function LiveLanding() {
             ],
             [
               "Keep showing up",
-              "Use your member QR and follow your attendance history.",
+              "Scan your gym QR and follow your attendance history.",
             ],
           ].map(([title, text]) => (
-            <article className="panel form-section" key={title}>
+            <li key={title}>
               <h3>{title}</h3>
               <p>{text}</p>
-            </article>
-          ))}
+            </li>
+          ))}</ol>
         </div>
       </section>
       <section className="container section-space landing-section">
-        <div className="landing-owner-cta">
+        {showOwnerLink && <div className="landing-owner-cta">
           <div className="landing-owner-icon">
             <Building2 size={32} aria-hidden="true" />
           </div>
@@ -204,7 +211,7 @@ export function LiveLanding() {
           <Link className="btn btn-primary" to="/register-gym">
             Register your gym <ArrowRight size={20} aria-hidden="true" />
           </Link>
-        </div>
+        </div>}
       </section>
     </>
   );
@@ -213,6 +220,9 @@ export function LiveExplore() {
   const [params, setParams] = useSearchParams(),
     [q, setQ] = useState(params.get("q") || ""),
     [geoError, setGeoError] = useState("");
+  const [maximumPrice, setMaximumPrice] = useState(params.get("maxPrice") ? String(Number(params.get("maxPrice")) / 100) : "");
+  const [priceError, setPriceError] = useState("");
+  useEffect(() => { setMaximumPrice(params.get("maxPrice") ? String(Number(params.get("maxPrice")) / 100) : ""); setPriceError(""); }, [params]);
   const nearby = params.has("lat");
   const query = useData<Row[]>(
     `/api/v1/public/gyms${nearby ? "/nearby" : ""}?${params}`,
@@ -220,22 +230,24 @@ export function LiveExplore() {
   const page = Number(params.get("page") || 1);
   function filter(key: string, value: string) {
     const next = new URLSearchParams(params);
-    next.set(key, value);
+    if (value) next.set(key, value); else next.delete(key);
     next.set("page", "1");
     setParams(next);
   }
   return (
     <div className="container section-space page-stack">
-      <header className="page-heading">
+      <PageHeader>
         <div>
           <span className="eyebrow">Gym discovery</span>
           <h1>Find your next gym</h1>
         </div>
-      </header>
+      </PageHeader>
       <form
         className="table-toolbar explore-filter-toolbar"
+        role="search"
         onSubmit={(e) => {
           e.preventDefault();
+          if (priceError) return;
           filter("q", q);
         }}
       >
@@ -249,6 +261,11 @@ export function LiveExplore() {
           />
           <button className="btn btn-primary">Search</button>
         </div>
+        <CompactFilters activeCount={["rating", "maxPrice", "facility"].filter(key => params.get(key)).length} onReset={() => {
+          const next = new URLSearchParams(params);
+          ["rating", "maxPrice", "facility"].forEach(key => next.delete(key));
+          next.set("page", "1"); setParams(next); setMaximumPrice(""); setPriceError("");
+        }} onApply={() => !priceError}>
         <label className="field">
           <span>Minimum rating</span>
           <select
@@ -265,18 +282,19 @@ export function LiveExplore() {
           <span>Maximum price (INR)</span>
           <input
             className="input"
-            type="number"
-            min="0"
-            value={
-              params.get("maxPrice") ? Number(params.get("maxPrice")) / 100 : ""
-            }
-            onChange={(e) =>
-              filter(
-                "maxPrice",
-                e.target.value ? String(Number(e.target.value) * 100) : "",
-              )
-            }
+            type="text"
+            inputMode="decimal"
+            aria-invalid={!!priceError}
+            aria-describedby={priceError ? "maximum-price-error" : undefined}
+            value={maximumPrice}
+            onChange={(e) => {
+              const value = e.target.value; setMaximumPrice(value);
+              const minor = Math.round(Number(value) * 100);
+              if (value && (!/^\d+(\.\d{1,2})?$/.test(value) || !Number.isSafeInteger(minor) || minor < 0)) { setPriceError("Enter a non-negative price with up to 2 decimal places."); return; }
+              setPriceError(""); filter("maxPrice", value ? String(minor) : "");
+            }}
           />
+          {priceError && <small id="maximum-price-error" className="filter-error" role="alert">{priceError}</small>}
         </label>
         <label className="field">
           <span>Facility</span>
@@ -286,6 +304,7 @@ export function LiveExplore() {
             onChange={(e) => filter("facility", e.target.value)}
           />
         </label>
+        </CompactFilters>
       </form>
       <div className="heading-actions">
         <button
@@ -331,7 +350,7 @@ export function LiveExplore() {
             setQ("");
           }}
         >
-          Reset filters
+          Clear search and location
         </button>
       </div>
       <PromotionPlacement placement="EXPLORE" />

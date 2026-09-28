@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "../../services/apiClient";
 import { LocationPicker } from "../../components/LocationPicker";
+import { PhoneInput } from "../../components/PhoneInput";
 import { validCoordinates, type LocatedPoint } from "../../services/location";
 import type { Row } from "../live/LiveData";
 
@@ -22,6 +23,8 @@ export function GymRegistrationForm({
 }) {
   const editing = Boolean(initial._id);
   const client = useQueryClient();
+  const requestIdentity = useRef<{ body: string; key: string } | null>(null);
+  const submitting = useRef(false);
   const [details, setDetails] = useState(() => ({
     name: initial.name || "",
     description: initial.description || "",
@@ -70,12 +73,12 @@ export function GymRegistrationForm({
         location: { coordinates: [point.longitude, point.latitude] },
       };
       const { location, ...rest } = gym;
+      const body = JSON.stringify(editing ? { gym } : { ...rest, coordinates: location.coordinates });
+      if (requestIdentity.current?.body !== body) requestIdentity.current = { body, key: crypto.randomUUID() };
       return apiRequest(endpoint, {
         method: editing ? "PATCH" : "POST",
-        body: JSON.stringify(
-          editing ? { gym } : { ...rest, coordinates: location.coordinates },
-        ),
-        idempotencyKey: crypto.randomUUID(),
+        body,
+        idempotencyKey: requestIdentity.current.key,
       });
     },
     onSuccess: async (response) => {
@@ -83,6 +86,7 @@ export function GymRegistrationForm({
       onSaved?.(response);
       await client.invalidateQueries();
     },
+    onSettled: () => { submitting.current = false; },
   });
   useEffect(() => {
     onBusyChange?.(save.isPending || locating);
@@ -92,7 +96,11 @@ export function GymRegistrationForm({
       className="registration-form page-stack"
       onSubmit={(event) => {
         event.preventDefault();
-        if (!disabled && !save.isPending && !locating) save.mutate();
+        if (!event.currentTarget.reportValidity()) return;
+        if (!disabled && !save.isPending && !locating && !submitting.current) {
+          submitting.current = true;
+          save.mutate();
+        }
       }}
     >
       <p>
@@ -122,17 +130,12 @@ export function GymRegistrationForm({
           </label>
           <label className="field">
             <span>Contact phone number *</span>
-            <input
+            <PhoneInput
               className="input"
-              type="tel"
               required
-              minLength={8}
-              maxLength={20}
-              title="Enter a phone number, including country code if needed."
-              autoComplete="tel"
               value={details.phone}
-              onChange={(e) => {
-                setDetails({ ...details, phone: e.target.value });
+              onValueChange={(value) => {
+                setDetails({ ...details, phone: value });
                 dirty();
               }}
             />

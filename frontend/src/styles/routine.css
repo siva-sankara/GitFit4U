@@ -1,0 +1,27 @@
+.routine-section { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); align-items: center; gap: clamp(20px, 4vw, 60px); }
+.routine-visual { min-width: 0; text-align: center; }
+.routine-visual svg { display: block; width: 100%; height: auto; }
+.routine-room { fill: var(--surface-solid); stroke: var(--border); }
+.routine-floor, .routine-rack, .routine-line { stroke: var(--text-muted); stroke-width: 5; fill: none; stroke-linecap: round; }
+.routine-calendar { fill: var(--bg); stroke: var(--control-border); stroke-width: 2; }
+.routine-day { fill: var(--border); }
+.routine-day.completed, .routine-shirt { fill: var(--brand-text); }
+.routine-skin { fill: #cb956c; }
+.routine-limb { stroke: #cb956c; stroke-width: 16; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.routine-legs { stroke: var(--text-secondary); stroke-width: 21; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.routine-shoes, .routine-bar { stroke: var(--text); stroke-width: 9; fill: none; stroke-linecap: round; }
+.routine-barbell { fill: var(--text); }
+.routine-energy { fill: none; stroke: var(--brand-text); stroke-width: 5; stroke-linecap: round; }
+.routine-caption { color: var(--text-muted); font-size: .85rem; }
+.routine-steps { list-style: none; padding: 0; margin: 0; display: grid; gap: 22px; counter-reset: routine-step; }
+.routine-steps li { display: grid; grid-template-columns: 36px minmax(0, 1fr); column-gap: 14px; counter-increment: routine-step; }
+.routine-steps li::before { content: counter(routine-step, decimal-leading-zero); color: var(--brand-text); font-size: .85rem; font-weight: 800; padding-top: 4px; grid-row: span 2; }
+.routine-steps h3, .routine-steps p { margin: 0; }
+.routine-steps p { color: var(--text-muted); margin-top: 4px; }
+.routine-athlete { transform-origin: 190px 269px; animation: routine-lift 3s ease-in-out infinite; animation-play-state: paused; }
+.routine-energy { animation: routine-pulse 3s ease-in-out infinite; animation-play-state: paused; }
+.routine-visual.is-visible .routine-athlete, .routine-visual.is-visible .routine-energy { animation-play-state: running; }
+@keyframes routine-lift { 0%, 100% { transform: translateY(0) scaleY(1); } 50% { transform: translateY(6px) scaleY(.95); } }
+@keyframes routine-pulse { 0%, 100% { opacity: .25; } 50% { opacity: 1; } }
+@media (max-width: 680px) { .routine-section { grid-template-columns: minmax(0, 1fr); gap: 20px; } .routine-visual { max-width: 430px; margin-inline: auto; } .routine-steps { gap: 16px; } }
+@media (prefers-reduced-motion: reduce) { .routine-athlete, .routine-energy { animation: none; } }

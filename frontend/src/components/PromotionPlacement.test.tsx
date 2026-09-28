@@ -13,6 +13,13 @@ afterEach(async () => { await act(async () => root.unmount()); host.remove(); })
 async function render(ads: any[]) { mocks.query.mockReturnValue({ data: { data: ads } }); await act(async () => root.render(<MemoryRouter><PromotionPlacement placement="GYM_PROFILE" gymId="gym-1" /></MemoryRouter>)); }
 it("renders no empty advertising block when there are no eligible ads", async () => { await render([]); expect(host.querySelector("section")).toBeNull(); });
 it("keeps a single ad static and routes its real call to action", async () => { await render([ad("one")]); expect(host.querySelector("button")).toBeNull(); expect(host.querySelector("a")?.getAttribute("href")).toBe("/app/gyms/test#gym-plans"); });
+it("keeps the real campaign action beside its gym identity with an accessible name", async () => {
+  await render([{ ...ad("one"), gymName: "A long gym name", ctaLabel: "View gym", href: "/app/gyms/real-gym" }]);
+  const identity = host.querySelector(".promotion-identity-row")!;
+  expect(identity.textContent).toContain("A long gym name");
+  expect(identity.querySelector("a")?.getAttribute("href")).toBe("/app/gyms/real-gym");
+  expect(identity.querySelector("a")?.getAttribute("aria-label")).toBe("View gym: A long gym name");
+});
 it("lets users navigate multiple ads with visible controls and no automatic advance", async () => {
   await render([ad("one"), ad("two")]);
   const track = host.querySelector<HTMLDivElement>(".promotion-carousel-track")!;

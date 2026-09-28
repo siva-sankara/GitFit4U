@@ -84,7 +84,7 @@ export async function listRegistrations(req: Request, res: Response) {
       .populate("ownerId", "publicId name phone email")
       .populate(
         "gymId",
-        "publicId name address platformSubscriptionStatus status",
+        "publicId name address platformSubscriptionStatus status deletedAt",
       )
       .sort({ createdAt: -1 })
       .skip(skip)

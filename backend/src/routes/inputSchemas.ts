@@ -1,4 +1,5 @@
 ﻿import { z } from "zod";
+import { accountEmail, optionalContactPhone } from "./authSchemas.js";
 export const id = z
   .string()
   .regex(/^[a-f\d]{24}$/i, "Invalid record identifier");
@@ -41,9 +42,9 @@ export const gymInput = z.object({
   amenities: z.array(text).max(30).optional(),
   contact: z
     .object({
-      phone: z.string().max(20).nullable().optional(),
+      phone: optionalContactPhone.nullable(),
       email: z.string().email().nullable().optional(),
-      whatsapp: z.string().max(20).nullable().optional(),
+      whatsapp: optionalContactPhone.nullable(),
       website: z.string().url().nullable().optional(),
     })
     .optional(),
@@ -109,8 +110,8 @@ export const planInput = z.object({
 export const memberInput = z
   .object({
     name: text,
-    email: z.string().trim().email().optional(),
-    phone: z.string().trim().min(8).max(20).optional(),
+    email: accountEmail.optional(),
+    phone: optionalContactPhone,
     fitnessGoal: z.string().max(200).optional(),
   })
   .refine((v) => v.email || v.phone, "Email or phone is required");
@@ -149,7 +150,7 @@ export const classInput = z
   });
 export const trainerInput = z.object({
   name: text,
-  email: z.string().trim().email(),
+  email: accountEmail,
   bio: z.string().max(3000).optional(),
   qualifications: z.array(text).max(20).optional(),
   specializations: z.array(text).max(20).optional(),

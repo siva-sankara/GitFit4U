@@ -2,26 +2,18 @@ import { Moon, Sun } from "lucide-react";
 import { useApp } from "../context/AppContext";
 export function ThemePicker() {
   const { themePreference, setThemePreference } = useApp();
+  const nextTheme = themePreference === "dark" ? "light" : "dark";
+  const label = `Switch to ${nextTheme} mode`;
+  const Icon = nextTheme === "dark" ? Moon : Sun;
   return (
-    <div className="theme-icon-picker" role="group" aria-label="Appearance">
-      {(
-        [
-          { value: "light", label: "Light theme", Icon: Sun },
-          { value: "dark", label: "Dark theme", Icon: Moon },
-        ] as const
-      ).map(({ value, label, Icon }) => (
-        <button
-          key={value}
-          type="button"
-          className="icon-btn"
-          aria-label={label}
-          title={label}
-          aria-pressed={(themePreference || "light") === value}
-          onClick={() => setThemePreference(value)}
-        >
-          <Icon size={17} />
-        </button>
-      ))}
-    </div>
+    <button
+      type="button"
+      className="icon-btn theme-icon-picker"
+      aria-label={label}
+      title={label}
+      onClick={() => setThemePreference(nextTheme)}
+    >
+      <Icon size={20} aria-hidden="true" />
+    </button>
   );
 }

@@ -1,10 +1,12 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import { ArrowLeft, ArrowRight, Eye, EyeOff, LockKeyhole } from "lucide-react";
-import { useEffect, useState } from "react";
-import { useForm } from "react-hook-form";
+import { ArrowRight, Eye, EyeOff, LockKeyhole } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Controller, useForm } from "react-hook-form";
 import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { z } from "zod";
 import { Brand } from "../../components/Brand";
+import { PhoneInput } from "../../components/PhoneInput";
+import { BackIconLink } from "../../components/BackIconControl";
 import { useApp } from "../../context/AppContext";
 import {
   apiRequest,
@@ -23,7 +25,7 @@ import {
   safeReturnTo,
   loginDestination,
 } from "../../services/authRedirect";
-import type { ActiveRole } from "../../services/session";
+import type { ActiveRole, OwnerOnboarding } from "../../services/session";
 
 const phoneForm = z.object({ phone: phoneSchema });
 const otpForm = z.object({
@@ -39,7 +41,7 @@ type Challenge = {
 };
 type AuthResponse = ApiEnvelope<{
   accessToken: string;
-  user: { activeRole: ActiveRole };
+  user: { activeRole: ActiveRole; roles?: ActiveRole[]; onboarding?: OwnerOnboarding };
 }>;
 function readChallenge(): Challenge | null {
   try {
@@ -76,6 +78,9 @@ export function AuthDesktopPage() {
   const [show, setShow] = useState(false),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
+  const [signupRequired, setSignupRequired] = useState(false);
+  const running = useRef(false);
+  const invalidPhoneInput = useRef(false);
   const [challenge, setChallenge] = useState<Challenge | null>(readChallenge);
   const [resetToken, setResetToken] = useState(
       sessionStorage.getItem("gfu_reset") || "",
@@ -100,8 +105,15 @@ export function AuthDesktopPage() {
   });
   useEffect(() => {
     setError("");
+    invalidPhoneInput.current = false;
+    setSignupRequired(false);
     setShow(false);
-  }, [path]);
+    login.clearErrors();
+    registration.clearErrors();
+    phone.clearErrors();
+    otp.clearErrors();
+    reset.clearErrors();
+  }, [path, login.clearErrors, registration.clearErrors, phone.clearErrors, otp.clearErrors, reset.clearErrors]);
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
@@ -110,7 +122,7 @@ export function AuthDesktopPage() {
     sessionStorage.removeItem("gfu_auth_challenge");
     sessionStorage.removeItem("gfu_challenge");
   }
-  function finish(response: AuthResponse) {
+  function finish(response: AuthResponse, fromSignup = false) {
     setAccessToken(null);
     setAccessToken(response.data.accessToken);
     setRole(
@@ -120,22 +132,28 @@ export function AuthDesktopPage() {
     );
     clearChallenge();
     sessionStorage.removeItem("gfu_reset");
-    navigate(loginDestination(response.data.user.activeRole, returnTo), {
+    const next = fromSignup && response.data.user.activeRole === "GYM_OWNER" ? undefined : returnTo;
+    navigate(loginDestination(response.data.user, next), {
       replace: true,
     });
   }
   async function run(action: () => Promise<void>) {
+    if (running.current) return;
+    running.current = true;
     setError("");
+    setSignupRequired(false);
     setBusy(true);
     try {
       await action();
     } catch (e) {
+      setSignupRequired(e instanceof ApiError && e.code === "SIGNUP_REQUIRED");
       setError(
         e instanceof ApiError
           ? e.message
           : "Unable to connect. Please try again.",
       );
     } finally {
+      running.current = false;
       setBusy(false);
     }
   }
@@ -205,9 +223,7 @@ export function AuthDesktopPage() {
   );
   return (
     <div className="auth-page auth-desktop">
-      <Link className="auth-back" to="/">
-        <ArrowLeft size={18} /> Back home
-      </Link>
+      <BackIconLink className="auth-back" to="/" label="Back to home" />
       <aside className="auth-story">
         <Brand />
         <div>
@@ -246,6 +262,7 @@ export function AuthDesktopPage() {
             </Link>
           </nav>
         )}
+        {location.state?.sessionExpired === true && !signup && <p className="auth-hint" role="status">Your session expired or was signed out. Please sign in again.</p>}
         {returnTo?.startsWith("/gyms/") && (
           <p className="auth-hint" role="status">
             Sign in to view your selected gym and choose a membership. We will
@@ -255,54 +272,77 @@ export function AuthDesktopPage() {
         {error && (
           <div className="form-alert" role="alert">
             {error}
+            {signupRequired && <p><Link to={authLink("/auth/signup")}>Create an account</Link></p>}
           </div>
         )}
         {signup ? (
           <form
             noValidate
-            onSubmit={registration.handleSubmit((values) =>
-              run(async () => {
+            onSubmit={registration.handleSubmit((values) => {
+              if (invalidPhoneInput.current) {
+                registration.setError("phone", { message: "Enter a 10-digit mobile number." }, { shouldFocus: true });
+                return;
+              }
+              return run(async () => {
                 const { confirm: _confirm, phone: mobile, ...details } = values;
                 finish(
                   await apiRequest<AuthResponse>("/api/v1/auth/register", {
                     method: "POST",
                     body: JSON.stringify({
                       ...details,
-                      ...(mobile ? { phone: mobile } : {}),
+                      phone: `+91${mobile}`,
                     }),
                   }),
+                  true,
                 );
-              }),
-            )}
+              });
+            })}
           >
             <h1>Create your account</h1>
-            <p>Start your fitness journey with a free member account.</p>
+            <p>Choose your account type to get started.</p>
+            <fieldset className="auth-role-options" aria-describedby="signup-role-error" disabled={busy}>
+              <legend>Account type</legend>
+              {([
+                ["USER", "User", "Find gyms, book classes and manage your fitness."],
+                ["GYM_OWNER", "Gym Owner", "Register your gym and manage members and operations."],
+              ] as const).map(([value, title, description]) => (
+                <label className="auth-role-option" key={value}>
+                  <input type="radio" value={value} required aria-invalid={Boolean(registration.formState.errors.role)} {...registration.register("role")} />
+                  <div><strong>{title}</strong></div>
+                </label>
+              ))}
+              <small id="signup-role-error" role={registration.formState.errors.role ? "alert" : undefined}>{registration.formState.errors.role?.message}</small>
+            </fieldset>
             <label className="field">
               <span>Full name</span>
-              <input autoComplete="name" {...registration.register("name")} />
-              <small>{registration.formState.errors.name?.message}</small>
+              <input autoComplete="name" required aria-invalid={Boolean(registration.formState.errors.name)} aria-describedby="signup-name-error" {...registration.register("name")} />
+              <small id="signup-name-error">{registration.formState.errors.name?.message}</small>
             </label>
             <label className="field">
               <span>Email address</span>
               <input
                 type="email"
                 autoComplete="email"
+                required
+                aria-invalid={Boolean(registration.formState.errors.email)}
+                aria-describedby="signup-email-error"
                 {...registration.register("email")}
               />
-              <small>{registration.formState.errors.email?.message}</small>
+              <small id="signup-email-error">{registration.formState.errors.email?.message}</small>
             </label>
             <label className="field">
-              <span>Phone number (optional)</span>
-              <input
-                type="tel"
-                autoComplete="tel"
-                placeholder="+919876543210"
-                {...registration.register("phone")}
-              />
-              <small>{registration.formState.errors.phone?.message}</small>
+              <span>Mobile number</span>
+              <Controller name="phone" control={registration.control} render={({ field }) =>
+                <PhoneInput name={field.name} ref={field.ref} value={field.value} onBlur={field.onBlur}
+                  allowInternational={false} valueFormat="local" required
+                  aria-label="Mobile number, India +91" aria-invalid={Boolean(registration.formState.errors.phone)} aria-describedby="signup-phone-error"
+                  onValidityChange={invalid => { invalidPhoneInput.current = invalid; }}
+                  onValueChange={value => { registration.clearErrors("phone"); field.onChange(value); }} />
+              } />
+              <small id="signup-phone-error" role={registration.formState.errors.phone ? "alert" : undefined}>{registration.formState.errors.phone?.message}</small>
             </label>
             <p className="auth-hint">
-              Add a phone number to use phone sign in and password recovery.
+              Use your 10-digit Indian mobile number for sign in and recovery.
             </p>
             <label className="field">
               <span>Password</span>
@@ -332,13 +372,10 @@ export function AuthDesktopPage() {
               {busy ? "Creating account…" : "Create account"}
             </button>
             <p className="auth-switch">
-              Already a member?{" "}
+              Already have an account?{" "}
               <Link to={authLink("/auth/login")} state={location.state}>
                 Log in
               </Link>
-            </p>
-            <p className="auth-switch">
-              Own a gym? <Link to="/register-gym">Register your gym</Link>
             </p>
           </form>
         ) : success ? (
@@ -425,12 +462,11 @@ export function AuthDesktopPage() {
               }),
             )}
           >
-            <Link
+            <BackIconLink
               className="auth-step-back"
               to={authLink(recovery ? "/auth/forgot-password" : "/auth/phone")}
-            >
-              Change number
-            </Link>
+              label="Back to change phone number"
+            />
             <h1>Check your phone</h1>
             <p>
               Enter the six-digit code for the number ending in{" "}
@@ -478,27 +514,32 @@ export function AuthDesktopPage() {
         ) : phoneView ? (
           <form
             noValidate
-            onSubmit={phone.handleSubmit((values) =>
-              requestCode(values.phone, forgot ? "ACCOUNT_RECOVERY" : "LOGIN"),
-            )}
+            onSubmit={phone.handleSubmit((values) => {
+              if (invalidPhoneInput.current) {
+                phone.setError("phone", { message: "Enter a valid mobile number." }, { shouldFocus: true });
+                return;
+              }
+              return requestCode(values.phone, forgot ? "ACCOUNT_RECOVERY" : "LOGIN");
+            })}
           >
-            <Link className="auth-step-back" to={authLink("/auth/login")}>
-              Back to login
-            </Link>
+            <BackIconLink
+              className="auth-step-back"
+              to={authLink("/auth/login")}
+              label="Back to login"
+            />
             <h1>{forgot ? "Recover your account" : "Continue with phone"}</h1>
             <p>
               {forgot
                 ? "Use the phone number saved on your account. Accounts without a phone number need support assistance."
-                : "Verify your number to sign in. New numbers create a member account."}
+                : "Verify the mobile number on your existing account to sign in."}
             </p>
             <label className="field">
               <span>Phone number</span>
-              <input
-                type="tel"
-                autoComplete="tel"
-                placeholder="+919876543210"
-                {...phone.register("phone")}
-              />
+              <Controller name="phone" control={phone.control} render={({ field }) =>
+                <PhoneInput name={field.name} ref={field.ref} value={field.value} onBlur={field.onBlur} required
+                  onValidityChange={invalid => { invalidPhoneInput.current = invalid; }}
+                  onValueChange={value => { phone.clearErrors("phone"); field.onChange(value); }} />
+              } />
               <small>{phone.formState.errors.phone?.message}</small>
             </label>
             <button className="btn btn-primary auth-submit" disabled={busy}>

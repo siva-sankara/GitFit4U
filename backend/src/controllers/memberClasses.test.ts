@@ -4,6 +4,8 @@ import { Gym } from "../models/Gym.js";
 import { ClassBooking, ClassSession, Notification } from "../models/Engagement.js";
 import { MemberProfile } from "../models/Member.js";
 import { classes, cancelBooking } from "./memberFeatureController.js";
+import { memberClassScope } from "../services/memberClassAccessService.js";
+vi.mock("../services/memberClassAccessService.js", () => ({ memberClassScope: vi.fn() }));
 vi.mock("../services/domainEventService.js", () => ({ emitDomainEvent: vi.fn() }));
 const gymId = "507f1f77bcf86cd799439011", memberId = "507f1f77bcf86cd799439012", classId = "507f1f77bcf86cd799439013";
 const chain = (value: unknown) => {
@@ -14,6 +16,7 @@ const chain = (value: unknown) => {
 afterEach(() => vi.restoreAllMocks());
 it("paginates classes and reports the authenticated user's booking independently of history pagination", async () => {
   const rows = chain([{ _id: classId, publicId: "class-two", gymId, startsAt: new Date(Date.now() + 86400000) }]);
+  vi.mocked(memberClassScope).mockResolvedValue({ filter: { gymId }, eligibleGymCount: 1 } as any);
   vi.spyOn(Gym, "find").mockReturnValue(chain([{ _id: gymId, timezone: "Asia/Kolkata" }]));
   vi.spyOn(ClassSession, "find").mockReturnValue(rows);
   vi.spyOn(ClassSession, "countDocuments").mockResolvedValue(31);

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { optionalContactPhone } from "./authSchemas.js";
 const timezone = z
   .string()
   .max(80)
@@ -33,7 +34,7 @@ export const profileUpdateInput = z
       .optional(),
     preferences: z
       // Accept old clients during rollout, but never persist System again.
-      .object({ theme: z.enum(["system", "light", "dark"]).transform(value => value === "system" ? "light" : value).optional() })
+      .object({ theme: z.enum(["system", "light", "dark"]).transform(value => value === "system" ? "dark" : value).optional() })
       .strict()
       .optional(),
     notificationPreferences: z
@@ -77,7 +78,7 @@ export const profileUpdateInput = z
         emergencyContact: z
           .object({
             name: z.string().max(120),
-            phone: z.string().max(25),
+            phone: optionalContactPhone,
             relationship: z.string().max(80),
           })
           .strict()

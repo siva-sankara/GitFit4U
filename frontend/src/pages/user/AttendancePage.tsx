@@ -1,3 +1,4 @@
+import { PageHeader } from "../../components/PageHeader";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { Activity, ChevronLeft, ChevronRight, Flame } from "lucide-react";
@@ -59,7 +60,7 @@ export function AttendancePage() {
   const query = useData<AttendanceData>(`/api/v1/users/me/attendance?page=${page}&limit=20${month ? `&month=${month}` : ""}`);
   const data = query.data?.data, summary = data?.summary, meta = query.data?.meta;
   return <div className="page-stack account-attendance">
-    <header className="page-heading"><div><h1>Attendance & streaks</h1><p>Progress from your verified gym check-ins, counted once per day.</p></div><Link className="btn btn-secondary" to="/app/attendance/qr">Scan gym QR</Link></header>
+    <PageHeader><div><h1>Attendance & streaks</h1><p>Progress from your verified gym check-ins, counted once per day.</p></div><Link className="btn btn-secondary" to="/app/attendance/qr">Scan gym QR</Link></PageHeader>
     <QueryState query={query}>{summary && <>
       <div className="account-stat-grid">
         <article className="panel"><Flame aria-hidden="true" /><span>Current streak</span><strong>{summary.currentStreak} days</strong></article>

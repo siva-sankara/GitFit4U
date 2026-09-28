@@ -1,3 +1,4 @@
+import { PageHeader } from "../../components/PageHeader";
 import { useState } from "react";
 import {
   Area,
@@ -39,7 +40,7 @@ export function RevenueAnalytics({ embedded = false }: { embedded?: boolean }) {
   return (
     <div className="page-stack revenue-page">
       {!embedded && (
-        <header className="page-heading">
+        <PageHeader>
           <div>
             <span className="eyebrow">Your gym's performance</span>
             <h1>Revenue</h1>
@@ -48,7 +49,7 @@ export function RevenueAnalytics({ embedded = false }: { embedded?: boolean }) {
               separately.
             </p>
           </div>
-        </header>
+        </PageHeader>
       )}
       {embedded && <h2>Revenue analytics</h2>}
       <div className="table-toolbar">

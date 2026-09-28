@@ -21,7 +21,7 @@ import { createMembershipQuote } from "../services/checkoutService.js";
 import { refreshGymRating } from "../services/gymProjectionService.js";
 import { emitDomainEvent } from "../services/domainEventService.js";
 import { withGymMedia } from "../services/gymMediaService.js";
-import { shiftCalendarDate, zonedDayStart } from "../utils/gymCalendar.js";
+import { memberClassScope } from "../services/memberClassAccessService.js";
 import { withTrainerMedia } from "../services/userMediaService.js";
 import { withClassMedia } from "../services/classMediaService.js";
 import {
@@ -214,44 +214,11 @@ export async function classes(req: Request, res: Response) {
       !mongoose.isValidObjectId(req.query.gymId))
   )
     throw new AppError(422, "GYM_INVALID", "Choose a valid gym.");
-  const visibleGyms = await Gym.find({
-    status: "ACTIVE",
-    verificationStatus: "VERIFIED",
-    platformSubscriptionStatus: "ACTIVE",
-    ...(req.query.gymId ? { _id: req.query.gymId } : {}),
-  })
-    .select("_id timezone")
-    .lean();
-  if (!visibleGyms.length) {
-    res.json({ success: true, data: [], meta: pageMeta(page, limit, 0) });
-    return;
-  }
-  const filter = {
-    ...(day
-      ? {
-          $or: visibleGyms.map((gym) => ({
-            gymId: gym._id,
-            startsAt: {
-              $gte: new Date(
-                Math.max(
-                  Date.now(),
-                  zonedDayStart(
-                    String(day),
-                    gym.timezone || "Asia/Kolkata",
-                  ).getTime(),
-                ),
-              ),
-              $lt: zonedDayStart(
-                shiftCalendarDate(String(day), 1),
-                gym.timezone || "Asia/Kolkata",
-              ),
-            },
-          })),
-        }
-      : { startsAt: { $gte: from } }),
-    status: "SCHEDULED",
-    gymId: { $in: visibleGyms.map((gym) => gym._id) },
-  };
+  const { filter, eligibleGymCount } = await memberClassScope(req.auth!.userId, {
+    from, day: day as string | undefined,
+    gymId: req.query.gymId as string | undefined,
+    search: typeof req.query.q === "string" ? req.query.q : undefined,
+  });
   const data = await ClassSession.find(filter)
     .populate("gymId", "publicId name slug timezone")
     .populate("trainerId", "publicId name photoUrl photoAttachmentId")
@@ -288,8 +255,18 @@ export async function classes(req: Request, res: Response) {
           (trainer: any) => String(trainer._id) === String(row.trainerId?._id),
         ) || row.trainerId,
     })),
-    meta: pageMeta(page, limit, await ClassSession.countDocuments(filter)),
+    meta: { ...pageMeta(page, limit, await ClassSession.countDocuments(filter)), eligibleGymCount },
   });
+}
+export async function classDetails(req: Request, res: Response) {
+  const { filter } = await memberClassScope(req.auth!.userId);
+  const row = await ClassSession.findOne({ ...filter, publicId: req.params.id })
+    .populate("gymId", "publicId name slug timezone")
+    .populate("trainerId", "publicId name photoUrl photoAttachmentId").lean();
+  if (!row) throw new AppError(404, "CLASS_UNAVAILABLE", "This class is not available for your memberships.");
+  const [data] = await withClassMedia([row]);
+  if (data.trainerId) [data.trainerId] = await withTrainerMedia([data.trainerId]);
+  res.json({ success: true, data });
 }
 export async function bookClass(req: Request, res: Response) {
   const session = await mongoose.startSession();
@@ -330,6 +307,7 @@ export async function bookClass(req: Request, res: Response) {
         gymId: classSession.gymId,
         userId: req.auth!.userId,
         status: "ACTIVE",
+        "invitation.status": { $ne: "PENDING" },
       }, { $inc: { version: 1 } }, { session, returnDocument: "after" });
       if (!member)
         throw new AppError(
@@ -340,9 +318,11 @@ export async function bookClass(req: Request, res: Response) {
       const active = await Subscription.findOneAndUpdate({
         type: "GYM_MEMBERSHIP",
         memberProfileId: member._id,
+        userId: req.auth!.userId,
+        ...(member.currentSubscriptionId ? { _id: member.currentSubscriptionId } : {}),
         gymId: classSession.gymId,
         status: "ACTIVE",
-        startsAt: { $lte: classSession.startsAt },
+        startsAt: { $lte: new Date() },
         endsAt: { $gte: classSession.endsAt },
       }, { $inc: { version: 1 } }, { session, returnDocument: "after" });
       if (!active)

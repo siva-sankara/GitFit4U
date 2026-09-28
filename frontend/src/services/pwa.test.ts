@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { beforeEach, expect, it, vi } from "vitest";
-import { dismissInstall, installApp, installInstructions, isInstalled, restoreInstall, startPwaLifecycle } from "./pwa";
+import { dismissInstall, installApp, installInstructions, installSessionKey, isInstalled, startPwaLifecycle } from "./pwa";
 beforeEach(() => {
   localStorage.clear();
+  sessionStorage.clear();
   Object.defineProperty(window, "matchMedia", { configurable: true, writable: true, value: vi.fn().mockReturnValue({ matches: false, addEventListener: vi.fn() }) });
 });
 it("provides appropriate installation instructions for iPhone, iPad desktop mode, Android and desktop", () => {
@@ -21,15 +22,14 @@ it("captures a browser install prompt without automatically prompting and respec
   expect(prompt).not.toHaveBeenCalled();
   await installApp();
   expect(prompt).toHaveBeenCalledOnce();
-  expect(Number(localStorage.getItem("gfu_install_dismissed_until"))).toBeGreaterThan(Date.now());
+  expect(JSON.parse(sessionStorage.getItem(installSessionKey)!)).toMatchObject({ dismissed: true });
   await installApp();
   expect(prompt).toHaveBeenCalledOnce();
-  restoreInstall();
   expect(localStorage.getItem("gfu_install_dismissed_until")).toBeNull();
 });
 it("can dismiss instructions and detects standalone installation without claiming native publication", () => {
   dismissInstall();
-  expect(Number(localStorage.getItem("gfu_install_dismissed_until"))).toBeGreaterThan(Date.now());
+  expect(JSON.parse(sessionStorage.getItem(installSessionKey)!)).toMatchObject({ dismissed: true });
   const media = vi.spyOn(window, "matchMedia").mockReturnValue({ matches: true } as MediaQueryList);
   expect(isInstalled()).toBe(true);
   media.mockRestore();

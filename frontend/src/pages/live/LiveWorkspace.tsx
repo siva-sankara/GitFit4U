@@ -1,3 +1,5 @@
+import { PageHeader } from "../../components/PageHeader";
+import { BackIconLink } from "../../components/BackIconControl";
 import { lazy, Suspense, useState } from "react";
 import { Link, Navigate, useLocation } from "react-router-dom";
 import {
@@ -199,13 +201,13 @@ function Heading({
   description?: string;
 }) {
   return (
-    <header className="page-heading">
+    <PageHeader>
       <div>
         <span className="eyebrow">GETFIT4U</span>
         <h1>{title}</h1>
         {description && <p>{description}</p>}
       </div>
-    </header>
+    </PageHeader>
   );
 }
 function Dashboard() {
@@ -256,7 +258,7 @@ function Dashboard() {
         )}
         <section className="stat-grid">
           {Object.entries(data)
-            .filter(([, v]) => typeof v === "number")
+            .filter(([key, v]) => typeof v === "number" && (role !== "USER" || ["activeSubscriptions", "unreadNotifications", "memberships", "activeMemberships", "bookings", "upcomingClasses", "attendance", "checkIns", "totalVisits"].includes(key)))
             .map(([key, value]) => (
               <article className="panel metric-tile" key={key}>
                 <span>{label(key.replace(/Minor$/, ""))}</span>
@@ -270,10 +272,10 @@ function Dashboard() {
       {role === "USER" && <><StreakKpi /><PromotionPlacement placement="DASHBOARD" /></>}
       {canReadSummary && (
         <QueryState query={summary}>
-          <section className="dashboard-chart-grid">
-            <article className="panel chart-card">
+          <section className={`dashboard-chart-grid${role === "USER" ? " member-activity-chart" : ""}`}>
+            {role !== "USER" && <article className="panel chart-card">
               <h2>
-                {role === "USER" ? "Payments" : "Gross captured payments"}
+                Gross captured payments
               </h2>
               <p>Last six months · INR</p>
               {series?.revenue?.length ? (
@@ -294,7 +296,7 @@ function Dashboard() {
               ) : (
                 <p>No captured payments in this period.</p>
               )}
-            </article>
+            </article>}
             <article className="panel chart-card">
               <h2>Daily check-ins</h2>
               <p>Last six months</p>
@@ -325,9 +327,6 @@ function Dashboard() {
             </Link>
             <Link className="btn btn-secondary" to="/app/classes">
               Book a class
-            </Link>
-            <Link className="btn btn-secondary" to="/register-gym">
-              Register a gym
             </Link>
           </>
         ) : role === "ADMIN" ? (
@@ -1155,7 +1154,7 @@ export function LiveWorkspace() {
   return (
     <div className="state-card">
       <h1>Page not found</h1>
-      <Link to="/">Back home</Link>
+      <BackIconLink to="/" label="Back to home" />
     </div>
   );
 }

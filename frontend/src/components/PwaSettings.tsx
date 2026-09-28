@@ -2,7 +2,7 @@ import { Download, RefreshCw, Smartphone, WifiOff } from "lucide-react";
 import { useState } from "react";
 import { ThemePicker } from "./ThemePicker";
 import { Modal } from "./Modal";
-import { applyAppUpdate, dismissInstall, installApp, installInstructions, restoreInstall, usePwa } from "../services/pwa";
+import { applyAppUpdate, installApp, installInstructions, usePwa } from "../services/pwa";
 import "../styles/pwa.css";
 
 export function AccountAppSettings() {
@@ -16,13 +16,9 @@ export function PwaSettings() {
   const pwa = usePwa();
   return <section className="panel account-personal pwa-settings" aria-label="App installation">
     <h2><Smartphone size={20} aria-hidden="true" /> GETFIT4U on your device</h2>
-    {pwa.installed ? <p>GETFIT4U is running as an installed app.</p> : pwa.dismissed ? <>
-      <p>Installation suggestions are hidden on this device.</p>
-      <button className="btn btn-secondary" onClick={restoreInstall}>Show installation options</button>
-    </> : <>
+    {pwa.installed ? <p>GETFIT4U is installed on this device.</p> : <>
       <p>Install GETFIT4U for a dedicated app window and quick access from your home screen.</p>
       {pwa.installAvailable ? <button className="btn btn-primary" onClick={() => { void installApp(); }}><Download size={18} aria-hidden="true" />Install GETFIT4U</button> : <p>{installInstructions()}</p>}
-      <button className="btn btn-secondary" onClick={dismissInstall}>Hide installation suggestions</button>
     </>}
     <p className="subtle">A connection is required for payments, bookings, attendance, messages and account changes.</p>
     {pwa.error && <p role="alert">{pwa.error}</p>}

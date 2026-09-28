@@ -6,19 +6,19 @@ import { expect, it, vi } from "vitest";
 const source = readFileSync(new URL("../../public/sw.js", import.meta.url), "utf8");
 function worker() {
   const events: Record<string, (event: any) => void> = {};
-  const cache = { add: vi.fn().mockResolvedValue(undefined) };
+  const cache = { addAll: vi.fn().mockResolvedValue(undefined) };
   const caches = { open: vi.fn().mockResolvedValue(cache), match: vi.fn().mockResolvedValue(new Response("<h1>Offline</h1>")), keys: vi.fn().mockResolvedValue(["getfit4u-shell-v2", "getfit4u-offline-v3", "unrelated-cache"]), delete: vi.fn().mockResolvedValue(true) };
   const self = { location: { origin: "https://fitness.example" }, skipWaiting: vi.fn(), addEventListener: (type: string, callback: (event: any) => void) => { events[type] = callback; } };
   const fetch = vi.fn().mockRejectedValue(new TypeError("Offline"));
   runInNewContext(source, { self, caches, fetch, URL, Response });
   return { events, cache, caches, self, fetch };
 }
-it("caches only the public offline document and activates updates only after an explicit request", async () => {
+it("caches only the public offline shell/theme and activates updates only after an explicit request", async () => {
   const sw = worker();
   let work: Promise<unknown> = Promise.resolve();
   sw.events.install({ waitUntil: (value: Promise<unknown>) => { work = value; } });
   await work;
-  expect(sw.cache.add).toHaveBeenCalledExactlyOnceWith("/offline.html");
+  expect(sw.cache.addAll).toHaveBeenCalledExactlyOnceWith(["/offline.html", "/theme-init.js"]);
   expect(sw.self.skipWaiting).not.toHaveBeenCalled();
   sw.events.message({ data: { type: "GETFIT4U_APPLY_UPDATE" } });
   expect(sw.self.skipWaiting).toHaveBeenCalledOnce();

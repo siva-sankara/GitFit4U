@@ -1,8 +1,9 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useCurrentUser } from "../../api/hooks";
 import { apiRequest } from "../../services/apiClient";
+import { authPath, loginDestination } from "../../services/authRedirect";
 
 const storageKey = "gfu_pending_invitation";
 function pendingInvitation(hash: string) {
@@ -17,6 +18,7 @@ export function ActivateAccountPage() {
   const [invitation] = useState(() => pendingInvitation(location.hash));
   const [error, setError] = useState("");
   const me = useCurrentUser();
+  const client = useQueryClient();
   const isLink = invitation?.kind === "LINK";
   useEffect(() => {
     if (invitation) sessionStorage.setItem(storageKey, JSON.stringify(invitation));
@@ -25,7 +27,10 @@ export function ActivateAccountPage() {
   }, [invitation]);
   const accept = useMutation({
     mutationFn: (password?: string) => apiRequest(`/api/v1/auth/${isLink ? "accept-invitation" : "activate-account"}`, { method: "POST", body: JSON.stringify({ token: invitation?.token, ...(password ? { password } : {}) }) }),
-    onSuccess: () => sessionStorage.removeItem(storageKey),
+    onSuccess: async () => {
+      sessionStorage.removeItem(storageKey);
+      await client.invalidateQueries({ queryKey: ["me"] });
+    },
   });
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -39,7 +44,7 @@ export function ActivateAccountPage() {
     <section className="panel" style={{ padding: 28 }}>
       <Link to="/">GETFIT4U</Link>
       <h1>{isLink ? "Accept your gym invitation" : "Activate your account"}</h1>
-      {accept.isSuccess ? <><p role="status">{isLink ? "Your gym membership is linked." : "Your account is active. Sign in with your new password."} Gym access remains subject to your membership eligibility.</p><Link className="btn btn-primary" to={isLink ? "/app/profile/membership" : "/login?returnTo=%2Fapp%2Fprofile%2Fmembership"}>{isLink ? "View membership" : "Sign in"}</Link></>
+      {accept.isSuccess ? <><p role="status">{isLink ? "Your gym membership is linked." : "Your account is active. Sign in with your new password."} Gym access remains subject to your membership eligibility.</p><Link className="btn btn-primary" to={isLink ? loginDestination(me.data?.data || "USER", "/app/profile/membership") : authPath("/login", "/app/profile/membership")}>{isLink ? "Continue to your account" : "Sign in"}</Link></>
         : !invitation ? <p role="alert">Open the invitation from your email. If the link has expired, ask your gym to resend it.</p>
         : <>
           <p>{isLink ? "Sign in to the existing account that received the email, then accept this membership. Your password and profile stay under your control." : "Choose your own password. Your gym membership will appear after you sign in."}</p>

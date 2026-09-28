@@ -38,6 +38,7 @@ afterEach(async () => {
   await act(async () => root.unmount());
   client.clear();
   host.remove();
+  vi.restoreAllMocks();
 });
 async function render(profile = {}) {
   await act(async () =>
@@ -93,6 +94,33 @@ it("persists removal as a null attachment reference", async () => {
   expect(
     JSON.parse(mocks.request.mock.calls[0][1].body).avatarAttachmentId,
   ).toBeNull();
+});
+it("groups fields and confirms cancelling before discarding staged profile changes", async () => {
+  await render();
+  expect([...host.querySelectorAll("legend")].map(node => node.textContent)).toEqual(["Profile photo", "Personal information", "Fitness information"]);
+  expect(host.querySelector('[aria-label="Contact information"]')).not.toBeNull();
+  await click("Choose S3 photo");
+  expect(host.querySelector("form")?.dataset.unsavedChanges).toBe("true");
+  const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);
+  await click("Cancel");
+  expect(host.querySelector("form")?.dataset.unsavedChanges).toBe("true");
+  await click("Cancel");
+  expect(confirm).toHaveBeenCalledTimes(2);
+  expect(host.querySelector("form")?.dataset.unsavedChanges).toBeUndefined();
+  await save();
+  expect(JSON.parse(mocks.request.mock.calls[0][1].body)).not.toHaveProperty("avatarAttachmentId");
+});
+it("clears unsaved navigation state after a successful save", async () => {
+  await render();
+  await click("Choose S3 photo");
+  const before = new Event("beforeunload", { cancelable: true });
+  window.dispatchEvent(before);
+  expect(before.defaultPrevented).toBe(true);
+  await save();
+  expect(host.querySelector("form")?.dataset.unsavedChanges).toBeUndefined();
+  const after = new Event("beforeunload", { cancelable: true });
+  window.dispatchEvent(after);
+  expect(after.defaultPrevented).toBe(false);
 });
 it("sends explicit removals when the user clears previously saved private fields", async () => {
   await render({

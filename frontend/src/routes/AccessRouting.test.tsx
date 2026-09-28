@@ -12,6 +12,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { ApiError } from "../services/apiClient";
 import { ProtectedRoute } from "./ProtectedRoute";
 import { LegacyAuthRedirect } from "./LegacyAuthRedirect";
+import { NotificationInboxRedirect } from "../pages/shared/NotificationInboxRedirect";
 import { safeReturnTo, loginDestination } from "../services/authRedirect";
 
 const mocks = vi.hoisted(() => ({ session: vi.fn() }));
@@ -95,6 +96,12 @@ async function render(path: string, back = false) {
             }
           />
           <Route path="/app/home" element={<Location />} />
+          <Route path="/owner/*" element={<ProtectedRoute><Location /></ProtectedRoute>} />
+          <Route path="/notifications" element={<ProtectedRoute><NotificationInboxRedirect /></ProtectedRoute>} />
+          <Route path="/messages" element={<ProtectedRoute><NotificationInboxRedirect destination="messages" /></ProtectedRoute>} />
+          <Route path="/messages/:conversationId" element={<ProtectedRoute><NotificationInboxRedirect destination="messages" /></ProtectedRoute>} />
+          <Route path="/register-gym" element={<ProtectedRoute><p>Registration form</p></ProtectedRoute>} />
+          <Route path="/app/onboarding/first" element={<ProtectedRoute><p>Registration form</p></ProtectedRoute>} />
           <Route path="/trainer/dashboard" element={<Location />} />
           <Route path="/admin/dashboard" element={<Location />} />
         </Routes>
@@ -170,4 +177,49 @@ it("allows profile return intent and rejects external and cross-role return path
   expect(loginDestination("USER", "/owner/members")).toBe("/app/home");
   expect(safeReturnTo("//external.example/profile")).toBeUndefined();
   expect(safeReturnTo("/app/../admin/dashboard")).toBeUndefined();
+});
+it.each(["/register-gym", "/app/onboarding/first"])("blocks an ordinary member opening %s directly", async path => {
+  await render(path);
+  expect(host.textContent).not.toContain("Registration form");
+  expect(host.textContent).toContain("/app/home");
+});
+it.each(["NOT_STARTED", "DRAFT", "PENDING", "CHANGES_REQUESTED"])("restores an owner in %s to the persisted registration flow", async state => {
+  mocks.session.mockReturnValue({ isPending: false, isError: false, data: { data: { context: { role: "GYM_OWNER" }, user: { activeRole: "GYM_OWNER", roles: ["GYM_OWNER"], onboarding: { state } } } } });
+  await render("/owner/members");
+  expect(host.textContent).toContain("Registration form");
+  expect(host.textContent).not.toContain("Owner members data");
+});
+it("permits an existing account's actual owner capability without changing its active member role", async () => {
+  mocks.session.mockReturnValue({ isPending: false, isError: false, data: { data: { context: { role: "USER" }, user: { roles: ["USER", "GYM_OWNER"] } } } });
+  await render("/register-gym");
+  expect(host.textContent).toContain("Registration form");
+});
+function incompleteOwner() {
+  mocks.session.mockReturnValue({ isPending: false, isError: false, data: { data: { context: { role: "GYM_OWNER" }, user: { activeRole: "GYM_OWNER", roles: ["GYM_OWNER"], onboarding: { state: "PENDING" } } } } });
+}
+it.each(["help", "contact", "support", "security", "profile", "notifications", "messages", "legal/privacy"])("retains incomplete-owner account route /owner/%s", async page => {
+  incompleteOwner();
+  await render(`/owner/${page}`);
+  expect(host.textContent).toContain(`/owner/${page}`);
+  expect(host.textContent).not.toContain("Registration form");
+});
+it.each([
+  ["/notifications", "/owner/notifications"],
+  ["/messages", "/owner/messages"],
+  ["/messages/conversation_123", "/owner/messages?conversation=conversation_123"],
+])("resolves %s to its permitted owner alias without an onboarding loop", async (path, destination) => {
+  incompleteOwner();
+  await render(path);
+  expect(host.textContent).toContain(destination);
+  expect(host.textContent).not.toContain("Registration form");
+});
+it.each(["/owner/dashboard", "/owner/messages/unknown", "/owner/support/unknown", "/owner/gym-profile"])("keeps incomplete owner operational or unknown destination %s in onboarding", async path => {
+  incompleteOwner();
+  await render(path);
+  expect(host.textContent).toContain("Registration form");
+});
+it("still forbids an ordinary member from an owner's account namespace", async () => {
+  await render("/owner/help");
+  expect(host.textContent).toContain("/app/home");
+  expect(host.textContent).not.toContain("/owner/help");
 });

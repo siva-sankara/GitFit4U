@@ -1,6 +1,8 @@
 ﻿import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { loginDestination } from "../../services/authRedirect";
+import { readSession, useSession } from "../../services/session";
 import { Brand } from "../../components/Brand";
 import { GymRegistrationForm } from "./GymRegistrationForm";
 import { PaymentCheckout } from "../live/LivePublic";
@@ -16,6 +18,8 @@ const price = (value: number, currency = "INR") =>
   );
 
 export function RegisterGymPage() {
+  const me = useSession();
+  const onboarding = me.data?.data.user?.onboarding;
   const query = useQuery({
     queryKey: ["api", "/api/v1/workspace/registrations"],
     queryFn: () =>
@@ -29,6 +33,7 @@ export function RegisterGymPage() {
     [newGym, setNewGym] = useState(false);
   const registration =
     query.data?.data.find((r) => r.publicId === selected) ||
+    query.data?.data.find((r) => r.publicId === onboarding?.registrationId) ||
     query.data?.data[0];
   const navigate = useNavigate(),
     client = useQueryClient();
@@ -36,6 +41,10 @@ export function RegisterGymPage() {
     mutationFn: async () => {
       // Capture the selected gym before refreshing; never open another gym's workspace.
       const registrationId = registration?.publicId;
+      if (newGym && registration) {
+        setNewGym(false);
+        return;
+      }
       if (!newGym) {
         const refreshed = await query.refetch();
         if (refreshed.error) throw refreshed.error;
@@ -43,7 +52,7 @@ export function RegisterGymPage() {
           (r) => r.publicId === registrationId,
         );
         const active =
-          current?.gymId?.status === "ACTIVE" && current.status === "ACTIVE";
+          current?.gymId?.status === "ACTIVE" && current.status === "ACTIVE" && !current.gymId.deletedAt;
         if (active) {
           const response = await apiRequest<ApiEnvelope<Row>>(
             "/api/v1/auth/switch-role",
@@ -57,24 +66,19 @@ export function RegisterGymPage() {
           );
           setAccessToken(response.data.accessToken);
           client.clear();
-          navigate("/owner/dashboard", { replace: true });
+          const session = await readSession();
+          client.setQueryData(["me"], session);
+          navigate(loginDestination(session.data), { replace: true });
           return;
         }
       }
-      navigate("/auth/login", { replace: true });
+      navigate("/profile", { replace: true });
     },
   });
   return (
     <main className="container section-space page-stack">
       <header className="onboarding-topbar">
         <Brand />
-        <button
-          className="btn btn-ghost"
-          disabled={query.isPending || leaveRegistration.isPending}
-          onClick={() => leaveRegistration.mutate()}
-        >
-          {leaveRegistration.isPending ? "Opening..." : "Back"}
-        </button>
       </header>
       {leaveRegistration.isError && (
         <p role="alert">{leaveRegistration.error.message}</p>
@@ -85,7 +89,14 @@ export function RegisterGymPage() {
         Your gym goes live automatically after the backend verifies payment.
       </p>
       <QueryState query={query}>
-        {!registration || newGym ? (
+        {!registration && onboarding?.state === "SUSPENDED" ? (
+          <section className="panel form-section" role="status">
+            <h2>Gym access needs attention</h2>
+            <p>Your gym record needs review. Contact support before continuing registration or payment.</p>
+            <Link className="btn btn-primary" to="/contact">Contact support</Link>
+            <Link className="btn btn-secondary" to="/profile">Open your account</Link>
+          </section>
+        ) : !registration || newGym ? (
           <section className="panel form-section page-stack">
             <GymRegistrationForm
               endpoint="/api/v1/owner/registrations"
@@ -106,7 +117,7 @@ export function RegisterGymPage() {
                 className="btn btn-secondary"
                 onClick={() => setNewGym(false)}
               >
-                Back to registrations
+                Cancel new gym
               </button>
             )}
           </section>
@@ -160,17 +171,16 @@ function Registration({
     [formBusy, setFormBusy] = useState(false),
     [checkoutBusy, setCheckoutBusy] = useState(false),
     [planId, setPlanId] = useState<string>(r.selectedPlatformPlanId || "");
-  const active = r.gymId?.status === "ACTIVE" || r.status === "ACTIVE",
-    suspended =
-      r.status === "SUSPENDED" ||
-      ["SUSPENDED", "ARCHIVED"].includes(r.gymId?.status);
+  const unavailable = !r.gymId || Boolean(r.gymId.deletedAt) ||
+    r.status === "SUSPENDED" || ["SUSPENDED", "ARCHIVED"].includes(r.gymId.status);
+  const active = !unavailable && (r.gymId.status === "ACTIVE" || r.status === "ACTIVE");
   const options = useData<Row>(
     "/api/v1/workspace/registration-options",
-    !active && !suspended,
+    !active && !unavailable,
   );
   const plans = useData<Row[]>(
     "/api/v1/workspace/platform-plans",
-    !active && !suspended,
+    !active && !unavailable,
   );
   const snapshot = r.latestPaymentId?.metadata?.quoteSnapshot;
   const availablePlans = [...(plans.data?.data || [])];
@@ -188,8 +198,8 @@ function Registration({
   return (
     <section className="panel form-section page-stack">
       <header>
-        <h2>{r.gymId?.name}</h2>
-        <p role="status">Status: {label(r.status)}</p>
+        <h2>{r.gymId?.name || "Gym registration"}</h2>
+        <p role="status">Status: {unavailable ? "Unavailable" : label(r.status)}</p>
       </header>
       <ol className="facility-row" aria-label="Registration progress">
         {["Gym details", "Plan and payment", "Active gym"].map((step, i) => (
@@ -229,11 +239,10 @@ function Registration({
             Register another gym
           </button>
         </>
-      ) : suspended ? (
-        <p>
-          This gym is suspended or archived. Contact support to resolve its
-          status.
-        </p>
+      ) : unavailable ? (
+        <><p>
+          This gym is unavailable for registration or payment. Contact support to review its status.
+        </p><Link className="btn btn-secondary" to="/contact">Contact support</Link></>
       ) : (
         <>
           <details className="registration-section">
@@ -339,6 +348,7 @@ function Registration({
                     onBusyChange={setCheckoutBusy}
                     onComplete={() => {
                       void client.invalidateQueries({ queryKey: ["api"] });
+                      void client.invalidateQueries({ queryKey: ["me"] });
                       onRefresh();
                     }}
                   />

@@ -26,9 +26,12 @@ it("sends gym-local calendar inputs and an uploaded member photo reference, neve
   expect(dialog.querySelector<HTMLInputElement>('[name="paidAt"]')!.value).toBe(today);
   expect(dialog.querySelector<HTMLInputElement>('[name="paidAt"]')!.max).toBe(today);
   (dialog.querySelector('[name="name"]') as HTMLInputElement).value = "Member One";
-  (dialog.querySelector('[name="phone"]') as HTMLInputElement).value = "+919876543210";
+  (dialog.querySelector('[name="email"]') as HTMLInputElement).value = "member@example.com";
   await act(async () => {
-    const select = dialog.querySelector("select")!; select.value = "gold"; select.dispatchEvent(new Event("change", { bubbles: true }));
+    const phone = dialog.querySelector<HTMLInputElement>('[name="phone"]')!;
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(phone, "9876543210");
+    phone.dispatchEvent(new Event("input", { bubbles: true }));
+    const select = dialog.querySelector('option[value="gold"]')!.closest("select")!; select.value = "gold"; select.dispatchEvent(new Event("change", { bubbles: true }));
     Array.from(dialog.querySelectorAll("button")).find((button) => button.textContent === "Upload MEMBER_AVATAR")!.click();
   });
   await act(async () => dialog.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));

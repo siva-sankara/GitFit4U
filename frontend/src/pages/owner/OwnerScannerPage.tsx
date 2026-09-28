@@ -1,39 +1,28 @@
 import { useState } from "react";
+import { PageHeader } from "../../components/PageHeader";
 import { useCurrentUser } from "../../api/hooks";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { QRCodeSVG } from "qrcode.react";
 import { apiRequest, type ApiEnvelope } from "../../services/apiClient";
-import { Modal } from "../../components/Modal";
 import "../../styles/member-management.css";
 
 type GymQr = {
   token: string;
   gymName: string;
-  revision: number;
+  revision?: number;
   locationRequired: boolean;
 };
 export function OwnerScannerPage() {
   const session = useCurrentUser();
   const permissions = session.data?.data.context.permissions || [];
-  const [replace, setReplace] = useState(false),
-    [memberCode, setMemberCode] = useState(""),
+  const [memberCode, setMemberCode] = useState(""),
     [reason, setReason] = useState("");
   const qr = useQuery({
-    queryKey: ["api", "/api/v1/owner/attendance/qr"],
+    queryKey: ["api", "/api/v1/owner/attendance/qr", session.data?.data.context.gymId],
+    enabled: Boolean(session.data?.data.context.gymId),
     queryFn: () =>
       apiRequest<ApiEnvelope<GymQr>>("/api/v1/owner/attendance/qr"),
     retry: false,
-  });
-  const rotate = useMutation({
-    mutationFn: () =>
-      apiRequest("/api/v1/owner/attendance/qr/rotate", {
-        method: "POST",
-        body: "{}",
-      }),
-    onSuccess: () => {
-      setReplace(false);
-      void qr.refetch();
-    },
   });
   const manual = useMutation({
     mutationFn: async () => {
@@ -67,7 +56,7 @@ export function OwnerScannerPage() {
   }
   return (
     <div className="page-stack">
-      <header className="page-heading">
+      <PageHeader>
         <div>
           <span className="eyebrow">Attendance</span>
           <h1>Gym attendance QR</h1>
@@ -76,7 +65,7 @@ export function OwnerScannerPage() {
             phone.
           </p>
         </div>
-      </header>
+      </PageHeader>
       {qr.isPending && <p role="status">Loading your gym QR...</p>}
       {qr.isError && (
         <div className="panel state-card" role="alert">
@@ -105,11 +94,13 @@ export function OwnerScannerPage() {
               <QRCodeSVG
                 value={qr.data.data.token}
                 size={210}
-                marginSize={2}
+                marginSize={4}
+                bgColor="#ffffff"
+                fgColor="#000000"
                 level="M"
               />
             </div>
-            <p>Persistent gym QR - Version {qr.data.data.revision}</p>
+            <p>Permanent gym QR. Keep this code displayed at reception; it stays the same when your gym details or subscription change.</p>
             <p>
               {qr.data.data.locationRequired
                 ? "Members must enable location and be near this gym."
@@ -119,14 +110,6 @@ export function OwnerScannerPage() {
               <button className="btn btn-primary" onClick={download}>
                 Download QR
               </button>
-              {permissions.includes("gym:update") && (
-                <button
-                  className="btn btn-secondary"
-                  onClick={() => setReplace(true)}
-                >
-                  Replace QR
-                </button>
-              )}
             </div>
           </section>
         )}
@@ -170,28 +153,6 @@ export function OwnerScannerPage() {
           </section>
         )}
       </div>
-      <Modal
-        open={replace}
-        title="Replace gym QR?"
-        onClose={() => {
-          if (!rotate.isPending) setReplace(false);
-        }}
-      >
-        <p>
-          The previous printed or downloaded code will stop working. Display the
-          replacement code at reception.
-        </p>
-        {rotate.isError && <p role="alert">{rotate.error.message}</p>}
-        <button
-          className="btn btn-primary"
-          disabled={rotate.isPending}
-          onClick={() => rotate.mutate()}
-        >
-          {rotate.isPending
-            ? "Replacing..."
-            : "Replace and revoke previous code"}
-        </button>
-      </Modal>
     </div>
   );
 }

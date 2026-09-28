@@ -18,6 +18,7 @@ export function InfoPage({ type }: { type: "help" | "contact" | "legal" }) {
   const supportPath = workspace
     ? `/${workspace}/support`
     : "/auth/login?returnTo=%2Fapp%2Fsupport";
+  if (type === "legal" && document !== "terms" && document !== "privacy") return <section className="container info-page"><h1>Page not found</h1><p>This legal document does not exist.</p><Link className="btn btn-secondary" to="/help">Open help center</Link></section>;
   if (type === "legal")
     return (
       <div className="container info-page">

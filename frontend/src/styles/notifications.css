@@ -116,7 +116,7 @@
   justify-content: center;
   border-radius: 14px;
   background: var(--surface-muted);
-  color: var(--brand-strong);
+  color: var(--brand-text);
 }
 .notification-setting-copy h2 {
   font-size: 1.125rem;

@@ -79,10 +79,14 @@ async function render(path: string) {
       </QueryClientProvider>,
     ),
   );
-  for (let i = 0; i < 10; i++)
+  const ready = () => path === "/owner/dashboard"
+    ? Boolean(host.querySelector(".owner-status-card"))
+    : Boolean(host.querySelector("tbody tr"));
+  for (let i = 0; i < 100 && !ready(); i++)
     await act(async () => {
-      await new Promise((resolve) => { setTimeout(resolve, 15); });
+      await new Promise((resolve) => { setTimeout(resolve, 20); });
     });
+  expect(ready()).toBe(true);
 }
 it("restores owner member membership, visits, payment and join columns from API records", async () => {
   await render("/owner/members");

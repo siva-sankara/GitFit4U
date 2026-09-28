@@ -13,13 +13,18 @@ for (const key of [
   "RAZORPAY_KEY_SECRET",
   "RAZORPAY_WEBHOOK_SECRET",
   "OBJECT_STORAGE_ENDPOINT",
+  "OBJECT_STORAGE_ACCESS_KEY", "OBJECT_STORAGE_SECRET_KEY", "OBJECT_STORAGE_SESSION_TOKEN",
+  "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_S3_BUCKET_NAME",
+  "CLOUDINARY_API_KEY", "CLOUDINARY_API_SECRET", "CLOUDINARY_CLOUD_NAME",
+  "RESEND_API_KEY", "EMAIL_FROM", "WHATSAPP_ACCESS_TOKEN", "WHATSAPP_PHONE_NUMBER_ID",
+  "FIREBASE_PROJECT_ID", "FIREBASE_CLIENT_EMAIL", "FIREBASE_PRIVATE_KEY", "LOCATIONIQ_API_KEY",
 ])
   delete process.env[key];
 process.env.RAZORPAY_WEBHOOK_SECRET = "isolated-integration-webhook-secret";
 const { app } = await import("../app.js");
 const { User } = await import("../models/User.js");
 const { Gym } = await import("../models/Gym.js");
-const { RoleAssignment } = await import("../models/Auth.js");
+const { RoleAssignment, AuthIdentity, Session } = await import("../models/Auth.js");
 const { MemberProfile } = await import("../models/Member.js");
 const { MembershipPlan, Subscription, Payment, PlanQuote } =
   await import("../models/Commerce.js");
@@ -63,6 +68,36 @@ try {
     { dbName: databaseName, serverSelectionTimeoutMS: 10000, autoCreate: false, autoIndex: false },
   );
   await testDatabase.initialize();
+  const signupRequest = (body: Record<string, unknown>, ip: string) => request(app)
+    .post("/api/v1/auth/register").set("x-csrf-protection", "1")
+    .set("x-forwarded-for", ip).send(body);
+  const baseSignup = { name: "Identity Race", role: "USER", password: "IntegrationPass123" };
+  for (const [group, inputs] of [
+    ["email", [
+      { email: "Race.Email+tag@integration.example", phone: "9876501281" },
+      { email: " race.email+tag@integration.example ", phone: "9876501282" },
+    ]],
+    ["phone", [
+      { email: "race-phone-a@integration.example", phone: "9876501283" },
+      { email: "race-phone-b@integration.example", phone: "+91 98765 01283" },
+    ]],
+  ] as const) {
+    const responses = await Promise.all(inputs.map((input) => signupRequest({ ...baseSignup, ...input }, group === "email" ? "192.0.2.11" : "192.0.2.12")));
+    ok(responses.map(result => result.status).sort().join(",") === "200,409", `Concurrent canonical ${group} duplicate signup creates at most one account`);
+    const filter = group === "email" ? { email: "race.email+tag@integration.example" } : { phone: "+919876501283" };
+    const account = await User.findOne(filter);
+    ok(await User.countDocuments(filter) === 1, `Independent unique ${group} constraint holds in MongoDB`);
+    ok(await AuthIdentity.countDocuments({ userId: account._id }) === 1 && await Session.countDocuments({ userId: account._id }) === 1,
+      `Losing ${group} signup creates no extra identity or session`);
+    const conflict = responses.find(result => result.status === 409)!;
+    ok(conflict.body.error.code === "ACCOUNT_EXISTS" && !JSON.stringify(conflict.body).includes("E11000"), "Duplicate-key failures return safe recovery guidance");
+  }
+  for (const extra of [{ role: "ADMIN" }, { permissions: ["admin:platform"] }, { approved: true }, { isAdmin: true }, { ownerId: "forged" }]) {
+    const forged = await signupRequest({ ...baseSignup, email: "forged@integration.example", phone: "9876501284", ...extra }, "192.0.2.13");
+    ok(forged.status === 422, "Forged public signup privilege fields are rejected");
+  }
+  const missingRole = await signupRequest({ name: "No Role", email: "missing-role@integration.example", phone: "9876501285", password: "IntegrationPass123" }, "192.0.2.14");
+  ok(missingRole.status === 422, "Signup requires an intentional role");
   const signup = await call(
       "post",
       "/auth/register",
@@ -71,6 +106,7 @@ try {
         name: "Integration Member",
         email: "member@integration.example",
         phone: "9876501234",
+        role: "USER",
         password: "IntegrationPass123",
       },
       200,
@@ -83,6 +119,8 @@ try {
     {
       name: "Duplicate",
       email: "MEMBER@integration.example",
+      phone: "9876501235",
+      role: "USER",
       password: "IntegrationPass123",
     },
     409,
@@ -611,18 +649,26 @@ try {
     paymentProvider.getPaymentStatus = priorStatus;
     paymentProvider.verifyCheckout = priorVerify;
   }
+  await call("post", "/owner/registrations", memberToken,
+    { name: "Forbidden Gym", coordinates: [78, 17] }, 403);
+  const ownerSignup = await call("post", "/auth/register", undefined, {
+    name: "New Gym Owner", email: "new-owner@integration.example", phone: "9876501291",
+    role: "GYM_OWNER", password: "IntegrationPass123",
+  });
+  ok(ownerSignup.data.user.activeRole === "GYM_OWNER" && ownerSignup.data.user.onboarding.state === "NOT_STARTED",
+    "Owner signup authenticates directly for onboarding without a gym");
   const signupOwner = await call(
     "post",
     "/owner/registrations",
-    memberToken,
+    ownerSignup.data.accessToken,
     { name: "New Gym", coordinates: [78, 17], address: { city: "Test" } },
     201,
   );
-  ok(!!signupOwner.data.registration, "Members can start owner onboarding");
+  ok(!!signupOwner.data.registration, "Authorized owners can start owner onboarding");
   await call(
     "post",
     `/owner/registrations/${signupOwner.data.registration.publicId}/submit`,
-    memberToken,
+    ownerSignup.data.accessToken,
     {},
     422,
   );
@@ -649,6 +695,8 @@ try {
   const trainerSignup = await call("post", "/auth/register", undefined, {
     name: "Test Trainer",
     email: "trainer@integration.example",
+    phone: "9876501292",
+    role: "USER",
     password: "IntegrationPass123",
   });
   const trainer = await call(
@@ -733,7 +781,7 @@ try {
     "post",
     "/auth/otp/request",
     undefined,
-    { phone: "9876509999", purpose: "LOGIN" },
+    { phone: "9876501234", purpose: "LOGIN" },
     202,
   );
   await call("post", "/auth/otp/verify", undefined, {

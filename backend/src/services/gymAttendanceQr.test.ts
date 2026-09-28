@@ -3,10 +3,25 @@ import {
   issueGymQr,
   verifyGymQr,
   issueAttendanceQr,
+  permanentGymQr,
+  parseGymQrReference,
 } from "./attendanceQrService.js";
 import { attendanceLocalDate } from "./attendanceService.js";
 const gym = "507f1f77bcf86cd799439011";
 describe("persistent gym QR", () => {
+  it("parses the opaque permanent identifier without any expiry or deployment signature", () => {
+    const identity = "abcdefghijklmnopqrstuvwx";
+    expect(parseGymQrReference(permanentGymQr(identity))).toEqual({ identityId: identity });
+    expect(() => parseGymQrReference(permanentGymQr("short"))).toThrow();
+  });
+  it("retains a printed legacy reference even after the signing secret changes", () => {
+    const token = issueGymQr(gym, "legacy-identity", 2);
+    const printedWithOldSecret = token.split(".")[0] + "." + "A".repeat(43);
+    expect(parseGymQrReference(printedWithOldSecret)).toEqual({ gymId: gym, identityId: "legacy-identity", revision: 2 });
+    // Authorization and current-revision checks happen against stored records.
+    expect(() => parseGymQrReference(issueAttendanceQr("member", gym).token)).toThrow();
+    expect(() => parseGymQrReference("https://unrelated.example/qr")).toThrow();
+  });
   it("keeps a stable signed identity across downloads and changes when revoked", () => {
     const token = issueGymQr(gym, "unguessable-identity", 1);
     expect(issueGymQr(gym, "unguessable-identity", 1)).toBe(token);

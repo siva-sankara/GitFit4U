@@ -1,29 +1,50 @@
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useCurrentUser } from "../../api/hooks";
+import { apiRequest, type ApiEnvelope } from "../../services/apiClient";
+import { PageHeader } from "../../components/PageHeader";
 import { Link, useSearchParams } from "react-router-dom";
 import { ClassCard } from "../../components/ClassCard";
 import { StatusBadge } from "../../components/StatusBadge";
-import { Action, QueryState, Table, useData, type Row } from "../live/LiveData";
+import { Action, QueryState, Table, type Row } from "../live/LiveData";
+
+function useMemberData<T>(path: string, userId?: string, enabled = true) {
+  return useQuery({
+    queryKey: ["api", path, userId],
+    queryFn: ({ signal }) => apiRequest<ApiEnvelope<T>>(path, { signal }),
+    enabled: Boolean(userId) && enabled,
+    staleTime: 0,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: true,
+    refetchInterval: 60_000,
+    retry: false,
+  });
+}
 
 export function UserClassesPage() {
+  const userId = useCurrentUser().data?.data.user._id;
   const [search, setSearch] = useSearchParams();
   const bookingId = search.get("booking") || "";
   const validBookingId = /^[a-f\d]{24}$/i.test(bookingId);
-  const selectedBooking = useData<Row>(`/api/v1/users/classes/bookings/${encodeURIComponent(bookingId)}`, validBookingId);
+  const selectedBooking = useMemberData<Row>(`/api/v1/users/classes/bookings/${encodeURIComponent(bookingId)}`, userId, validBookingId);
   const [day, setDay] = useState(""), [page, setPage] = useState(1), [bookingPage, setBookingPage] = useState(1);
-  const sessions = useData<Row[]>(
-    `/api/v1/users/classes?${new URLSearchParams({ day, page: String(page), limit: "12" })}`,
+  const [query, setQuery] = useState(""), [searchDraft, setSearchDraft] = useState("");
+  const sessions = useMemberData<Row[]>(
+    `/api/v1/users/classes?${new URLSearchParams({ day, q:query, page: String(page), limit: "12" })}`,
+    userId,
   );
-  const bookings = useData<Row[]>(
+  const bookings = useMemberData<Row[]>(
     `/api/v1/workspace/records/bookings?limit=20&page=${bookingPage}`,
+    userId,
   );
   return (
     <div className="page-stack">
-      <header className="page-heading">
+      <PageHeader>
         <div>
           <h1>Classes and bookings</h1>
-          <p>Find a session and book using your eligible gym membership.</p>
+          <p>Upcoming classes from your current eligible gym subscriptions. Past bookings remain in your history.</p>
         </div>
-      </header>
+      </PageHeader>
       {bookingId && <section className="panel form-section page-stack" aria-label="Selected booking">
         <header className="page-heading"><h2>Your booking details</h2><button className="btn btn-secondary" onClick={() => setSearch((current) => { current.delete("booking"); return current; })}>Close details</button></header>
         {!validBookingId ? <p role="alert">This booking link is invalid.</p> : <QueryState query={selectedBooking}>
@@ -34,6 +55,13 @@ export function UserClassesPage() {
           </>}
         </QueryState>}
       </section>}
+      <form className="table-toolbar" onSubmit={event => { event.preventDefault(); setQuery(searchDraft.trim()); setPage(1); }}>
+        <label className="field">
+          <span>Search subscribed gym classes</span>
+          <input className="input" type="search" maxLength={80} value={searchDraft} onChange={event => setSearchDraft(event.target.value)} />
+        </label>
+        <button className="btn btn-secondary">Search classes</button>
+      </form>
       <label className="field class-status-filter">
         <span>Filter by gym-local date</span>
         <input
@@ -75,7 +103,13 @@ export function UserClassesPage() {
           })}
         </div>
         {!sessions.data?.data.length && (
-          <p>No upcoming classes match this date.</p>
+          <div className="state-card">
+            {sessions.data?.meta?.eligibleGymCount === 0 ? <>
+              <h2>No eligible gym subscriptions</h2>
+              <p>Subscribe to a gym to see its classes. Expired, frozen, cancelled or not-yet-started memberships do not provide class access.</p>
+              <Link className="btn btn-primary" to="/app/discover">Explore gyms</Link>
+            </> : <p>No upcoming classes match your filters at your subscribed gyms.</p>}
+          </div>
         )}
       </QueryState>
       <nav className="table-footer" aria-label="Class pages">
@@ -85,6 +119,7 @@ export function UserClassesPage() {
       </nav>
       <section className="panel form-section">
         <h2>Your bookings</h2>
+        <p>Your booking history stays available when a membership ends or changes.</p>
         <QueryState query={bookings}>
           <Table
             rows={bookings.data?.data || []}

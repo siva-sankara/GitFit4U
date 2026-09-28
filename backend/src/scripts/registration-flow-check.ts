@@ -11,8 +11,21 @@ Object.assign(process.env, {
   RAZORPAY_KEY_SECRET: "isolated-checkout-secret",
   RAZORPAY_WEBHOOK_SECRET: "isolated-registration-webhook",
 });
-for (const key of ["MSG91_AUTH_KEY", "MSG91_TEMPLATE_ID"])
+for (const key of ["MSG91_AUTH_KEY", "MSG91_TEMPLATE_ID",
+  "RESEND_API_KEY", "EMAIL_FROM", "WHATSAPP_ACCESS_TOKEN", "WHATSAPP_PHONE_NUMBER_ID",
+  "FIREBASE_PROJECT_ID", "FIREBASE_CLIENT_EMAIL", "FIREBASE_PRIVATE_KEY", "LOCATIONIQ_API_KEY",
+  "OBJECT_STORAGE_ENDPOINT", "OBJECT_STORAGE_ACCESS_KEY", "OBJECT_STORAGE_SECRET_KEY", "OBJECT_STORAGE_SESSION_TOKEN",
+  "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_S3_BUCKET_NAME",
+  "CLOUDINARY_API_KEY", "CLOUDINARY_API_SECRET", "CLOUDINARY_CLOUD_NAME",
+])
   delete process.env[key];
+// Exercise disabled document-upload routing without loading real S3 credentials.
+// This suite does not upload bytes or contact this reserved .invalid endpoint.
+Object.assign(process.env, {
+  OBJECT_STORAGE_ENDPOINT: "https://storage.invalid",
+  OBJECT_STORAGE_ACCESS_KEY: "isolated-test-access",
+  OBJECT_STORAGE_SECRET_KEY: "isolated-test-secret",
+});
 const { app } = await import("../app.js");
 const { User } = await import("../models/User.js");
 const { Gym } = await import("../models/Gym.js");
@@ -116,12 +129,16 @@ try {
   const owner = await call("post", "/auth/register", undefined, {
     name: "Gym applicant",
     email: "owner@registration.example",
+    phone: "9876501201",
+    role: "GYM_OWNER",
     password: "RegistrationPass123",
   });
   const token = owner.data.accessToken;
   const other = await call("post", "/auth/register", undefined, {
     name: "Other applicant",
     email: "other@registration.example",
+    phone: "9876501202",
+    role: "GYM_OWNER",
     password: "RegistrationPass123",
   });
   const admin = await User.create({
@@ -173,14 +190,17 @@ try {
     { ...details, coordinates: [200, 91] },
     422,
   );
+  const creationKey = crypto.randomUUID();
   const created = await Promise.all([
     request(app)
       .post("/api/v1/owner/registrations")
       .auth(token, { type: "bearer" })
+      .set("idempotency-key", creationKey)
       .send(details),
     request(app)
       .post("/api/v1/owner/registrations")
       .auth(token, { type: "bearer" })
+      .set("idempotency-key", creationKey)
       .send(details),
   ]);
   check(
@@ -470,6 +490,14 @@ try {
     "Status polling recovers delayed capture without another callback or webhook",
   );
   const afterCapture = gatewayChecks;
+  const replay = await request(app).post("/api/v1/owner/registrations")
+    .auth(token, { type: "bearer" }).set("idempotency-key", creationKey).send(details);
+  check(replay.status === 200 && replay.body.data.registration.publicId === registration.publicId,
+    "A creation retry after payment activation reuses the original gym");
+  check((await Gym.countDocuments({ ownerId: gym.ownerId })) === 1,
+    "An activated registration is not duplicated by a lost-response retry");
+  check((await call("get", "/auth/me", token)).data.user.onboarding.state === "ACTIVE",
+    "Fresh account state observes completed owner onboarding");
   await call("post", "/checkout/verify", token, verify);
   check(
     gatewayChecks === afterCapture,

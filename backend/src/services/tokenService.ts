@@ -5,6 +5,7 @@ import type { Response } from "express";
 import { env, isProduction } from "../config/env.js";
 import type { Role } from "../constants/domain.js";
 import { Session } from "../models/Auth.js";
+import { User } from "../models/User.js";
 import { sha256 } from "../utils/crypto.js";
 import { AppError } from "../utils/AppError.js";
 
@@ -68,26 +69,53 @@ export async function createSession(input: {
 }
 
 export async function rotateRefreshToken(refreshToken: string) {
-  const [sessionId] = refreshToken.split(".");
-  if (!sessionId) throw new AppError(401, "INVALID_REFRESH_TOKEN", "Please sign in again.");
-  const session = await Session.findOne({ publicId: sessionId }).select("+refreshTokenHash");
-  if (!session || session.revokedAt || session.expiresAt <= new Date()) {
-    throw new AppError(401, "SESSION_EXPIRED", "Your session has expired. Please sign in again.");
+  if (typeof refreshToken !== "string")
+    throw new AppError(401, "INVALID_REFRESH_TOKEN", "Please sign in again.");
+  const parts = refreshToken.split(".");
+  const sessionId = parts[0];
+  if (parts.length !== 2 || !sessionId || !parts[1])
+    throw new AppError(401, "INVALID_REFRESH_TOKEN", "Please sign in again.");
+  const hash = sha256(refreshToken);
+  // Concurrent tabs can reconstruct the same successor without storing a
+  // plaintext refresh credential. The server secret prevents prediction.
+  const successor = `${sessionId}.${crypto.createHmac("sha384", env.JWT_REFRESH_SECRET)
+    .update(`gfu-refresh-v1\0${refreshToken}`).digest("base64url")}`;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const session = await Session.findOne({ publicId: sessionId })
+      .select("+refreshTokenHash +previousRefreshTokenHash");
+    const active = session && !session.revokedAt && await User.exists({ _id: session.userId, status: "ACTIVE" });
+    const now = new Date();
+    if (!active || session.expiresAt <= now)
+      throw new AppError(401, "SESSION_EXPIRED", "Your session has expired. Please sign in again.");
+    const inGrace = session.refreshGraceUntil && session.refreshGraceUntil > now;
+    const current = session.refreshTokenHash === hash;
+    const previous = inGrace && session.previousRefreshTokenHash === hash &&
+      session.refreshTokenHash === sha256(successor);
+    if (!current && !previous) {
+      await Session.updateMany(
+        { tokenFamily: session.tokenFamily, refreshTokenHash: session.refreshTokenHash, revokedAt: null },
+        { $set: { revokedAt: now, revokeReason: "TOKEN_REUSE" } },
+      );
+      throw new AppError(401, "REFRESH_TOKEN_REUSE", "This session was revoked for your protection.");
+    }
+    const rotate = current && !inGrace;
+    const nextToken = rotate || previous ? successor : refreshToken;
+    const updated = await Session.findOneAndUpdate(
+      { publicId: sessionId, refreshTokenHash: session.refreshTokenHash, revokedAt: null, expiresAt: { $gt: now } },
+      { $set: { lastUsedAt: now, ...(rotate ? {
+        refreshTokenHash: sha256(nextToken), previousRefreshTokenHash: hash,
+        // Fixed window: retries never extend it or absolute session expiry.
+        refreshGraceUntil: new Date(now.getTime() + 10_000),
+      } : {}) } },
+      { returnDocument: "after" },
+    );
+    if (updated) return {
+      accessToken: signAccessToken(String(session.userId), session.publicId),
+      refreshToken: nextToken, sessionId: session.publicId,
+    };
+    // A refresh or logout won the compare-and-swap; never overwrite its state.
   }
-  if (session.refreshTokenHash !== sha256(refreshToken)) {
-    await Session.updateMany({ tokenFamily: session.tokenFamily }, { revokedAt: new Date(), revokeReason: "TOKEN_REUSE" });
-    throw new AppError(401, "REFRESH_TOKEN_REUSE", "This session was revoked for your protection.");
-  }
-  const newSecret = crypto.randomBytes(48).toString("base64url");
-  const newRefreshToken = `${session.publicId}.${newSecret}`;
-  session.refreshTokenHash = sha256(newRefreshToken);
-  session.lastUsedAt = new Date();
-  await session.save();
-  return {
-    accessToken: signAccessToken(String(session.userId), session.publicId),
-    refreshToken: newRefreshToken,
-    sessionId: session.publicId
-  };
+  throw new AppError(503, "REFRESH_BUSY", "Session recovery is busy. Please retry.");
 }
 
 export function setRefreshCookie(res: Response, token: string): void {

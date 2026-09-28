@@ -1,3 +1,4 @@
+import { PageHeader } from "../../components/PageHeader";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
@@ -6,6 +7,7 @@ import { apiRequest, setAccessToken, type ApiEnvelope } from "../../services/api
 import { Modal } from "../../components/Modal";
 import { GymIdentity } from "../../components/GymIdentity";
 import { StatusBadge } from "../../components/StatusBadge";
+import { BackIconLink } from "../../components/BackIconControl";
 import "../../styles/platform-subscription.css";
 import { PaymentCheckout } from "../live/LivePublic";
 import { useData, QueryState, money, type Row } from "../live/LiveData";
@@ -56,7 +58,7 @@ export function PlatformSubscriptionPage() {
   if (!target) return <section className="panel state-card" role="alert">
     <h1>Gym subscription unavailable</h1>
     <p>This reminder does not match a gym you are authorized to manage. No gym or payment was changed.</p>
-    <Link className="btn btn-secondary" to="/notifications">Back to notifications</Link>
+    <BackIconLink className="btn btn-secondary" to="/notifications" label="Back to notifications" />
   </section>;
   if (!ready) return <section className="panel form-section">
     <h1>Confirm renewal gym</h1>
@@ -71,10 +73,10 @@ export function PlatformSubscriptionPage() {
   </section>;
   return (
     <div className="page-stack">
-      <header className="page-heading">
+      <PageHeader>
         <h1>Platform subscription</h1>
         <p>Renew <strong>{target.name}</strong>'s GETFIT4U subscription with verified payment.</p>
-      </header>
+      </PageHeader>
       {["SUSPENDED", "ARCHIVED"].includes(target.status) && <p role="alert">
         This gym is {target.status.toLowerCase()}. Contact support about its status. Renewal does not remove administrative restrictions.
       </p>}

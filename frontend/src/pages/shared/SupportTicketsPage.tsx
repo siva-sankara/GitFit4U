@@ -1,3 +1,4 @@
+import { PageHeader } from "../../components/PageHeader";
 import { useRef, useState } from "react";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
@@ -33,8 +34,8 @@ export function SupportTicketsPage() {
     },
   });
   return <div className="page-stack support-tickets-page">
-    <header className="page-heading"><div><span className="eyebrow">Help center</span><h1>Support tickets</h1><p>Track requests, review their history and reply to support.</p></div>
-      <button className="btn btn-primary" onClick={() => setCreating(true)}>Create ticket</button></header>
+    <PageHeader><div><span className="eyebrow">Help center</span><h1>Support tickets</h1><p>Track requests, review their history and reply to support.</p></div>
+      <button className="btn btn-primary" onClick={() => setCreating(true)}>Create ticket</button></PageHeader>
     <section className="panel support-ticket-list">
       <h2>Your support requests</h2>
       <QueryState query={tickets}>

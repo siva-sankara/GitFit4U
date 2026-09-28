@@ -1,7 +1,7 @@
 (function () {
-  var preference = "light";
+  var preference = "dark";
   try {
-    preference = localStorage.getItem("gfu_theme_preference") === "dark" ? "dark" : "light";
+    preference = localStorage.getItem("gfu_theme_preference") === "light" ? "light" : "dark";
     localStorage.setItem("gfu_theme_preference", preference);
   } catch (_) {
     /* Storage is optional. */

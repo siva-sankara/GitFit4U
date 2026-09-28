@@ -3,7 +3,10 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, afterEach, expect, it, vi } from "vitest";
-const mocks = vi.hoisted(() => ({ saved: [] as string[], toggle: vi.fn() }));
+const mocks = vi.hoisted(() => ({ saved: [] as string[], toggle: vi.fn(), role: "USER" }));
+vi.mock("../../services/session", () => ({
+  useSession: () => ({ data: { data: { user: { roles: [mocks.role] }, context: { role: mocks.role } } } }),
+}));
 vi.mock("../../context/AppContext", () => ({
   useApp: () => ({
     favorites: mocks.saved,
@@ -23,6 +26,7 @@ const gym = { publicId: "gym-one", slug: "gym-one", name: "Gym One" };
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.saved = [];
+  mocks.role = "USER";
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   host = document.createElement("div");
   document.body.append(host);
@@ -35,6 +39,13 @@ afterEach(async () => {
 async function render(element: React.ReactNode) {
   await act(async () => root.render(<MemoryRouter>{element}</MemoryRouter>));
 }
+it("hides the owner entry point for ordinary members and preserves it for owners", async () => {
+  await render(<PublicHeader />);
+  expect(host.querySelector('a[href="/register-gym"]')).toBeNull();
+  mocks.role = "GYM_OWNER";
+  await render(<PublicHeader />);
+  expect(host.querySelector('a[href="/register-gym"]')).not.toBeNull();
+});
 it("uses a default cover when the gym has no photo", async () => {
   await render(<DatabaseGymCard gym={gym} />);
   expect(host.querySelector("img")!.getAttribute("src")).toBe(

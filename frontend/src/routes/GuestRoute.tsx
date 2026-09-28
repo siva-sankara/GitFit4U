@@ -20,12 +20,12 @@ export function GuestRoute({
   // unavailable session endpoint must not replace public content with an error.
   if (!getAccessToken() || !session.data || session.isError)
     return <>{children}</>;
-  const role = session.data.data.context.role;
+  const identity = session.data.data;
   const from =
     safeReturnTo(new URLSearchParams(location.search).get("returnTo")) ||
     safeReturnTo(location.state?.from);
   const destination = auth
-    ? loginDestination(role, from)
-    : workspacePath(role, location.pathname + location.search + location.hash);
+    ? loginDestination(identity, from)
+    : workspacePath(identity, location.pathname + location.search + location.hash);
   return <Navigate to={destination} replace />;
 }

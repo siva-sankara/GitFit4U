@@ -6,6 +6,8 @@ import { GymRegistration } from "../models/GymRegistration.js";
 import { User } from "../models/User.js";
 import { RoleAssignment } from "../models/Auth.js";
 import { Payment } from "../models/Commerce.js";
+import { IdempotencyRecord } from "../models/Operations.js";
+import { sha256 } from "../utils/crypto.js";
 import { OWNER_DEFAULT_PERMISSIONS } from "../constants/domain.js";
 import { AppError } from "../utils/AppError.js";
 import { writeAudit } from "../services/auditService.js";
@@ -13,26 +15,54 @@ import {
   editableRegistrationStates,
   payableGym,
   registrationStatus,
+  availableRegistrationGym,
 } from "../services/registrationService.js";
 
 export async function createRegistration(req: Request, res: Response) {
   let created = false;
+  const scope = `gym.registration:${req.auth!.userId}`;
+  const key = req.idempotencyKey!;
+  const requestHash = sha256(JSON.stringify(req.body));
   const data = await mongoose.connection.transaction(async (session) => {
     // Serialize draft creation for this owner, including simultaneous double-clicks.
-    await User.updateOne(
-      { _id: req.auth!.userId },
+    const owner = await User.updateOne(
+      { _id: req.auth!.userId, status: "ACTIVE", roles: { $in: ["GYM_OWNER", "ADMIN"] } },
       { $inc: { registrationRevision: 1 } },
       { session },
     );
+    if (owner.matchedCount !== 1)
+      throw new AppError(403, "ROLE_FORBIDDEN", "Gym registration requires a gym owner account.");
+    const replay = await IdempotencyRecord.findOne({ scope, key }).session(session);
+    if (replay) {
+      if (replay.requestHash !== requestHash)
+        throw new AppError(409, "IDEMPOTENCY_CONFLICT", "This request key was already used for different gym details.");
+      const registration = await GymRegistration.findOne({
+        _id: replay.responseBody.registrationId,
+        ownerId: req.auth!.userId,
+      }).session(session);
+      if (!registration)
+        throw new AppError(409, "REGISTRATION_UNAVAILABLE", "Refresh your registrations before continuing.");
+      created = false;
+      return { registration, gym: await availableRegistrationGym(registration, req.auth!.userId, session) };
+    }
+    const remember = async (registrationId: unknown) => {
+      await IdempotencyRecord.create([{
+        scope, key, requestHash, status: "COMPLETED", statusCode: 200,
+        responseBody: { registrationId },
+        expiresAt: new Date(Date.now() + 30 * 86_400_000),
+      }], { session });
+    };
     const existing = await GymRegistration.findOne({
       ownerId: req.auth!.userId,
       status: { $nin: ["ACTIVE", "SUSPENDED"] },
     }).session(session);
     if (existing) {
       created = false;
+      const gym = await availableRegistrationGym(existing, req.auth!.userId, session);
+      await remember(existing._id);
       return {
         registration: existing,
-        gym: await Gym.findById(existing.gymId).session(session),
+        gym,
       };
     }
     const [gym] = await Gym.create(
@@ -87,6 +117,7 @@ export async function createRegistration(req: Request, res: Response) {
       ],
       { session },
     );
+    await remember(registration._id);
     created = true;
     return { registration, gym };
   });

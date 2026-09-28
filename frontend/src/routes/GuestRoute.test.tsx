@@ -125,6 +125,7 @@ async function render(path: string, back = false) {
             <Route path="/owner/*" element={<Destination />} />
             <Route path="/trainer/*" element={<Destination />} />
             <Route path="/admin/*" element={<Destination />} />
+            <Route path="/register-gym" element={<Destination />} />
           </Routes>
         </MemoryRouter>
       </QueryClientProvider>,
@@ -268,4 +269,9 @@ it("keeps protected content hidden when the session endpoint is rate limited", a
   await render("/");
   expect(host.textContent).toContain("Public landing");
   expect(mocks.request).toHaveBeenCalledOnce();
+});
+it("uses persisted owner onboarding when reopening login in an installed app", async () => {
+  mocks.request.mockResolvedValue({ data: { context: { role: "GYM_OWNER" }, user: { activeRole: "GYM_OWNER", onboarding: { state: "PENDING", registrationId: "existing" } } } });
+  await render("/login?returnTo=%2Fowner%2Fmembers");
+  await until(() => host.textContent!.includes("/register-gym"));
 });

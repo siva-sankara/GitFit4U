@@ -48,6 +48,7 @@ afterEach(async () => { await act(async () => root.unmount()); host.remove(); se
 
 it("uses a safe parent for a member detail opened directly, without relying on browser history", async () => {
   await render("/owner/members/member-a");
+  expect(host.querySelector(".workspace-breadcrumb-header>button")?.getAttribute("aria-label")).toBe("Back to Members");
   await click(".workspace-breadcrumb-header>button");
   expect(current()).toBe("/owner/members");
   expect(window.confirm).not.toHaveBeenCalled();
@@ -66,7 +67,8 @@ it("restores the actual list filters and pagination after details and Back", asy
 it("remembers an authorized list URL with filters and rejects a stored off-site destination", async () => {
   await render("/owner/members?status=ACTIVE&page=3");
   await click('a[href="/owner/members/member-a"]');
-  expect(host.querySelector('nav[aria-label="Breadcrumb"] a[href="/owner/members?status=ACTIVE&page=3"]')).not.toBeNull();
+  expect(host.querySelector('nav[aria-label="Breadcrumb"]')).toBeNull();
+  expect(host.querySelector(".workspace-breadcrumb-header>button")?.getAttribute("aria-label")).toBe("Back to Members");
   await click(".workspace-breadcrumb-header>button");
   expect(current()).toBe("/owner/members?status=ACTIVE&page=3");
   await click('a[href="/owner/members/member-a"]');
@@ -110,10 +112,10 @@ it("clears dirty state when the form is intentionally reset", async () => {
 it("labels Profile sections and returns to Overview without a remembered-section loop", async () => {
   sessionStorage.setItem(navigationSessionKey(scope, "list:/app/profile"), "/app/profile?section=payments");
   await render("/app/profile?section=payments", "USER");
-  expect(host.querySelector('[aria-current="page"]')?.textContent).toBe("Payments");
+  expect(host.querySelector(".workspace-breadcrumb-header>button")?.getAttribute("aria-label")).toBe("Back to Profile");
   await click(".workspace-breadcrumb-header>button");
   expect(current()).toBe("/app/profile");
-  expect(host.querySelector('[aria-current="page"]')?.textContent).toBe("Profile");
+  expect(host.querySelector(".workspace-breadcrumb-header>button")?.getAttribute("aria-label")).toBe("Back to Home");
 });
 it("isolates remembered member search by gym and clears session navigation data on logout", async () => {
   sessionStorage.setItem(navigationSessionKey(scope, "member-list"), JSON.stringify({ search: "private search", page: 2 }));

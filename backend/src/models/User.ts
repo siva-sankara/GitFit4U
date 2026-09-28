@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 const { Schema, model, models } = mongoose;
 import { ROLES } from "../constants/domain.js";
+import { normalizeAccountPhone, normalizeEmail } from "../utils/accountIdentity.js";
 
 const userSchema = new Schema(
   {
@@ -10,6 +11,7 @@ const userSchema = new Schema(
     phone: {
       type: String,
       trim: true,
+      set: (value: string | null | undefined) => typeof value === "string" ? value.trim() ? normalizeAccountPhone(value) : undefined : value == null ? undefined : value,
       unique: true,
       sparse: true,
       index: true,
@@ -18,6 +20,7 @@ const userSchema = new Schema(
       type: String,
       trim: true,
       lowercase: true,
+      set: (value: string | null | undefined) => typeof value === "string" ? normalizeEmail(value) || undefined : value == null ? undefined : value,
       unique: true,
       sparse: true,
       index: true,
@@ -39,8 +42,8 @@ const userSchema = new Schema(
       theme: {
         type: String,
         enum: ["light", "dark"],
-        default: "light",
-        set: (value: string) => value === "system" ? "light" : value,
+        default: "dark",
+        set: (value: string) => value === "system" ? "dark" : value,
       },
     },
     notificationPreferences: {
@@ -80,7 +83,7 @@ userSchema.index({ status: 1, "social.visibility": 1, name: 1, _id: 1 });
 
 // Existing hydrated accounts remain editable before the batch migration runs.
 userSchema.post("init", (user: any) => {
-  if (user.preferences?.theme === "system") user.set("preferences.theme", "light");
+  if (user.preferences?.theme === "system") user.set("preferences.theme", "dark");
 });
 
 export const User = models.User || model("User", userSchema);

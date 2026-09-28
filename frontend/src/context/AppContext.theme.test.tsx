@@ -23,7 +23,7 @@ function Appearance() {
     </>
   );
 }
-it("migrates System to Light, preserves manual Dark and never subscribes to the OS theme", async () => {
+it("migrates System to Dark, preserves explicit modes and never subscribes to the OS theme", async () => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   localStorage.clear();
   localStorage.setItem("gfu_theme_preference", "system");
@@ -38,8 +38,8 @@ it("migrates System to Light, preserves manual Dark and never subscribes to the 
   const original = window.matchMedia;
   window.matchMedia = vi.fn(() => media as unknown as MediaQueryList);
   const host = document.createElement("div"),
-    root = createRoot(host),
     client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  let root = createRoot(host);
   try {
     await act(async () =>
       root.render(
@@ -50,12 +50,12 @@ it("migrates System to Light, preserves manual Dark and never subscribes to the 
         </QueryClientProvider>,
       ),
     );
-    expect(host.textContent).toContain("light:light");
+    expect(host.textContent).toContain("dark:dark");
     await act(async () => {
       media.matches = true;
       listeners.forEach((listener) => listener());
     });
-    expect(document.documentElement.dataset.theme).toBe("light");
+    expect(document.documentElement.dataset.theme).toBe("dark");
     await act(async () => host.querySelector("button")!.click());
     expect(host.textContent).toContain("light:light");
     expect(localStorage.getItem("gfu_theme_preference")).toBe("light");
@@ -70,6 +70,20 @@ it("migrates System to Light, preserves manual Dark and never subscribes to the 
     expect(document.documentElement.dataset.theme).toBe("dark");
     expect(localStorage.getItem("gfu_theme_preference")).toBe("dark");
     expect(window.matchMedia).not.toHaveBeenCalled();
+    // Logging out and reopening the application do not reset device appearance.
+    await act(async () => window.dispatchEvent(new CustomEvent("gfu-auth", {
+      detail: { token: null, changedSession: true },
+    })));
+    expect(document.documentElement.dataset.theme).toBe("dark");
+    await act(async () => root.unmount());
+    root = createRoot(host);
+    await act(async () => root.render(
+      <QueryClientProvider client={client}>
+        <AppProvider><Appearance /></AppProvider>
+      </QueryClientProvider>,
+    ));
+    expect(host.textContent).toContain("dark:dark");
+    expect(localStorage.getItem("gfu_theme_preference")).toBe("dark");
   } finally {
     await act(async () => root.unmount());
     client.clear();

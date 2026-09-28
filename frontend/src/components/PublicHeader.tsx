@@ -3,9 +3,14 @@ import { useState } from "react";
 import { Link, NavLink } from "react-router-dom";
 import { Brand } from "./Brand";
 import { ThemePicker } from "./ThemePicker";
+import { useSession } from "../services/session";
+import { canRegisterGym } from "../services/authRedirect";
+import { getAccessToken } from "../services/apiClient";
 
 export function PublicHeader() {
   const [open, setOpen] = useState(false);
+  const me = useSession({ publicPage: true });
+  const showOwnerLink = !getAccessToken() || Boolean(me.data && canRegisterGym(me.data.data));
   return (
     <header className="public-header">
       <div className="container header-inner">
@@ -20,9 +25,9 @@ export function PublicHeader() {
           <a href="/#how-it-works" onClick={() => setOpen(false)}>
             How it works
           </a>
-          <Link to="/register-gym" onClick={() => setOpen(false)}>
+          {showOwnerLink && <Link to="/register-gym" onClick={() => setOpen(false)}>
             For gym owners
-          </Link>
+          </Link>}
           <Link to="/help" onClick={() => setOpen(false)}>
             Help
           </Link>

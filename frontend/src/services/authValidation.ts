@@ -3,13 +3,25 @@ import { z } from "zod";
 export const passwordSchema = z.string().min(10, "Use at least 10 characters").max(128, "Use at most 128 characters")
   .regex(/[A-Z]/, "Add an uppercase letter").regex(/[a-z]/, "Add a lowercase letter").regex(/\d/, "Add a number");
 export const phoneSchema = z.string().trim().max(20).refine(value => {
-  const cleaned = value.replace(/[\s()-]/g, "");
-  return /^\+[1-9]\d{7,14}$/.test(cleaned.startsWith("+") ? cleaned : `+91${cleaned.replace(/^0+/, "")}`);
+  if (!/^\+?[0-9 ()-]+$/.test(value)) return false;
+  const cleaned = value.replace(/[ ()-]/g, "");
+  return cleaned.startsWith("+") && !cleaned.startsWith("+91")
+    ? /^\+[1-9]\d{7,14}$/.test(cleaned)
+    : Boolean(parseIndianMobile(cleaned));
 }, "Enter a valid phone number, including country code outside India");
+export const localMobileSchema = z.string().regex(/^[0-9]{10}$/, "Enter a 10-digit mobile number.");
+// Parse only recognized Indian formatting. Never truncate or discard arbitrary text.
+export function parseIndianMobile(value: string): string | undefined {
+  const text = value.trim();
+  if (!/^\+?[0-9 ()-]+$/.test(text)) return;
+  const local = text.replace(/[ ()-]/g, "").replace(/^\+91/, "");
+  return /^[0-9]{10}$/.test(local) ? local : undefined;
+}
 export const signupSchema = z.object({
   name: z.string().trim().min(2, "Enter your full name").max(120),
-  email: z.string().trim().email("Enter a valid email address"),
-  phone: z.union([z.literal(""), phoneSchema]),
+  email: z.string().trim().toLowerCase().email("Enter a valid email address"),
+  phone: localMobileSchema,
+  role: z.enum(["USER", "GYM_OWNER"], { error: "Select your account type." }),
   password: passwordSchema,
   confirm: z.string()
 }).refine(value => value.password === value.confirm, { path: ["confirm"], message: "Passwords do not match" });

@@ -1,9 +1,10 @@
-// Cache only the public offline document. Never cache authenticated HTML,
+// Cache only the public offline document and its theme bootstrap. Never cache authenticated HTML,
 // API responses, uploads, signed media, invoices or conversation contents.
 const CACHE_NAME = "getfit4u-offline-v3";
 const OFFLINE_URL = "/offline.html";
+const THEME_URL = "/theme-init.js";
 self.addEventListener("install", event => {
-  event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.add(OFFLINE_URL)));
+  event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll([OFFLINE_URL, THEME_URL])));
   // Updates wait until the user saves their work and explicitly reloads.
 });
 self.addEventListener("message", event => {
@@ -17,6 +18,10 @@ self.addEventListener("activate", event => {
 });
 self.addEventListener("fetch", event => {
   const url = new URL(event.request.url);
+  if (event.request.method === "GET" && url.origin === self.location.origin && url.pathname === THEME_URL) {
+    event.respondWith(fetch(event.request).catch(() => caches.match(THEME_URL)));
+    return;
+  }
   if (event.request.method !== "GET" || url.origin !== self.location.origin ||
       event.request.mode !== "navigate" || url.pathname.startsWith("/api/")) return;
   event.respondWith(fetch(event.request).catch(async () => {

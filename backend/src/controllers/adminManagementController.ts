@@ -2,6 +2,7 @@ import type { Request, Response } from "express";
 import mongoose from "mongoose";
 import { nanoid } from "nanoid";
 import { z } from "zod";
+import { optionalContactPhone } from "../routes/authSchemas.js";
 import { User } from "../models/User.js";
 import {
   AuthIdentity,
@@ -29,10 +30,7 @@ const accountInput = z
   .object({
     name: z.string().trim().min(2).max(120),
     email: z.string().trim().email().toLowerCase().optional(),
-    phone: z
-      .string()
-      .regex(/^\+[1-9]\d{7,14}$/)
-      .optional(),
+    phone: optionalContactPhone,
   })
   .strict();
 export const accountUpdate = accountInput
@@ -517,10 +515,7 @@ export async function updateTrainer(req: Request, res: Response) {
 export const settingsInput = z
   .object({
     supportEmail: z.string().email().optional(),
-    supportPhone: z
-      .string()
-      .regex(/^\+[1-9]\d{7,14}$/)
-      .optional(),
+    supportPhone: optionalContactPhone,
     maintenanceNotice: z.string().max(500).optional(),
   })
   .strict();

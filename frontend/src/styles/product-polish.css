@@ -63,16 +63,6 @@
 .table-toolbar > .btn {
   min-height: 44px;
 }
-.theme-picker select {
-  background: var(--surface-solid);
-  color: var(--text);
-  border: 1px solid var(--border-strong);
-  border-radius: 10px;
-  padding: 8px 10px;
-  min-height: 40px;
-  max-width: 150px;
-  font-size: 0.8125rem;
-}
 .gym-identity {
   display: inline-flex;
   align-items: center;
@@ -90,7 +80,7 @@
   border-radius: 12px;
   border: 1px solid var(--border-strong);
   background: var(--surface-solid);
-  color: var(--brand-strong);
+  color: var(--brand-text);
   overflow: hidden;
   font-size: 1rem;
   font-weight: 800;
@@ -382,10 +372,6 @@
   }
   .explore-filter-toolbar > .field:last-child {
     grid-column: 1/-1;
-  }
-  .theme-picker select {
-    max-width: 112px;
-    padding: 7px;
   }
   .gd-heading .gym-identity-logo {
     width: 44px;

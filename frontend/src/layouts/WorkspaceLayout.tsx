@@ -25,7 +25,8 @@ import { Brand } from "../components/Brand";
 import { Avatar } from "../components/Avatar";
 import { GymIdentity } from "../components/GymIdentity";
 import { ThemePicker } from "../components/ThemePicker";
-import { WorkspaceBreadcrumbs } from "../components/WorkspaceBreadcrumbs";
+import { PageNavigationContext } from "../components/pageNavigation";
+import { AppHeader } from "../components/AppInstallBanner";
 import { useMobileKeyboard } from "../services/useMobileKeyboard";
 import { navigationSessionScope } from "../services/navigationSession";
 import { useData, type Row } from "../pages/live/LiveData";
@@ -123,12 +124,6 @@ export function WorkspaceLayout() {
     ([, , permission]) =>
       !permission || context?.permissions.includes(permission),
   );
-  const title =
-    rows.find(([, page]) => location.pathname === `${prefix}/${page}`)?.[0] ||
-    (location.pathname === "/profile" ||
-    location.pathname === `${prefix}/profile`
-      ? "My profile"
-      : "GETFIT4U");
   const mobileChoices = role === "USER"
     ? [["Home", "home", LayoutDashboard], ["Book", "classes", CalendarDays], ["Scan", "attendance/qr", ScanLine], ["Profile", "profile", UserRound], ["Messages", "messages", MessageCircle]] as const
     : role === "GYM_OWNER"
@@ -193,7 +188,7 @@ export function WorkspaceLayout() {
       )}
       <aside className={drawer ? "sidebar drawer-open" : "sidebar"}>
         <div className="sidebar-head">
-          <Brand to={loginDestination(role)} />
+          <Brand to={loginDestination(me.data?.data || role)} />
           <button
             className="icon-btn drawer-close"
             aria-label="Close menu"
@@ -246,14 +241,6 @@ export function WorkspaceLayout() {
         </nav>
         <div className="sidebar-foot">
           <NavLink
-            to="/register-gym"
-            title="Register a gym"
-            aria-label="Register a gym"
-          >
-            <Building2 size={20} />
-            <span>Register a gym</span>
-          </NavLink>
-          <NavLink
             to="/profile"
             className="sidebar-profile"
             aria-label={`Open profile for ${user?.name || "Member"}`}
@@ -279,7 +266,7 @@ export function WorkspaceLayout() {
         </div>
       </aside>
       <div className="workspace-main">
-        <header className="workspace-topbar">
+        <AppHeader><header className="workspace-topbar">
           <button
             className="icon-btn drawer-toggle"
             aria-label="Open menu"
@@ -289,8 +276,8 @@ export function WorkspaceLayout() {
             <Menu />
           </button>
           <div className="topbar-title">
-            <span className="subtle">{gym?.name || "GETFIT4U"}</span>
-            <strong>{title}</strong>
+            <span className="subtle">{roleLabel}</span>
+            <strong>{gym?.name || "GETFIT4U"}</strong>
           </div>
           <div className="topbar-actions">
             <ThemePicker />
@@ -319,7 +306,7 @@ export function WorkspaceLayout() {
               <strong>{user?.name || "Member"}</strong>
             </NavLink>
           </div>
-        </header>
+        </header></AppHeader>
         <main id="workspace-content" className="workspace-content">
           {role === "GYM_OWNER" && gym?.logoUrl && (
             <img
@@ -329,8 +316,9 @@ export function WorkspaceLayout() {
               aria-hidden="true"
             />
           )}
-          <WorkspaceBreadcrumbs role={activeRole} permissions={context?.permissions || []} navigationScope={navigationSessionScope(context)} />
-          <Outlet />
+          <PageNavigationContext.Provider value={{ role: activeRole, permissions: context?.permissions || [], navigationScope: navigationSessionScope(context) }}>
+            <Outlet />
+          </PageNavigationContext.Provider>
         </main>
       </div>
       <nav className="mobile-bottom-nav" aria-label="Mobile navigation">

@@ -1,12 +1,10 @@
 import { z } from "zod";
-const phone = z
-  .string()
-  .trim()
-  .regex(/^\+?[0-9 ()-]{8,20}$/, "Enter a valid phone number");
+import { accountEmail, optionalContactPhone } from "./authSchemas.js";
+const phone = optionalContactPhone;
 const identifier = z.string().min(3).max(64);
 const contact = {
   name: z.string().trim().min(2).max(120),
-  email: z.string().trim().email().optional(),
+  email: accountEmail.optional(),
   phone: phone.optional(),
   avatarAttachmentId: z.string().regex(/^[a-fA-F0-9]{24}$/).nullable().optional(),
   fitnessGoal: z.string().max(200).optional(),
@@ -51,7 +49,7 @@ export const ownerMemberUpdateInput = z.object({
 }).strict();
 export const ownerTrainerInput = z.object({
   name: contact.name,
-  email: z.string().trim().email(),
+  email: accountEmail,
   phone: phone.optional(),
   photoAttachmentId: z.string().regex(/^[a-fA-F0-9]{24}$/).nullable().optional(),
   bio: z.string().max(3000).optional(),

@@ -14,6 +14,9 @@ const gymScannerSchema = new Schema(
     kind: { type: String, enum: ["DEVICE", "GYM_IDENTITY"], default: "DEVICE" },
     status: { type: String, enum: ["ACTIVE", "DISABLED"], default: "ACTIVE" },
     secretVersion: { type: Number, default: 1 },
+    // The encoded public gym identifier is stored once, never regenerated from
+    // a deployment secret or changed by ordinary QR display/print requests.
+    qrPayload: { type: String, unique: true, sparse: true, immutable: true },
     lastSeenAt: Date,
   },
   { timestamps: true },

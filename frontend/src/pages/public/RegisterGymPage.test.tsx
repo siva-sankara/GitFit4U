@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({ request: vi.fn(), setToken: vi.fn() }));
 vi.mock("../../services/apiClient", () => ({
   apiRequest: mocks.request,
   setAccessToken: mocks.setToken,
+  getAccessToken: () => "token",
 }));
 vi.mock("../live/LivePublic", () => ({
   PaymentCheckout: ({ quoteBody, onComplete }: any) => (
@@ -74,6 +75,8 @@ beforeEach(() => {
       return Promise.resolve({ data: { configured: false } });
     if (path === "/api/v1/auth/switch-role")
       return Promise.resolve({ data: { accessToken: "owner-session" } });
+    if (path === "/api/v1/auth/me")
+      return Promise.resolve({ data: { user: { activeRole: "GYM_OWNER", onboarding: { state: "ACTIVE" } }, context: { role: "GYM_OWNER", gymId: "gym-one" } } });
     return Promise.resolve({ data: {} });
   });
 });
@@ -102,6 +105,7 @@ async function render() {
           <Routes>
             <Route path="/register-gym" element={<RegisterGymPage />} />
             <Route path="/auth/login" element={<p>User login opened</p>} />
+            <Route path="/profile" element={<p>Account profile opened</p>} />
             <Route
               path="/owner/dashboard"
               element={<p>Owner dashboard opened</p>}
@@ -111,7 +115,7 @@ async function render() {
       </QueryClientProvider>,
     ),
   );
-  await until(() => host.textContent!.includes("First Gym"));
+  await until(() => Boolean(host.querySelector('[aria-label="Registration"]')));
 }
 it("preserves profile and location while replacing uploads with backend plans", async () => {
   await render();
@@ -242,8 +246,24 @@ it("does not offer payment for a suspended gym", async () => {
   registrations[0].status = "SUSPENDED";
   registrations[0].gymId.status = "SUSPENDED";
   await render();
-  expect(host.textContent).toContain("suspended or archived");
+  expect(host.textContent).toContain("unavailable for registration or payment");
   expect(host.textContent).not.toContain("Choose a registration plan");
+});
+it.each(["suspended", "deleted", "missing"])("keeps a %s registration out of the active-gym flow", async condition => {
+  registrations[0].status = condition === "suspended" ? "SUSPENDED" : "ACTIVE";
+  registrations[0].gymId = condition === "missing" ? null : {
+    ...gym, status: "ACTIVE", ...(condition === "deleted" ? { deletedAt: "2026-09-28T00:00:00.000Z" } : {}),
+  };
+  await render();
+  expect(host.textContent).toContain("Contact support to review its status.");
+  expect(host.querySelector('a[href="/contact"]')?.textContent).toBe("Contact support");
+  expect(host.textContent).not.toContain("Your gym is active.");
+  expect(button("Open gym owner workspace")).toBeUndefined();
+  expect(button("Register another gym")).toBeUndefined();
+  expect(mocks.request.mock.calls.some(([path]) => path === "/api/v1/workspace/platform-plans")).toBe(false);
+  expect(button("Back")).toBeUndefined();
+  expect(host.querySelector('[aria-label="Breadcrumb"]')).toBeNull();
+  expect(mocks.request.mock.calls.some(([path]) => path === "/api/v1/auth/switch-role")).toBe(false);
 });
 
 it.each([
@@ -252,11 +272,11 @@ it.each([
   "PAYMENT_FAILED",
   "PAYMENT_CANCELLED",
   "SUSPENDED",
-])("returns to user login when going back from %s", async (status) => {
+])("keeps %s onboarding focused without a page-level Back action", async (status) => {
   registrations[0].status = status;
   await render();
-  await act(async () => button("Back").click());
-  await until(() => host.textContent!.includes("User login opened"));
+  expect(button("Back")).toBeUndefined();
+  expect(host.querySelector('[aria-label="Breadcrumb"]')).toBeNull();
   expect(
     mocks.request.mock.calls.some(
       (call) => call[0] === "/api/v1/auth/switch-role",
@@ -264,7 +284,7 @@ it.each([
   ).toBe(false);
 });
 
-it("opens the selected active gym owner dashboard when going back", async () => {
+it("opens the selected active gym through its explicit workspace action", async () => {
   registrations.push({
     publicId: "registration-two",
     status: "ACTIVE",
@@ -278,7 +298,7 @@ it("opens the selected active gym owner dashboard when going back", async () => 
     select.value = "registration-two";
     select.dispatchEvent(new Event("change", { bubbles: true }));
   });
-  await act(async () => button("Back").click());
+  await act(async () => button("Open gym owner workspace").click());
   await until(() => host.textContent!.includes("Owner dashboard opened"));
   expect(mocks.request).toHaveBeenCalledWith("/api/v1/auth/switch-role", {
     method: "POST",
@@ -287,7 +307,9 @@ it("opens the selected active gym owner dashboard when going back", async () => 
   expect(mocks.setToken).toHaveBeenCalledWith("owner-session");
 });
 
-it("checks the latest server activation before deciding where Back goes", async () => {
+it("checks current server activation before opening the owner workspace", async () => {
+  registrations[0].status = "ACTIVE";
+  registrations[0].gymId.status = "ACTIVE";
   await render();
   registrations = [
     {
@@ -296,17 +318,17 @@ it("checks the latest server activation before deciding where Back goes", async 
       gymId: { ...gym, status: "ACTIVE" },
     },
   ];
-  await act(async () => button("Back").click());
+  await act(async () => button("Open gym owner workspace").click());
   await until(() => host.textContent!.includes("Owner dashboard opened"));
 });
 
-it("returns an unsaved new registration to login even if another gym is active", async () => {
+it("returns an unsaved new registration to the existing gym without a login redirect", async () => {
   registrations[0].status = "ACTIVE";
   registrations[0].gymId.status = "ACTIVE";
   await render();
   await act(async () => button("Register another gym").click());
-  await act(async () => button("Back").click());
-  await until(() => host.textContent!.includes("User login opened"));
+  await act(async () => button("Cancel new gym").click());
+  await until(() => host.textContent!.includes("Your gym is active"));
   expect(
     mocks.request.mock.calls.some(
       (call) => call[0] === "/api/v1/auth/switch-role",
@@ -324,10 +346,22 @@ it("shows a role-switch failure without navigating to the owner dashboard", asyn
       : original(path, ...rest),
   );
   await render();
-  await act(async () => button("Back").click());
+  await act(async () => button("Open gym owner workspace").click());
   await until(() =>
     host.textContent!.includes("Gym access could not be selected"),
   );
   expect(host.textContent).not.toContain("Owner dashboard opened");
   expect(mocks.setToken).not.toHaveBeenCalled();
+});
+
+it("resumes the authoritative registration instead of whichever gym is listed first", async () => {
+  registrations.push({ publicId: "registration-two", status: "PAYMENT_PENDING", gymId: { ...gym, _id: "gym-two", name: "Second Gym" } });
+  const original = mocks.request.getMockImplementation()!;
+  mocks.request.mockImplementation((path, ...rest) => path === "/api/v1/auth/me"
+    ? Promise.resolve({ data: { user: { activeRole: "GYM_OWNER", onboarding: { state: "PENDING", registrationId: "registration-two" } }, context: { role: "GYM_OWNER" } } })
+    : original(path, ...rest));
+  await render();
+  await until(() => host.querySelector<HTMLSelectElement>('[aria-label="Registration"]')?.value === "registration-two");
+  expect(host.textContent).toContain("Payment is pending.");
+  expect([...host.querySelectorAll("button")].some(button => button.textContent === "Save gym draft")).toBe(false);
 });

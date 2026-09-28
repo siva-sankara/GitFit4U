@@ -1,3 +1,5 @@
+import { PageHeader } from "../../components/PageHeader";
+import { CompactFilters } from "../../components/CompactFilters";
 import { useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
@@ -6,6 +8,8 @@ import { Modal } from "../../components/Modal";
 import { LocationPicker } from "../../components/LocationPicker";
 import { validCoordinates } from "../../services/location";
 import { StatusBadge } from "../../components/StatusBadge";
+import { PhoneInput } from "../../components/PhoneInput";
+import { isPhoneField } from "../../services/contactPhoneInput";
 export type Row = Record<string, any>;
 export const read = (row: Row, path: string): any =>
   path.split(".").reduce((value, key) => value?.[key], row);
@@ -184,6 +188,7 @@ export function EditForm({
       onChange={onDirty}
       onSubmit={(e) => {
         e.preventDefault();
+        if (!e.currentTarget.reportValidity()) return;
         if (locationPicker && !validCoordinates(selectedPoint)) return;
         const body: Row = {};
         for (const f of fields) {
@@ -228,6 +233,9 @@ export function EditForm({
                   value={values[f.key]}
                   onChange={(value) => setValues({ ...values, [f.key]: value })}
                 />
+              ) : isPhoneField(f.key) ? (
+                <PhoneInput name={f.key} value={String(values[f.key] || "")} required={f.required}
+                  onValueChange={value => setValues({ ...values, [f.key]: value })} />
               ) : f.type === "select" ? (
                 <select
                   className="select"
@@ -489,7 +497,7 @@ export function ResourcePage({
     meta = query.data?.meta;
   return (
     <div className="page-stack">
-      <header className="page-heading">
+      <PageHeader>
         <div>
           <span className="eyebrow">Workspace</span>
           <h1>{title}</h1>
@@ -500,10 +508,11 @@ export function ResourcePage({
             Create {title.toLowerCase().replace(/s$/, "")}
           </button>
         )}
-      </header>
+      </PageHeader>
       <section className="panel">
         <form
           className="table-toolbar"
+          role="search"
           onSubmit={(e) => {
             e.preventDefault();
             setPage(1);
@@ -519,6 +528,7 @@ export function ResourcePage({
             />
           </label>
           <button className="btn btn-secondary">Search</button>
+          {(columns.some(c => c.format === "date") || statuses) && <CompactFilters activeCount={[from, to, status].filter(Boolean).length} onReset={() => { setFrom(""); setTo(""); setStatus(""); setPage(1); }}>
           {columns.some((c) => c.format === "date") && (
             <>
               <label>
@@ -569,6 +579,7 @@ export function ResourcePage({
               ))}
             </select>
           )}
+          </CompactFilters>}
           <button
             className="btn btn-secondary"
             type="button"

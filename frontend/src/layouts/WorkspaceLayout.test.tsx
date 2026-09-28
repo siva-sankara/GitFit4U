@@ -103,17 +103,9 @@ it("uses the session role, removes role switching and duplicate/hidden owner ite
   expect(nav.querySelector('[href="/owner/profile"]')).toBeNull();
   expect(nav.textContent).not.toContain("Campaigns");
   expect(nav.textContent).not.toContain("Invoices");
-  expect(
-    host.querySelector('[role="group"][aria-label="Appearance"]'),
-  ).not.toBeNull();
-  for (const label of ["Light theme", "Dark theme"])
-    expect(host.querySelector(`button[aria-label="${label}"]`)).not.toBeNull();
+  expect(host.querySelectorAll('.theme-icon-picker')).toHaveLength(1);
+  expect(host.querySelector('button[aria-label="Switch to dark mode"]')).not.toBeNull();
   expect(host.querySelector('button[aria-label="System theme"]')).toBeNull();
-  expect(
-    host
-      .querySelector('button[aria-label="Light theme"]')
-      ?.getAttribute("aria-pressed"),
-  ).toBe("true");
   expect(host.querySelector('select[aria-label="Active role"]')).toBeNull();
   expect(host.textContent).toContain("Gym owner");
 });
@@ -143,7 +135,7 @@ it("opens the canonical profile when the user's name is clicked", async () => {
   );
   expect(host.textContent).toContain("Profile details");
   expect(host.querySelector(".topbar-title")?.textContent).toContain(
-    "My profile",
+    "Asha Fitness",
   );
 });
 it("shows only permitted navigation for staff and an unread notification badge", async () => {
@@ -174,6 +166,17 @@ it("keeps User mobile tabs in the exact required order and account features insi
   expect(tabs.map(tab => tab.getAttribute("href"))).toEqual(["/app/home", "/app/classes", "/app/attendance/qr", "/app/profile", "/app/messages"]);
   const nav = host.querySelector('[aria-label="Workspace navigation"]')!;
   for (const removed of ["Favorites", "Payments", "Invoices", "Workouts", "Subscriptions", "Referrals"]) expect(nav.textContent).not.toContain(removed);
+});
+it("removes the registration sidebar entry even when the account has owner capabilities", async () => {
+  session("USER", []);
+  const member = mocks.me();
+  member.data.data.user.roles = ["USER"];
+  mocks.me.mockReturnValue(member);
+  await render();
+  expect(host.querySelector('a[href="/register-gym"]')).toBeNull();
+  member.data.data.user.roles.push("GYM_OWNER");
+  await render();
+  expect(host.querySelector('a[href="/register-gym"]')).toBeNull();
 });
 it("clears the authenticated token only after successful logout and replaces with login", async () => {
   mocks.request.mockResolvedValue(undefined);

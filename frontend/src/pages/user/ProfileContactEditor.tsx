@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest, type ApiEnvelope } from "../../services/apiClient";
+import { PhoneInput } from "../../components/PhoneInput";
 export function ProfileContactEditor({
   phone,
   email,
@@ -110,17 +111,16 @@ export function ProfileContactEditor({
       <form
         onSubmit={(event) => {
           event.preventDefault();
+          if (!event.currentTarget.reportValidity()) return;
           challengeId ? confirm.mutate() : request.mutate();
         }}
       >
         <label>
           New phone number
-          <input
-            type="tel"
-            autoComplete="tel"
+          <PhoneInput
             value={nextPhone}
-            onChange={(event) => {
-              setPhone(event.target.value);
+            onValueChange={(value) => {
+              setPhone(value);
               setChallenge("");
             }}
             required

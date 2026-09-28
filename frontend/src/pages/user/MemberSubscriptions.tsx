@@ -1,3 +1,4 @@
+import { PageHeader } from "../../components/PageHeader";
 import { useState, type FormEvent } from "react";
 import {
   keepPreviousData,
@@ -301,6 +302,8 @@ export function MemberSubscriptions() {
             "/api/v1/users/me/subscriptions",
             "/api/v1/workspace/summary",
             "/api/v1/users/me/attendance",
+            "/api/v1/users/classes",
+            "/api/v1/workspace/records/bookings",
           ].some((prefix) => cachedPath.startsWith(prefix))
         );
       },
@@ -308,7 +311,7 @@ export function MemberSubscriptions() {
   }
   return (
     <div className="page-stack member-subscriptions-page">
-      <header className="page-heading">
+      <PageHeader>
         <div>
           <span className="eyebrow">Memberships</span>
           <h1>Your subscriptions</h1>
@@ -317,7 +320,7 @@ export function MemberSubscriptions() {
         <Link className="btn btn-primary" to="/app/explore">
           Find a gym
         </Link>
-      </header>
+      </PageHeader>
       {activeGymJoined && (
         <div className="panel subscription-notice" role="status">
           <strong>Welcome to {joinedGymName}</strong>

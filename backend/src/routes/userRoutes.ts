@@ -87,6 +87,7 @@ userRoutes.post(
 userRoutes.patch("/me/reviews/:id", feature.updateReview);
 userRoutes.get("/classes", feature.classes);
 userRoutes.get("/classes/bookings/:bookingId", feature.bookingDetails);
+userRoutes.get("/classes/:id", feature.classDetails);
 userRoutes.post("/classes/:id/bookings", feature.bookClass);
 userRoutes.delete("/classes/:id/bookings/:bookingId", feature.cancelBooking);
 userRoutes.post(
