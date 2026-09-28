@@ -43,3 +43,22 @@ it.each(["/help", "/contact", "/legal/privacy", "/legal/terms"])("moves public a
   expect(workspacePath(pendingOwner, path)).toBe(`/owner${path}`);
   expect(loginDestination(pendingOwner, `/owner${path}`)).toBe(`/owner${path}`);
 });
+it("keeps every published policy public for every role, including owner onboarding", () => {
+  const policies = [
+    "/terms-and-policies",
+    "/terms-and-conditions",
+    "/privacy-policy",
+    "/refund-cancellation-policy",
+    "/data-deletion",
+  ];
+  for (const role of ["USER", "GYM_OWNER", "GYM_STAFF", "TRAINER", "ADMIN"]) {
+    for (const path of policies) {
+      expect(workspacePath(role, path)).toBe(path);
+      expect(loginDestination(role, path)).toBe(path);
+    }
+  }
+  for (const path of policies) {
+    expect(loginDestination(pendingOwner, path)).toBe(path);
+    expect(safeReturnTo(path)).toBe(path);
+  }
+});

@@ -26,6 +26,7 @@ import { InfoPage } from "./pages/public/InfoPage";
 import { RegisterGymPage } from "./pages/public/RegisterGymPage";
 import { ActivateAccountPage } from "./pages/public/ActivateAccountPage";
 import { BackIconLink } from "./components/BackIconControl";
+import { publicPolicyRoutes } from "./routes/publicPolicyRoutes";
 const Auth = lazy(() =>
   import("./pages/public/AuthDesktopPage").then((m) => ({
     default: m.AuthDesktopPage,
@@ -34,6 +35,7 @@ const Auth = lazy(() =>
 const PlatformSubscription = lazy(() => import("./pages/owner/PlatformSubscriptionPage").then(module => ({ default: module.PlatformSubscriptionPage })));
 const router = createBrowserRouter([
   { path: "/activate-account", element: <ActivateAccountPage /> },
+  ...publicPolicyRoutes,
   {
     path: "/platform-renewal",
     element: <ProtectedRoute><WorkspaceLayout /></ProtectedRoute>,
@@ -58,7 +60,6 @@ const router = createBrowserRouter([
       },
       { path: "/help", element: <InfoPage type="help" /> },
       { path: "/contact", element: <InfoPage type="contact" /> },
-      { path: "/legal/:document", element: <InfoPage type="legal" /> },
     ],
   },
   {
@@ -159,7 +160,8 @@ const router = createBrowserRouter([
       { path: "gyms/:slug", element: <LiveGymDetails /> },
       { path: "help", element: <InfoPage type="help" /> },
       { path: "contact", element: <InfoPage type="contact" /> },
-      { path: "legal/:document", element: <InfoPage type="legal" /> },
+      { path: "legal/terms", element: <Navigate to="/terms-and-policies" replace /> },
+      { path: "legal/privacy", element: <Navigate to="/terms-and-policies" replace /> },
       ...(["GYM_OWNER", "ADMIN"].includes(role) ? [{ path: "onboarding/*", element: <RegisterGymPage /> }] : []),
       { path: "*", element: <LiveWorkspace /> },
     ],
