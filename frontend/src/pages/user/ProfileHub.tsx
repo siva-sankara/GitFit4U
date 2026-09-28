@@ -8,6 +8,7 @@ import { InvoiceDownload } from "../../components/InvoiceDownload";
 import { ThemePicker } from "../../components/ThemePicker";
 import { PushNotificationSettings } from "../../components/PushNotificationSettings";
 import { PwaSettings } from "../../components/PwaSettings";
+import { WhatsAppPreferences } from "../../components/WhatsAppPreferences";
 import { Action, QueryState, ResourcePage, useData, type Row } from "../live/LiveData";
 import { ProfileEditor } from "./ProfileEditor";
 import { MemberSubscriptions } from "./MemberSubscriptions";
@@ -77,7 +78,7 @@ export function ProfileHub({ security }: { security?: ReactNode }) {
       ]} />}
       {section === "referrals" && <Referrals />}
       {section === "social" && <Suspense fallback={<p role="status">Loading your social profile…</p>}><SocialProfilePage /></Suspense>}
-      {section === "settings" && <div className="page-stack"><section className="panel account-personal"><h2>Appearance</h2><p>Choose Light or Dark. Your selection is saved to your account and this device.</p><ThemePicker /></section><PwaSettings /><PushNotificationSettings />{security}</div>}
+      {section === "settings" && <div className="page-stack"><section className="panel account-personal"><h2>Appearance</h2><p>Choose Light or Dark. Your selection is saved to your account and this device.</p><ThemePicker /></section><PwaSettings /><PushNotificationSettings /><WhatsAppPreferences />{security}</div>}
     </section></PageNavigationContext.Provider>
   </div>;
 }

@@ -42,6 +42,20 @@ services:
       redis:
         condition: service_healthy
 
+  whatsapp-worker:
+    build: ./backend
+    restart: unless-stopped
+    command: npm run start:whatsapp-worker
+    env_file: ./backend/.env
+    environment:
+      MONGO_URI: mongodb://mongo:27017/getfit4u?replicaSet=rs0
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
 volumes:
   getfit4u_mongo:
   getfit4u_redis:

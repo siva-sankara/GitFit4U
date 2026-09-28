@@ -10,7 +10,11 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("./config/env.js", () => ({
-  env: { NODE_ENV: "test", CLIENT_ORIGIN: "https://www.getfit4u.in,https://git-fit4-u.vercel.app" },
+  env: {
+    NODE_ENV: "test",
+    CLIENT_ORIGIN: "https://www.getfit4u.in,https://git-fit4-u.vercel.app",
+    WHATSAPP_VERIFY_TOKEN: "whatsapp-route-test-token",
+  },
 }));
 vi.mock("./config/db.js", () => ({ connectDatabase: mocks.connect }));
 vi.mock("./config/logger.js", () => ({ logger: { error: mocks.logError } }));
@@ -99,6 +103,20 @@ describe("Vercel Express entry point", () => {
     expect(response.body).toEqual({ raw: true, body });
     expect(mocks.connect).toHaveBeenCalledOnce();
     expect(mocks.connect.mock.invocationCallOrder[0]).toBeLessThan(mocks.webhook.mock.invocationCallOrder[0]);
+  });
+
+  it("verifies the WhatsApp callback without waiting for MongoDB", async () => {
+    mocks.connect.mockRejectedValue(new Error("Database unavailable"));
+    const response = await request(app)
+      .get("/api/v1/webhooks/whatsapp")
+      .query({
+        "hub.mode": "subscribe",
+        "hub.verify_token": "whatsapp-route-test-token",
+        "hub.challenge": "meta-challenge",
+      });
+    expect(response.status).toBe(200);
+    expect(response.text).toBe("meta-challenge");
+    expect(mocks.connect).not.toHaveBeenCalled();
   });
 
   it("passes database failures to the existing error handler and allows a retry", async () => {

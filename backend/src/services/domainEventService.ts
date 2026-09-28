@@ -1,6 +1,7 @@
 import type { ClientSession, Types } from "mongoose";
 import { Notification } from "../models/Engagement.js";
 import { User } from "../models/User.js";
+import { enqueueWhatsAppDomainEvent } from "./whatsappDeliveryService.js";
 
 // Copy belongs here, not in controllers or browser event handlers. Messages
 // intentionally exclude amounts, diagnoses, message contents and contact data.
@@ -250,7 +251,7 @@ export async function emitDomainEvents(inputs: DomainEventInput[]) {
     _id: { $in: [...new Set(inputs.map((input) => String(input.userId)))] },
     status: { $in: ["ACTIVE", "PENDING_VERIFICATION"] },
   })
-    .select("status notificationPreferences")
+    .select("name phone status notificationPreferences")
     .session(inputs[0].session || null)
     .lean();
   const byId = new Map(users.map((user) => [String(user._id), user]));
@@ -268,25 +269,38 @@ export async function emitDomainEvents(inputs: DomainEventInput[]) {
       },
     ];
   });
+  let result;
   if (writes.length)
-    return Notification.bulkWrite(writes, {
+    result = await Notification.bulkWrite(writes, {
       ...(inputs[0].session ? { session: inputs[0].session } : {}),
       ordered: true,
     });
+  for (let index = 0; index < inputs.length; index += 25) {
+    const batch = inputs.slice(index, index + 25);
+    await Promise.all(
+      batch.map((input) => {
+        const user = byId.get(String(input.userId));
+        return user ? enqueueWhatsAppDomainEvent(input, user) : undefined;
+      }),
+    );
+  }
+  return result;
 }
 export async function emitDomainEvent(input: DomainEventInput) {
   const user = await User.findById(input.userId)
-    .select("status notificationPreferences")
+    .select("name phone status notificationPreferences")
     .session(input.session || null)
     .lean();
   if (!user || !["ACTIVE", "PENDING_VERIFICATION"].includes(user.status))
     return;
   const document = storedNotification(input, user);
-  return Notification.updateOne(
+  const result = await Notification.updateOne(
     { userId: input.userId, dedupeKey: document.dedupeKey },
     {
       $setOnInsert: document,
     },
     { upsert: true, ...(input.session ? { session: input.session } : {}) },
   );
+  await enqueueWhatsAppDomainEvent(input, user);
+  return result;
 }

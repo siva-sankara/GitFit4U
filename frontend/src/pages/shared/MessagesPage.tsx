@@ -15,6 +15,8 @@ import { useCurrentUser } from "../../api/hooks";
 import { uploadMedia } from "../../services/mediaUpload";
 import { Avatar } from "../../components/Avatar";
 import { BackIconButton } from "../../components/BackIconControl";
+import { WhatsAppInbox } from "../../components/WhatsAppInbox";
+import { WhatsAppConnectionSettings } from "../../components/WhatsAppConnectionSettings";
 import { QueryState, date, type Row } from "../live/LiveData";
 import "../../styles/messaging.css";
 
@@ -32,7 +34,7 @@ const statuses = [
 ];
 const path = (id: string) => "/api/v1/conversations/" + id;
 type ConversationScope = { conversationId: string };
-export function MessagesPage({
+function InternalMessagesPage({
   supportOnly = false,
 }: {
   supportOnly?: boolean;
@@ -907,4 +909,24 @@ export function MessagesPage({
       </section>
     </div>
   );
+}
+
+export function MessagesPage({ supportOnly = false }: { supportOnly?: boolean }) {
+  const me = useCurrentUser();
+  const [params] = useSearchParams();
+  const role = me.data?.data.context?.role;
+  const permissions = me.data?.data.context?.permissions || [];
+  const businessInbox =
+    !supportOnly &&
+    ["ADMIN", "GYM_OWNER", "GYM_STAFF"].includes(role || "") &&
+    (permissions.includes("member:read") || permissions.includes("admin:platform"));
+  if (!businessInbox) return <InternalMessagesPage supportOnly={supportOnly} />;
+  const channel = params.get("channel") === "whatsapp" ? "whatsapp" : "internal";
+  return <div className="page-stack">
+    <nav className="message-channel-tabs" aria-label="Message channels">
+      <Link to="?channel=internal" aria-current={channel === "internal" ? "page" : undefined}>In-app messages</Link>
+      <Link to="?channel=whatsapp" aria-current={channel === "whatsapp" ? "page" : undefined}>WhatsApp Business</Link>
+    </nav>
+    {channel === "whatsapp" ? <><details className="panel"><summary>WhatsApp sender settings</summary><WhatsAppConnectionSettings /></details><WhatsAppInbox /></> : <InternalMessagesPage />}
+  </div>;
 }
