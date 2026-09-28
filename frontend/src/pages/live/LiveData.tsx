@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { apiRequest, type ApiEnvelope } from "../../services/apiClient";
@@ -68,11 +68,13 @@ export type Field = {
     | "select"
     | "checkbox";
   required?: boolean;
+  clearable?: boolean;
   min?: number;
   max?: number;
   options?: string[];
   source?: string;
   optionValue?: string;
+  createOnly?: boolean;
 };
 function set(object: Row, path: string, value: any) {
   const parts = path.split(".");
@@ -131,6 +133,9 @@ export function EditForm({
   submitLabel?: string;
 }) {
   const client = useQueryClient();
+  const requestAttempt = useRef<{ signature: string; key: string } | null>(
+    null,
+  );
   const [values, setValues] = useState<Row>(() =>
     Object.fromEntries(
       fields.map((f) => {
@@ -156,13 +161,19 @@ export function EditForm({
     longitude: values.longitude === "" ? undefined : Number(values.longitude),
   };
   const save = useMutation({
-    mutationFn: (body: Row) =>
-      apiRequest(endpoint, {
+    mutationFn: (body: Row) => {
+      const serialized = JSON.stringify(transform ? transform(body) : body);
+      const signature = `${method}:${endpoint}:${serialized}`;
+      if (requestAttempt.current?.signature !== signature)
+        requestAttempt.current = { signature, key: crypto.randomUUID() };
+      return apiRequest(endpoint, {
         method,
-        body: JSON.stringify(transform ? transform(body) : body),
-        idempotencyKey: crypto.randomUUID(),
-      }),
+        body: serialized,
+        idempotencyKey: requestAttempt.current.key,
+      });
+    },
     onSuccess: async (response) => {
+      requestAttempt.current = null;
       await client.invalidateQueries();
       onSaved?.(response);
     },
@@ -177,7 +188,10 @@ export function EditForm({
         const body: Row = {};
         for (const f of fields) {
           let value = values[f.key];
-          if (value === "" && !f.required) continue;
+          if (value === "" && !f.required) {
+            if (!f.clearable) continue;
+            value = null;
+          }
           if (["number", "money"].includes(f.type || ""))
             value = Number(value) * (f.type === "money" ? 100 : 1);
           if (f.type === "money") value = Math.round(value);
@@ -319,6 +333,7 @@ export function EditForm({
 export type Column = {
   key: string;
   title: string;
+  render?: (row: Row) => ReactNode;
   format?: "money" | "date" | "status";
   link?: (row: Row) => string;
 };
@@ -367,7 +382,7 @@ export function Table({
             <tr key={row._id || row.publicId || row.code}>
               {columns.map((c) => (
                 <td key={c.key}>
-                  {c.link ? (
+                  {c.render ? c.render(row) : c.link ? (
                     <Link to={c.link(row)}>{display(row, c)}</Link>
                   ) : c.format === "status" ? (
                     <StatusBadge status={read(row, c.key)} />
@@ -396,12 +411,14 @@ export function Action({
   method = "POST",
   children,
   onDone,
+  confirmMessage,
 }: {
   path: string;
   body?: Row;
   method?: string;
   children: ReactNode;
   onDone?: () => void;
+  confirmMessage?: string;
 }) {
   const client = useQueryClient();
   const action = useMutation({
@@ -421,7 +438,10 @@ export function Action({
       <button
         className="btn btn-secondary"
         disabled={action.isPending}
-        onClick={() => action.mutate()}
+        onClick={() => {
+          if (!confirmMessage || window.confirm(confirmMessage))
+            action.mutate();
+        }}
       >
         {action.isPending ? "Working…" : children}
       </button>
@@ -580,7 +600,7 @@ export function ResourcePage({
               URL.revokeObjectURL(url);
             }}
           >
-            Export this page
+            Download
           </button>
         </form>
         <QueryState query={query}>
@@ -634,7 +654,9 @@ export function ResourcePage({
         {fields && (adding || editing) && (
           <EditForm
             key={editing?._id || "new"}
-            fields={fields}
+            fields={
+              editing ? fields.filter((field) => !field.createOnly) : fields
+            }
             initial={editing || {}}
             endpoint={editing ? updatePath!(editing) : createPath!}
             method={editing ? "PATCH" : "POST"}

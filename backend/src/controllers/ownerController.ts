@@ -1,8 +1,16 @@
 import type { Request, Response } from "express";
-import mongoose from "mongoose";
+import { z } from "zod";
+import { transitionMembership } from "../services/membershipLifecycleService.js";
+import mongoose, { type ClientSession } from "mongoose";
+import { lockAttachments } from "../services/mediaBindingService.js";
 import { nanoid } from "nanoid";
 import { Gym } from "../models/Gym.js";
-import { validateGymMedia, withGymMedia } from "../services/gymMediaService.js";
+import { gymRevenue } from "../services/revenueService.js";
+import {
+  validateGymLogo,
+  validateGymMedia,
+  withGymMedia,
+} from "../services/gymMediaService.js";
 import { GymRegistration } from "../models/GymRegistration.js";
 import { User } from "../models/User.js";
 import { RoleAssignment } from "../models/Auth.js";
@@ -22,12 +30,21 @@ import { writeAudit } from "../services/auditService.js";
 import { paginationFromQuery, pageMeta } from "../utils/pagination.js";
 import { AppError } from "../utils/AppError.js";
 import {
-  Advertisement,
   BankAccount,
-  Offer,
   Settlement,
 } from "../models/Business.js";
 import { verifyAttendanceQr } from "../services/attendanceQrService.js";
+import {
+  calendarDate,
+  calendarDaysRemaining,
+  shiftCalendarDate,
+  zonedDayStart,
+} from "../utils/gymCalendar.js";
+import {
+  withTrainerMedia,
+  withMemberMedia,
+} from "../services/userMediaService.js";
+import { saveGymClass } from "../services/classManagementService.js";
 
 export {
   createRegistration,
@@ -40,9 +57,13 @@ export async function dashboard(req: Request, res: Response) {
   const gymId = req.auth!.gymId!;
   const canReadFinance = req.auth!.permissions.includes("finance:read");
   const now = new Date();
-  const startOfDay = new Date(now);
-  startOfDay.setHours(0, 0, 0, 0);
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const gym = await Gym.findById(gymId)
+    .select("status timezone platformSubscriptionStatus")
+    .lean();
+  const timezone = gym?.timezone || "Asia/Kolkata";
+  const today = calendarDate(now, timezone);
+  const startOfDay = zonedDayStart(today, timezone);
+  const endOfDay = zonedDayStart(shiftCalendarDate(today, 1), timezone);
   const [
     totalMembers,
     activeMembers,
@@ -55,8 +76,9 @@ export async function dashboard(req: Request, res: Response) {
     MemberProfile.countDocuments({ gymId, status: "ACTIVE" }),
     Subscription.countDocuments({
       gymId,
+      type: "GYM_MEMBERSHIP",
       status: "ACTIVE",
-      endsAt: { $gte: now, $lte: new Date(now.getTime() + 7 * 86_400_000) },
+      endsAt: { $gte: now, $lt: zonedDayStart(shiftCalendarDate(today, 8), timezone) },
     }),
     AttendanceEvent.countDocuments({
       gymId,
@@ -64,31 +86,50 @@ export async function dashboard(req: Request, res: Response) {
       occurredAt: { $gte: startOfDay },
     }),
     canReadFinance
-      ? Payment.aggregate([
-          {
-            $match: {
-              gymId: new mongoose.Types.ObjectId(gymId),
-              status: "CAPTURED",
-              capturedAt: { $gte: monthStart },
-            },
-          },
-          { $group: { _id: null, total: { $sum: "$amountMinor" } } },
-        ])
+      ? gymRevenue(gymId).then((report) => [{ total: report.monthMinor }])
       : Promise.resolve([]),
     ClassSession.countDocuments({
       gymId,
       startsAt: {
         $gte: startOfDay,
-        $lt: new Date(startOfDay.getTime() + 86_400_000),
+        $lt: endOfDay,
       },
     }),
   ]);
+  const platform =
+    req.auth!.role === "GYM_OWNER"
+      ? await Subscription.findOne({
+          gymId,
+          type: "PLATFORM",
+          status: { $ne: "PENDING_PAYMENT" },
+        })
+          .sort({ endsAt: -1, createdAt: -1 })
+          .lean()
+      : null;
   res.json({
     success: true,
     data: {
-      gymStatus:
-        (await Gym.findById(gymId).select("status").lean())?.status ||
-        "INACTIVE",
+      gymStatus: gym?.status || "INACTIVE",
+      timezone,
+      platformSubscription: platform
+        ? {
+            publicId: platform.publicId,
+            planId: platform.planId,
+            status: platform.status,
+            plan: platform.planSnapshot,
+            startsAt: platform.startsAt,
+            endsAt: platform.endsAt,
+            daysRemaining: platform.endsAt
+              ? calendarDaysRemaining(platform.endsAt, now, timezone)
+              : null,
+            usage: {
+              members: activeMembers,
+              memberLimit: platform.planSnapshot?.memberLimit ?? null,
+            },
+            canRenew: ["ACTIVE", "EXPIRED", "GRACE"].includes(platform.status),
+            renewalUrl: "/owner/platform-subscription",
+          }
+        : null,
       totalMembers,
       activeMembers,
       expiringMemberships: expiring,
@@ -121,7 +162,16 @@ export async function updateGym(req: Request, res: Response) {
         update[key + "." + child] = entry;
     else update[key] = value;
   }
-  const before = await Gym.findById(req.auth!.gymId).lean();
+  const bindingIds = [req.body.logoAttachmentId, req.body.coverAttachmentId,
+    ...(req.body.mediaAttachmentIds || [])].filter(Boolean);
+  const save = async (session?: ClientSession) => {
+  const beforeQuery = Gym.findById(req.auth!.gymId);
+  if (session) beforeQuery.session(session);
+  const before = await beforeQuery.lean();
+  if (req.body.logoAttachmentId !== undefined) {
+    await validateGymLogo(req.auth!.gymId!, req.body.logoAttachmentId, session);
+    if (req.body.logoAttachmentId === null) update.logoUrl = null;
+  }
   if (
     req.body.mediaAttachmentIds !== undefined ||
     req.body.coverAttachmentId !== undefined
@@ -134,14 +184,21 @@ export async function updateGym(req: Request, res: Response) {
       req.body.coverAttachmentId === undefined
         ? before?.coverAttachmentId?.toString()
         : req.body.coverAttachmentId,
+      session,
     );
   }
+  if (session) await lockAttachments(bindingIds, session);
   const gym = await Gym.findOneAndUpdate(
     { _id: req.auth!.gymId, status: { $ne: "ARCHIVED" } },
     { $set: update },
-    { new: true, runValidators: true },
+    { returnDocument: "after", runValidators: true, ...(session ? { session } : {}) },
   ).lean();
   if (!gym) throw new AppError(404, "GYM_NOT_FOUND", "Gym not found.");
+  return { before, gym };
+  };
+  const { before, gym } = bindingIds.length
+    ? await mongoose.connection.transaction((session) => save(session))
+    : await save();
   await writeAudit(req, {
     action: "gym.profile.updated",
     entityType: "Gym",
@@ -154,59 +211,236 @@ export async function updateGym(req: Request, res: Response) {
 
 export async function listMembers(req: Request, res: Response) {
   const { page, limit, skip } = paginationFromQuery(req.query);
+  const canReadFinance =
+    req.auth!.permissions.includes("finance:read") ||
+    req.auth!.role === "ADMIN";
   const filter: Record<string, unknown> = { gymId: req.auth!.gymId };
-  if (req.query.status) filter.status = req.query.status;
+  const gym = await Gym.findById(req.auth!.gymId).select("timezone").lean();
+  const timezone = gym?.timezone || "Asia/Kolkata",
+    now = new Date();
+  const filters = z
+    .object({
+      q: z.string().max(120).optional(),
+      status: z
+        .enum([
+          "",
+          "JOIN_REQUESTED",
+          "ACTIVE",
+          "INACTIVE",
+          "SUSPENDED",
+          "ARCHIVED",
+        ])
+        .optional(),
+      membershipStatus: z
+        .enum([
+          "",
+          "ACTIVE",
+          "EXPIRING",
+          "FROZEN",
+          "EXPIRED",
+          "CANCELLED",
+          "DEACTIVATED",
+          "GRACE",
+          "PENDING_PAYMENT",
+          "NONE",
+        ])
+        .optional(),
+      planId: z.string().max(64).optional(),
+      trainerId: z.string().max(64).optional(),
+    })
+    .parse(req.query);
+  if (filters.status) filter.status = filters.status;
+  if (filters.trainerId === "none") filter.assignedTrainerId = null;
+  else if (filters.trainerId) {
+    if (!mongoose.isValidObjectId(filters.trainerId))
+      throw new AppError(
+        422,
+        "TRAINER_INVALID",
+        "Choose a trainer from this gym.",
+      );
+    filter.assignedTrainerId = filters.trainerId;
+  }
+  const subscriptionScope = { gymId: req.auth!.gymId, type: "GYM_MEMBERSHIP" };
+  const membershipClauses: Record<string, unknown>[] = [];
+  if (filters.planId) {
+      const plan = await MembershipPlan.findOne({
+        gymId: req.auth!.gymId,
+        publicId: filters.planId,
+      })
+        .select("_id publicId")
+        .lean();
+      if (!plan)
+        throw new AppError(
+          422,
+          "PLAN_INVALID",
+          "Choose a membership plan from this gym.",
+        );
+      filter.currentSubscriptionId = { $in: await Subscription.distinct("_id", {
+        ...subscriptionScope, "planSnapshot.planId": plan.publicId,
+      }) };
+  }
+  const inactive = ["INACTIVE", "ARCHIVED", "SUSPENDED"];
+  if (filters.membershipStatus === "NONE") {
+    membershipClauses.push({ currentSubscriptionId: null, directAccess: { $ne: true }, status: { $nin: inactive } });
+  } else if (filters.membershipStatus) {
+    const subscriptionFilter: Record<string, unknown> = { ...subscriptionScope };
+    if (filters.membershipStatus === "EXPIRING") {
+      subscriptionFilter.status = "ACTIVE";
+      subscriptionFilter.endsAt = {
+        $gte: now,
+        $lt: zonedDayStart(
+          shiftCalendarDate(calendarDate(now, timezone), 8),
+          timezone,
+        ),
+      };
+    } else if (filters.membershipStatus === "EXPIRED")
+      subscriptionFilter.$or = [
+        { status: "EXPIRED" },
+        { status: { $in: ["ACTIVE", "GRACE"] }, endsAt: { $lt: now } },
+      ];
+    else if (filters.membershipStatus) {
+      subscriptionFilter.status = filters.membershipStatus;
+      if (["ACTIVE", "GRACE"].includes(filters.membershipStatus))
+        subscriptionFilter.endsAt = { $gte: now };
+    }
+    const subscribed = { currentSubscriptionId: { $in: await Subscription.distinct("_id", subscriptionFilter) } };
+    if (filters.membershipStatus === "DEACTIVATED")
+      membershipClauses.push({ $or: [{ status: { $in: ["INACTIVE", "SUSPENDED"] } }, { status: { $ne: "ARCHIVED" }, ...subscribed }] });
+    else if (filters.membershipStatus === "CANCELLED")
+      membershipClauses.push({ $or: [{ status: "ARCHIVED" }, { status: { $nin: ["INACTIVE", "SUSPENDED"] }, ...subscribed }] });
+    else {
+      membershipClauses.push({ status: { $nin: inactive } });
+      membershipClauses.push(filters.membershipStatus === "ACTIVE"
+        ? { $or: [subscribed, { currentSubscriptionId: null, directAccess: true }] }
+        : subscribed);
+    }
+  }
+  if (membershipClauses.length) filter.$and = membershipClauses;
+  if (filters.q) {
+    const query = filters.q
+      .trim()
+      .slice(0, 120)
+      .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const regex = new RegExp(query, "i");
+    const users = await User.distinct("_id", {
+      $or: [{ name: regex }, { email: regex }, { phone: regex }],
+    });
+    filter.$or = [
+      { userId: { $in: users } },
+      { memberCode: regex },
+      { "contact.name": regex },
+      { "contact.email": regex },
+      { "contact.phone": regex },
+    ];
+  }
   const [members, total] = await Promise.all([
     MemberProfile.find(filter)
-      .populate("userId", "publicId name phone email avatarUrl")
-      .populate("currentSubscriptionId")
+      .populate(
+        "userId",
+        "publicId name phone email status avatarUrl avatarAttachmentId",
+      )
+      .populate({
+        path: "assignedTrainerId",
+        match: { gymId: req.auth!.gymId },
+        select: "name status photoUrl photoAttachmentId",
+      })
+      .populate({
+        path: "currentSubscriptionId",
+        select:
+          "publicId status startsAt endsAt " +
+          (canReadFinance
+            ? "planSnapshot latestPaymentId"
+            : "planSnapshot.name planSnapshot.durationDays planSnapshot.freezeDaysAllowed"),
+        ...(canReadFinance
+          ? { populate: { path: "latestPaymentId", select: "publicId status" } }
+          : {}),
+      })
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
       .lean(),
     MemberProfile.countDocuments(filter),
   ]);
+  const visits = members.length
+    ? await AttendanceEvent.aggregate<{
+        _id: mongoose.Types.ObjectId;
+        count: number;
+      }>([
+        {
+          $match: {
+            gymId: new mongoose.Types.ObjectId(req.auth!.gymId),
+            memberProfileId: { $in: members.map((member: any) => member._id) },
+            type: "CHECK_IN",
+            occurredAt: {
+              $gte: new Date(Date.now() - 30 * 86400000),
+              $lte: new Date(),
+            },
+          },
+        },
+        { $group: { _id: "$memberProfileId", count: { $sum: 1 } } },
+      ])
+    : [];
+  const visitCounts = new Map(
+    visits.map((visit) => [String(visit._id), visit.count]),
+  );
+  const trainers = await withTrainerMedia(
+    members.flatMap((member: any) =>
+      member.assignedTrainerId ? [member.assignedTrainerId] : [],
+    ),
+  );
+  const resolvedMembers = await withMemberMedia(members);
   res.json({
     success: true,
-    data: members,
-    meta: pageMeta(page, limit, total),
+    data: resolvedMembers.map((member: any) => ({
+      ...member,
+      assignedTrainerId:
+        trainers.find(
+          (trainer: any) =>
+            String(trainer._id) === String(member.assignedTrainerId?._id),
+        ) || member.assignedTrainerId,
+      attendanceVisits30Days: visitCounts.get(String(member._id)) || 0,
+    })),
+    meta: {
+      ...pageMeta(page, limit, total),
+      timezone,
+      serverNow: now.toISOString(),
+    },
   });
 }
 
-export async function createMember(req: Request, res: Response) {
-  const phone = req.body.phone ? normalizePhone(req.body.phone) : undefined;
-  const email = req.body.email?.trim().toLowerCase();
-  let user = await User.findOne({
-    $or: [...(phone ? [{ phone }] : []), ...(email ? [{ email }] : [])],
-  });
-  if (!user) {
-    user = await User.create({
-      publicId: nanoid(18),
-      name: req.body.name,
-      phone,
-      email,
-      roles: ["USER"],
-      status: "PENDING_VERIFICATION",
-    });
-  }
-  const member = await MemberProfile.create({
-    publicId: nanoid(18),
-    gymId: req.auth!.gymId,
-    userId: user._id,
-    memberCode: req.body.memberCode || `GFU-${nanoid(8).toUpperCase()}`,
-    fitnessGoal: req.body.fitnessGoal,
-    emergencyContact: req.body.emergencyContact,
-  });
-  res.status(201).json({ success: true, data: member });
-}
+export { createMemberWithMembership as createMember } from "./memberManagementController.js";
 
 export async function getMember(req: Request, res: Response) {
+  const canReadFinance =
+    req.auth!.permissions.includes("finance:read") ||
+    req.auth!.role === "ADMIN";
   const member = await MemberProfile.findOne({
     publicId: req.params.id,
     gymId: req.auth!.gymId,
   })
-    .populate("userId", "publicId name phone email avatarUrl profile")
-    .populate("currentSubscriptionId")
+    .select("+medicalNotes")
+    .populate(
+      "userId",
+      "publicId name phone email status avatarUrl avatarAttachmentId profile",
+    )
+    .populate({
+      path: "assignedTrainerId",
+      match: { gymId: req.auth!.gymId },
+      select:
+        "publicId name userId photoUrl photoAttachmentId phone email specializations experienceYears qualifications availability status",
+      populate: {
+        path: "userId",
+        select: "name phone email avatarUrl avatarAttachmentId",
+      },
+    })
+    .populate({
+      path: "currentSubscriptionId",
+      select:
+        "publicId status startsAt endsAt freezePeriods " +
+        (canReadFinance
+          ? "planSnapshot latestPaymentId"
+          : "planSnapshot.name planSnapshot.durationDays planSnapshot.freezeDaysAllowed"),
+    })
     .lean();
   if (!member) throw new AppError(404, "MEMBER_NOT_FOUND", "Member not found.");
   const [attendance, payments] = await Promise.all([
@@ -214,14 +448,29 @@ export async function getMember(req: Request, res: Response) {
       .sort({ occurredAt: -1 })
       .limit(90)
       .lean(),
-    Payment.find({
-      payerId: (member.userId as any)._id,
-      gymId: req.auth!.gymId,
-    })
-      .sort({ createdAt: -1 })
-      .lean(),
+    canReadFinance
+      ? Payment.find({
+          payerId: (member.userId as any)._id,
+          gymId: req.auth!.gymId,
+        })
+          .sort({ createdAt: -1 })
+          .lean()
+      : Promise.resolve([]),
   ]);
-  res.json({ success: true, data: { member, attendance, payments } });
+  if (member.assignedTrainerId)
+    member.assignedTrainerId = (
+      await withTrainerMedia([member.assignedTrainerId])
+    )[0];
+  const gym = await Gym.findById(req.auth!.gymId).select("timezone").lean();
+  res.json({
+    success: true,
+    data: {
+      member: (await withMemberMedia([member]))[0],
+      attendance,
+      payments,
+      timezone: gym?.timezone || "Asia/Kolkata",
+    },
+  });
 }
 
 export async function listPlans(req: Request, res: Response) {
@@ -248,7 +497,7 @@ export async function updatePlan(req: Request, res: Response) {
   const plan = await MembershipPlan.findOneAndUpdate(
     { publicId: req.params.id, gymId: req.auth!.gymId },
     { $set: req.body },
-    { new: true, runValidators: true },
+    { returnDocument: "after", runValidators: true },
   ).lean();
   if (!plan) throw new AppError(404, "PLAN_NOT_FOUND", "Plan not found.");
   await refreshGymPrice(req.auth!.gymId);
@@ -256,18 +505,17 @@ export async function updatePlan(req: Request, res: Response) {
 }
 
 export async function scanMember(req: Request, res: Response) {
-  const qr = req.body.qrToken
-    ? verifyAttendanceQr(req.body.qrToken)
-    : undefined;
-  if (qr && qr.gymId !== req.auth!.gymId)
-    throw new AppError(409, "WRONG_GYM_QR", "This QR belongs to another gym.");
+  if (req.body.qrToken || req.body.source === "QR")
+    throw new AppError(
+      410,
+      "ATTENDANCE_FLOW_CHANGED",
+      "Members now scan the gym QR from their own device. Use manual check-in for an authorized exception.",
+    );
   const result = await checkIn({
     gymId: req.auth!.gymId!,
-    memberIdentifier: qr?.memberId || req.body.memberIdentifier,
+    memberIdentifier: req.body.memberIdentifier,
     actorId: req.auth!.userId,
-    source: req.body.source || "QR",
-    scannerId: req.body.scannerId,
-    qrNonce: qr?.nonce || req.body.qrNonce,
+    source: "MANUAL",
     location: req.body.location,
     idempotencyKey: req.idempotencyKey,
   });
@@ -277,73 +525,88 @@ export async function scanMember(req: Request, res: Response) {
 }
 
 export async function listClasses(req: Request, res: Response) {
-  const data = await ClassSession.find({ gymId: req.auth!.gymId })
-    .sort({ startsAt: 1 })
+  const { page, limit, skip } = paginationFromQuery({
+    ...req.query,
+    limit: req.query.limit || "24",
+  });
+  const query = z
+    .object({
+      status: z.enum(["", "SCHEDULED", "CANCELLED", "COMPLETED"]).optional(),
+      q: z.string().max(120).optional(),
+    })
+    .parse(req.query);
+  const filter = {
+    gymId: req.auth!.gymId,
+    ...(query.status ? { status: query.status } : {}),
+    ...(query.q
+      ? {
+          name: new RegExp(query.q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"),
+        }
+      : {}),
+  };
+  const data = await ClassSession.find(filter)
+    .populate("gymId", "name timezone")
+    .populate("trainerId", "publicId name photoUrl photoAttachmentId status")
+    .sort({ startsAt: -1 })
+    .skip(skip)
+    .limit(limit)
     .lean();
-  res.json({ success: true, data });
+  const trainers = await withTrainerMedia(
+    data.flatMap((row: any) => (row.trainerId ? [row.trainerId] : [])),
+  );
+  res.json({
+    success: true,
+    data: data.map((row: any) => ({
+      ...row,
+      trainerId:
+        trainers.find(
+          (trainer: any) => String(trainer._id) === String(row.trainerId?._id),
+        ) || row.trainerId,
+    })),
+    meta: pageMeta(page, limit, await ClassSession.countDocuments(filter)),
+  });
 }
 
 export async function createClass(req: Request, res: Response) {
-  if (
-    req.body.trainerId &&
-    !(await Trainer.exists({
-      _id: req.body.trainerId,
-      gymId: req.auth!.gymId,
-      status: "ACTIVE",
-    }))
-  )
-    throw new AppError(
-      422,
-      "TRAINER_INVALID",
-      "Select an active trainer at this gym.",
-    );
-  const session = await ClassSession.create({
-    ...req.body,
-    publicId: nanoid(18),
-    gymId: req.auth!.gymId,
+  const data = await saveGymClass({ gymId: req.auth!.gymId!, body: req.body });
+  await writeAudit(req, {
+    action: "class.created",
+    entityType: "ClassSession",
+    entityId: data.publicId,
   });
-  res.status(201).json({ success: true, data: session });
+  res.status(201).json({ success: true, data });
+}
+
+export async function cancelClass(req: Request, res: Response) {
+  const body = z
+    .object({ reason: z.string().trim().min(3).max(500) })
+    .parse(req.body);
+  const data = await saveGymClass({
+    gymId: req.auth!.gymId!,
+    publicId: String(req.params.id),
+    body: {},
+    cancel: true,
+    reason: body.reason,
+  });
+  await writeAudit(req, {
+    action: "class.cancelled",
+    entityType: "ClassSession",
+    entityId: data.publicId,
+  });
+  res.json({ success: true, data });
 }
 
 export async function listTrainers(req: Request, res: Response) {
   const data = await Trainer.find({
     gymId: req.auth!.gymId,
     status: { $ne: "ARCHIVED" },
-  }).lean();
-  res.json({ success: true, data });
+  })
+    .populate("userId", "name email phone avatarUrl avatarAttachmentId")
+    .lean();
+  res.json({ success: true, data: await withTrainerMedia(data) });
 }
 
-export async function createTrainer(req: Request, res: Response) {
-  const user = await User.findOne({
-    email: req.body.email.toLowerCase(),
-    status: "ACTIVE",
-  });
-  if (!user)
-    throw new AppError(
-      422,
-      "TRAINER_ACCOUNT_REQUIRED",
-      "The trainer must create an account with this email first.",
-    );
-  if (await Trainer.exists({ userId: user._id, gymId: req.auth!.gymId }))
-    throw new AppError(
-      409,
-      "TRAINER_EXISTS",
-      "This trainer already belongs to this gym.",
-    );
-  const trainer = await Trainer.create({
-    ...req.body,
-    publicId: nanoid(18),
-    gymId: req.auth!.gymId,
-    userId: user._id,
-  });
-  await RoleAssignment.findOneAndUpdate(
-    { userId: user._id, gymId: req.auth!.gymId, role: "TRAINER" },
-    { $set: { permissions: TRAINER_DEFAULT_PERMISSIONS, status: "ACTIVE" } },
-    { upsert: true },
-  );
-  await User.updateOne({ _id: user._id }, { $addToSet: { roles: "TRAINER" } });
-  res.status(201).json({ success: true, data: trainer });
-}
+export { saveTrainer as createTrainer } from "./memberManagementController.js";
 
 export async function listCampaigns(req: Request, res: Response) {
   const data = await Campaign.find({ gymId: req.auth!.gymId })
@@ -380,139 +643,40 @@ export async function listSubscriptions(req: Request, res: Response) {
   res.json({ success: true, data, meta: pageMeta(page, limit, total) });
 }
 export async function subscriptionAction(req: Request, res: Response) {
-  const subscription = await Subscription.findOne({
-    publicId: req.params.id,
-    gymId: req.auth!.gymId,
-  });
-  if (!subscription)
-    throw new AppError(
-      404,
-      "SUBSCRIPTION_NOT_FOUND",
-      "Subscription not found.",
-    );
-  const action = req.params.action;
-  if (
-    action === "activate" &&
-    ["GRACE", "FROZEN"].includes(subscription.status) &&
-    subscription.endsAt > new Date()
-  )
-    subscription.status = "ACTIVE";
-  else if (
-    action === "cancel" &&
-    ["ACTIVE", "FROZEN", "GRACE"].includes(subscription.status)
-  ) {
-    subscription.status = "CANCELLED";
-    subscription.cancelledAt = new Date();
-    subscription.cancellationReason = req.body.reason;
-  } else
-    throw new AppError(
-      409,
-      "INVALID_SUBSCRIPTION_TRANSITION",
-      "This subscription action is not allowed.",
-    );
-  await subscription.save();
-  await writeAudit(req, {
-    action: `subscription.${action}`,
-    entityType: "Subscription",
-    entityId: subscription.publicId,
-    after: { status: subscription.status },
-  });
-  res.json({ success: true, data: subscription });
-}
-export async function listOffers(req: Request, res: Response) {
-  res.json({
-    success: true,
-    data: await Offer.find({
-      gymId: req.auth!.gymId,
-      status: { $ne: "ARCHIVED" },
+  const body = z
+    .object({
+      reason: z.string().max(1000).optional(),
+      endsAt: z.coerce.date().optional(),
     })
-      .sort({ createdAt: -1 })
-      .lean(),
-  });
-}
-export async function createOffer(req: Request, res: Response) {
-  const data = await Offer.create({
-    ...req.body,
-    publicId: nanoid(20),
+    .parse(req.body);
+  const action = z
+    .enum(["activate", "freeze", "reactivate", "cancel", "deactivate"])
+    .parse(req.params.action);
+  const data = await transitionMembership({
+    publicId: String(req.params.id),
     gymId: req.auth!.gymId,
-    createdBy: req.auth!.userId,
+    actorId: req.auth!.userId,
+    action,
+    actorRole: req.auth!.role,
+    ...body,
   });
-  res.status(201).json({ success: true, data });
-}
-export async function updateOffer(req: Request, res: Response) {
-  const data = await Offer.findOneAndUpdate(
-    { publicId: req.params.id, gymId: req.auth!.gymId },
-    { $set: req.body },
-    { new: true, runValidators: true },
-  );
-  if (!data) throw new AppError(404, "OFFER_NOT_FOUND", "Offer not found.");
+  await writeAudit(req, {
+    action: "subscription." + action,
+    entityType: "Subscription",
+    entityId: data.publicId,
+    after: { status: data.status, endsAt: data.endsAt },
+  });
   res.json({ success: true, data });
 }
-export async function listAds(req: Request, res: Response) {
-  res.json({
-    success: true,
-    data: await Advertisement.find({
-      gymId: req.auth!.gymId,
-      status: { $ne: "ARCHIVED" },
-    })
-      .sort({ createdAt: -1 })
-      .lean(),
-  });
-}
-export async function createAd(req: Request, res: Response) {
-  const data = await Advertisement.create({
-    ...req.body,
-    publicId: nanoid(20),
-    gymId: req.auth!.gymId,
-    createdBy: req.auth!.userId,
-  });
-  res.status(201).json({ success: true, data });
-}
+export { listOffers, createOffer, updateOffer, listAds, createAd, updateAd } from "./promotionController.js";
 export async function revenue(req: Request, res: Response) {
-  const [captured, refunds, settlements, bank] = await Promise.all([
-    Payment.aggregate([
-      {
-        $match: {
-          gymId: new mongoose.Types.ObjectId(req.auth!.gymId),
-          status: { $in: ["CAPTURED", "PARTIALLY_REFUNDED"] },
-        },
-      },
-      { $group: { _id: null, grossMinor: { $sum: "$amountMinor" } } },
-    ]),
-    (await import("../models/Business.js")).Refund.aggregate([
-      {
-        $lookup: {
-          from: "payments",
-          localField: "paymentId",
-          foreignField: "_id",
-          as: "payment",
-        },
-      },
-      { $unwind: "$payment" },
-      {
-        $match: {
-          "payment.gymId": new mongoose.Types.ObjectId(req.auth!.gymId),
-          status: "PROCESSED",
-        },
-      },
-      { $group: { _id: null, total: { $sum: "$amountMinor" } } },
-    ]),
-    Settlement.find({ gymId: req.auth!.gymId })
-      .sort({ createdAt: -1 })
-      .limit(50)
-      .lean(),
-    BankAccount.findOne({ gymId: req.auth!.gymId }).lean(),
-  ]);
-  const gross = captured[0]?.grossMinor || 0,
-    refunded = refunds[0]?.total || 0;
   res.json({
     success: true,
-    data: {
-      grossMinor: gross,
-      refundMinor: refunded,
-      netMinor: gross - refunded,
-      bankAccount: bank,
-      settlements,
-    },
+    data: await gymRevenue(
+      req.auth!.gymId!,
+      req.query.from,
+      req.query.to,
+      req.query.period,
+    ),
   });
 }

@@ -1,8 +1,13 @@
 // Only local, known application destinations may be restored after authentication.
 export function safeReturnTo(value: unknown): string | undefined {
-  if (typeof value !== "string" || /[\\\u0000-\u0020]/.test(value)) return;
   if (
-    !/^\/(?:gyms\/[^/?#]+|register-gym|notifications|profile|(?:app|owner|trainer|admin)\/[^?#]+)(?:[?#].*)?$/.test(
+    typeof value !== "string" ||
+    value.includes("\\") ||
+    [...value].some((character) => character.charCodeAt(0) <= 32)
+  )
+    return;
+  if (
+    !/^\/(?:gyms\/[^/?#]+|register-gym|platform-renewal|notifications|messages(?:\/[A-Za-z0-9_-]+)?|profile(?:\/[A-Za-z0-9_-]+)?|(?:app|owner|trainer|admin)\/[^?#]+)(?:[?#].*)?$/.test(
       value,
     )
   )
@@ -28,7 +33,7 @@ export function loginDestination(role: string, returnTo?: string): string {
           : "/app/home";
   const safe = safeReturnTo(returnTo);
   return safe &&
-    (/^\/(gyms\/|(?:register-gym|notifications|profile)(?:[?#]|$))/.test(
+    (/^\/(gyms\/|messages(?:\/|[?#]|$)|profile(?:\/|[?#]|$)|(?:register-gym|platform-renewal|notifications)(?:[?#]|$))/.test(
       safe,
     ) ||
       safe.startsWith(`/${home.split("/")[1]}/`))

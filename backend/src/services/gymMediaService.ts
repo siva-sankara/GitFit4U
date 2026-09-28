@@ -1,20 +1,24 @@
 import { Attachment } from "../models/Business.js";
-import { presignedObjectUrl } from "../integrations/storage/s3ObjectStore.js";
+import type { ClientSession } from "mongoose";
+import { attachmentUrl } from "../integrations/storage/mediaStore.js";
 import { AppError } from "../utils/AppError.js";
 
 export async function validateGymMedia(
   gymId: string,
   ids: string[],
   coverId?: string | null,
+  session?: ClientSession,
 ) {
-  const files = await Attachment.find({
+  const query = Attachment.find({
     _id: { $in: ids },
     gymId,
     status: "READY",
     deletedAt: null,
     purpose: { $in: ["GYM_GALLERY", "GYM_COVER"] },
     mimeType: { $in: ["image/jpeg", "image/png", "image/webp", "video/mp4"] },
-  }).lean();
+  });
+  if (session) query.session(session);
+  const files = await query.lean();
   if (files.length !== ids.length)
     throw new AppError(
       422,
@@ -35,8 +39,30 @@ export async function validateGymMedia(
 }
 
 // Persist attachment IDs, not expiring S3 URLs. Resolve fresh viewing links on every read.
+export async function validateGymLogo(gymId: string, id?: string | null, session?: ClientSession) {
+  if (!id) return;
+  const query = Attachment.exists({
+      _id: id,
+      gymId,
+      purpose: "GYM_LOGO",
+      status: "READY",
+      deletedAt: null,
+      mimeType: { $in: ["image/jpeg", "image/png", "image/webp"] },
+      size: { $lte: 5_000_000 },
+    });
+  if (session) query.session(session);
+  if (!(await query))
+    throw new AppError(
+      422,
+      "GYM_LOGO_INVALID",
+      "Choose a completed logo upload belonging to this gym.",
+    );
+}
 export async function withGymMedia(gyms: any[]) {
-  const ids = gyms.flatMap((g) => g.mediaAttachmentIds || []);
+  const ids = gyms.flatMap((g) => [
+    ...(g.mediaAttachmentIds || []),
+    ...(g.logoAttachmentId ? [g.logoAttachmentId] : []),
+  ]);
   const files = ids.length
     ? await Attachment.find({
         _id: { $in: ids },
@@ -57,13 +83,37 @@ export async function withGymMedia(gyms: any[]) {
           publicId: file.publicId,
           name: file.originalName,
           mimeType: file.mimeType,
-          url: presignedObjectUrl("GET", file.objectKey, 3600),
+          url: attachmentUrl(file),
         },
       ];
     });
     const cover =
       media.find((m: any) => m._id === String(gym.coverAttachmentId)) ||
       media.find((m: any) => m.mimeType.startsWith("image/"));
-    return { ...gym, media, coverImageUrl: cover?.url || gym.coverImageUrl };
+    const logo = files.find(
+      (f) =>
+        String(f._id) === String(gym.logoAttachmentId) &&
+        String(f.gymId) === String(gym._id) &&
+        f.purpose === "GYM_LOGO",
+    );
+    return {
+      ...gym,
+      media,
+      coverImageUrl: cover?.url || gym.coverImageUrl,
+      logoUrl: logo
+        ? attachmentUrl(logo)
+        : gym.logoAttachmentId === null
+          ? null
+          : gym.logoUrl,
+      logo: logo
+        ? {
+            url: attachmentUrl(logo),
+            publicId: logo.providerPublicId || logo.publicId,
+            attachmentId: String(logo._id),
+            width: logo.width,
+            height: logo.height,
+          }
+        : null,
+    };
   });
 }

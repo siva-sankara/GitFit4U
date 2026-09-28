@@ -1,7 +1,8 @@
 import { GuestRoute } from "./routes/GuestRoute";
 import { LegacyAuthRedirect } from "./routes/LegacyAuthRedirect";
 import { NotificationInboxRedirect } from "./pages/shared/NotificationInboxRedirect";
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useEffect } from "react";
+import { safeReturnTo } from "./services/authRedirect";
 import {
   createBrowserRouter,
   Navigate,
@@ -27,7 +28,13 @@ const Auth = lazy(() =>
     default: m.AuthDesktopPage,
   })),
 );
+const PlatformSubscription = lazy(() => import("./pages/owner/PlatformSubscriptionPage").then(module => ({ default: module.PlatformSubscriptionPage })));
 const router = createBrowserRouter([
+  {
+    path: "/platform-renewal",
+    element: <ProtectedRoute><WorkspaceLayout /></ProtectedRoute>,
+    children: [{ index: true, element: <PlatformSubscription /> }],
+  },
   {
     element: (
       <GuestRoute>
@@ -55,6 +62,22 @@ const router = createBrowserRouter([
     element: (
       <ProtectedRoute>
         <NotificationInboxRedirect />
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: "/messages",
+    element: (
+      <ProtectedRoute>
+        <NotificationInboxRedirect destination="messages" />
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: "/messages/:conversationId",
+    element: (
+      <ProtectedRoute>
+        <NotificationInboxRedirect destination="messages" />
       </ProtectedRoute>
     ),
   },
@@ -93,7 +116,10 @@ const router = createBrowserRouter([
         <WorkspaceLayout />
       </ProtectedRoute>
     ),
-    children: [{ index: true, element: <LiveWorkspace /> }],
+    children: [
+      { index: true, element: <LiveWorkspace /> },
+      { path: ":profileId", element: <LiveWorkspace /> },
+    ],
   },
   {
     path: "/register-gym",
@@ -144,6 +170,17 @@ const router = createBrowserRouter([
   },
 ]);
 export function App() {
+  useEffect(() => {
+    if (!("serviceWorker" in navigator)) return;
+    const openNotification = (event: MessageEvent) => {
+      if (event.data?.type !== "GETFIT4U_NOTIFICATION_CLICK") return;
+      const path = safeReturnTo(event.data.path);
+      if (path) void router.navigate(path);
+    };
+    navigator.serviceWorker.addEventListener("message", openNotification);
+    return () =>
+      navigator.serviceWorker.removeEventListener("message", openNotification);
+  }, []);
   return (
     <Suspense fallback={<main className="state-card">Loading GETFIT4U…</main>}>
       <RouterProvider router={router} />

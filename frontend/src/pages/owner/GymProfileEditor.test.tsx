@@ -31,6 +31,7 @@ import {
   GymHoursEditor,
   GymLocationEditor,
 } from "./GymProfileEditor";
+import { GymLogoEditor } from "./GymLogoEditor";
 let host: HTMLDivElement, root: Root, client: QueryClient;
 beforeEach(() => {
   vi.resetAllMocks();
@@ -70,7 +71,7 @@ async function render(element: React.ReactNode) {
 async function until(check: () => boolean) {
   for (let i = 0; i < 80 && !check(); i++)
     await act(async () => {
-      await new Promise((r) => setTimeout(r, 15));
+      await new Promise((r) => { setTimeout(r, 15); });
     });
   expect(check()).toBe(true);
 }
@@ -105,6 +106,43 @@ it("uploads bytes and confirms storage before linking a photo to the gym", async
   expect(JSON.parse(mocks.request.mock.calls[2][1].body)).toEqual({
     mediaAttachmentIds: ["existing", "attachment-one"],
   });
+});
+it("previews and replaces a logo using the completed attachment ID", async () => {
+  URL.createObjectURL = vi.fn(() => "blob:logo-preview");
+  URL.revokeObjectURL = vi.fn();
+  await render(
+    <GymLogoEditor
+      gym={{ name: "Test Gym", logoUrl: "https://storage.test/old-logo" }}
+    />,
+  );
+  await choose(new File(["logo"], "logo.png", { type: "image/png" }));
+  expect(host.querySelector("img")?.getAttribute("src")).toBe(
+    "blob:logo-preview",
+  );
+  await act(async () => button("Save logo").click());
+  await until(() => host.textContent!.includes("Gym logo saved."));
+  expect(JSON.parse(mocks.request.mock.calls[0][1].body).purpose).toBe(
+    "GYM_LOGO",
+  );
+  expect(mocks.request).toHaveBeenCalledWith("/api/v1/owner/gym", {
+    method: "PATCH",
+    body: JSON.stringify({ logoAttachmentId: "attachment-one" }),
+  });
+  expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:logo-preview");
+});
+it("removes the gym logo reference without deleting unrelated files", async () => {
+  await render(
+    <GymLogoEditor
+      gym={{ name: "Test Gym", logoUrl: "https://storage.test/current-logo" }}
+    />,
+  );
+  await act(async () => button("Remove logo").click());
+  await until(() => host.textContent!.includes("Gym logo saved."));
+  expect(mocks.request).toHaveBeenCalledWith("/api/v1/owner/gym", {
+    method: "PATCH",
+    body: JSON.stringify({ logoAttachmentId: null }),
+  });
+  expect(mocks.upload).not.toHaveBeenCalled();
 });
 it("retains the selected video after a cloud failure and retries", async () => {
   mocks.upload.mockRejectedValueOnce(new Error("Cloud access denied"));
@@ -243,13 +281,16 @@ it("lets the owner publish a membership directly from the gym profile", async ()
   );
   await until(() => host.textContent!.includes("No published memberships yet"));
   await act(async () => button("Add membership plan").click());
+  const dialog = document.querySelector<HTMLElement>('[role="dialog"]')!;
+  expect(dialog).not.toBeNull();
+  expect(host.contains(dialog)).toBe(false);
   for (const [label, value] of [
     ["Plan name", "Monthly"],
     ["Plan code", "MONTHLY"],
     ["Days", "30"],
     ["Price", "1500"],
   ]) {
-    const input = [...host.querySelectorAll("label")]
+    const input = [...dialog.querySelectorAll("label")]
       .find((el) => el.textContent?.startsWith(label))!
       .querySelector("input")!;
     await act(async () => {
@@ -261,7 +302,7 @@ it("lets the owner publish a membership directly from the gym profile", async ()
     });
   }
   await act(async () =>
-    host
+    dialog
       .querySelector("form")!
       .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })),
   );

@@ -10,12 +10,13 @@ import { CalendarDays, CreditCard, LoaderCircle, QrCode } from "lucide-react";
 import { apiRequest, type ApiEnvelope } from "../../services/apiClient";
 import { Modal } from "../../components/Modal";
 import { StatusBadge } from "../../components/StatusBadge";
+import { GymIdentity } from "../../components/GymIdentity";
 import "../../styles/member-workspace.css";
 
 export interface MemberSubscription {
   _id: string;
   publicId: string;
-  gymId?: { _id: string; name: string; slug?: string } | null;
+  gymId?: { _id: string; name: string; slug?: string; logoUrl?: string } | null;
   planSnapshot?: {
     name?: string;
     planId?: string;
@@ -30,7 +31,7 @@ export interface MemberSubscription {
   endsAt?: string;
   freezePeriods?: { startsAt: string; endsAt: string }[];
 }
-type Command = "cancel" | "freeze";
+type Command = "cancel" | "freeze" | "reactivate";
 type Selection = { subscription: MemberSubscription; command: Command };
 const resourcePath = "/api/v1/workspace/records/subscriptions";
 const statuses = [
@@ -40,6 +41,7 @@ const statuses = [
   "GRACE",
   "EXPIRED",
   "CANCELLED",
+  "DEACTIVATED",
 ];
 const day = (value?: string) =>
   value && Number.isFinite(Date.parse(value))
@@ -152,7 +154,13 @@ function SubscriptionCommand({
   return (
     <Modal
       open
-      title={command === "cancel" ? "Cancel membership" : "Freeze membership"}
+      title={
+        command === "cancel"
+          ? "Cancel membership"
+          : command === "reactivate"
+            ? "Reactivate membership"
+            : "Freeze membership"
+      }
       onClose={() => {
         if (!save.isPending) onClose();
       }}
@@ -165,7 +173,9 @@ function SubscriptionCommand({
         <p>
           {command === "cancel"
             ? "Cancelling ends access to this membership immediately. This action does not issue a refund."
-            : `Your membership pauses immediately and its end date extends by the selected duration. ${remainingDays} freeze days remain.`}
+            : command === "reactivate"
+              ? "Gym access resumes immediately. Unused freeze days are returned and your membership end date is recalculated."
+              : `Your membership pauses immediately and its end date extends by the selected duration. ${remainingDays} freeze days remain.`}
         </p>
         {command === "freeze" && (
           <label className="field">
@@ -276,7 +286,9 @@ export function MemberSubscriptions() {
     setNotice(
       command === "cancel"
         ? "Membership cancelled."
-        : "Membership frozen. Your end date has been updated.",
+        : command === "reactivate"
+          ? "Membership reactivated. Your end date has been updated."
+          : "Membership frozen. Your end date has been updated.",
     );
     void client.invalidateQueries({
       queryKey: ["api"],
@@ -310,8 +322,8 @@ export function MemberSubscriptions() {
         <div className="panel subscription-notice" role="status">
           <strong>Welcome to {joinedGymName}</strong>
           <p>
-            Your payment is verified and your gym membership is active. Your
-            member QR is available below.
+            Your payment is verified and your gym membership is active. Your gym
+            attendance scanner is available below.
           </p>
         </div>
       )}
@@ -442,13 +454,11 @@ export function MemberSubscriptions() {
                 key={subscription.publicId}
               >
                 <header>
-                  <div className="subscription-gym-icon" aria-hidden="true">
-                    <CreditCard size={24} />
-                  </div>
-                  <div>
-                    <h2>{subscription.gymId?.name || "Gym unavailable"}</h2>
-                    <p>{plan?.name || "Membership details unavailable"}</p>
-                  </div>
+                  <GymIdentity
+                    name={subscription.gymId?.name || "Gym unavailable"}
+                    logoUrl={subscription.gymId?.logoUrl}
+                    subtitle={plan?.name || "Membership details unavailable"}
+                  />
                   <StatusBadge status={subscription.status} />
                 </header>
                 <dl className="live-subscription-details">
@@ -484,10 +494,11 @@ export function MemberSubscriptions() {
                     period.
                   </p>
                 )}
+                {subscription.status === "DEACTIVATED" && <p className="subscription-payment-note">Gym access has been deactivated. Contact your gym to request reactivation of any remaining paid validity.</p>}
                 {subscription.status === "ACTIVE" && !started && (
                   <p className="subscription-payment-note">
                     Your membership starts on {day(subscription.startsAt)}. Your
-                    QR will be available then.
+                    attendance access will be available then.
                   </p>
                 )}
                 {!available && (
@@ -503,8 +514,19 @@ export function MemberSubscriptions() {
                       to={`/app/attendance/qr?gymId=${encodeURIComponent(subscription.gymId!._id)}`}
                     >
                       <QrCode size={18} aria-hidden="true" />
-                      Member QR
+                      Scan gym QR
                     </Link>
+                  )}
+                  {subscription.status === "FROZEN" && available && (
+                    <button
+                      className="btn btn-primary"
+                      disabled={query.isPlaceholderData}
+                      onClick={() =>
+                        setSelection({ subscription, command: "reactivate" })
+                      }
+                    >
+                      Reactivate
+                    </button>
                   )}
                   {href && (
                     <Link

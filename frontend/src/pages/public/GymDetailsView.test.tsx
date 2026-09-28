@@ -60,6 +60,8 @@ const data = () => ({
       name: "Morning Yoga",
       category: "YOGA",
       startsAt: "2026-09-12T00:30:00Z",
+      endsAt: "2026-09-12T01:30:00Z",
+      status: "SCHEDULED",
       capacity: 12,
       bookedCount: 5,
     },
@@ -122,8 +124,8 @@ it("shows backend details, plan prices, classes, hours and member reviews", asyn
     "Free induction",
     "2,500",
     "Morning Yoga",
-    "7 spots left",
-    "6:00 am",
+    "7 available / 12",
+    "60 min",
     "Next day",
     "Welcoming space",
     "Helpful staff",
@@ -194,7 +196,7 @@ it("shows honest empty states and avoids a purchase CTA when no plans exist", as
     trainers: [],
   });
   expect(host.textContent).toContain("Gym photos will appear here when added");
-  expect(host.textContent).toContain("Memberships coming soon");
+  expect(host.textContent).toContain("Join this gym");
   expect(host.textContent).toContain("Not provided");
   expect(host.querySelector(".gd-mobile-join")).toBeNull();
   expect(host.querySelector(".gd-gallery-count")).toBeNull();

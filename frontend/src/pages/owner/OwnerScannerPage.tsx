@@ -1,309 +1,202 @@
+import { useState } from "react";
+import { useCurrentUser } from "../../api/hooks";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { QRCodeSVG } from "qrcode.react";
+import { apiRequest, type ApiEnvelope } from "../../services/apiClient";
+import { Modal } from "../../components/Modal";
 import { deviceLocation } from "../../services/location";
-import { useMutation } from "@tanstack/react-query";
-import {
-  Camera,
-  Check,
-  CheckCircle2,
-  Keyboard,
-  MapPin,
-  RefreshCw,
-  ScanLine,
-  ShieldAlert,
-  ShieldCheck,
-} from "lucide-react";
-import { useEffect, useRef, useState } from "react";
-import {
-  ApiError,
-  apiRequest,
-  type ApiEnvelope,
-} from "../../services/apiClient";
+import "../../styles/member-management.css";
 
-type ScanResult = {
-  duplicate: boolean;
-  member?: { displayName?: string; memberCode?: string };
-  event: { occurredAt: string };
-  subscription?: { endsAt: string };
+type GymQr = {
+  token: string;
+  gymName: string;
+  revision: number;
+  locationRequired: boolean;
 };
-type BarcodeDetectorLike = {
-  detect(source: ImageBitmapSource): Promise<Array<{ rawValue: string }>>;
-};
-declare global {
-  interface Window {
-    BarcodeDetector?: new (options: {
-      formats: string[];
-    }) => BarcodeDetectorLike;
-  }
-}
-
-async function currentLocation() {
-  const point = await deviceLocation();
-  return {
-    coordinates: [point.longitude, point.latitude] as [number, number],
-    accuracyMeters: point.accuracyMeters,
-    capturedAt: point.capturedAt,
-  };
-}
-
 export function OwnerScannerPage() {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const frameRef = useRef<number | null>(null);
-  const [mode, setMode] = useState<"QR" | "MANUAL">("QR");
-  const [value, setValue] = useState("");
-  const [cameraError, setCameraError] = useState("");
-  const scan = useMutation({
-    mutationFn: async (input: { value: string; mode: "QR" | "MANUAL" }) => {
+  const session = useCurrentUser();
+  const permissions = session.data?.data.context.permissions || [];
+  const [replace, setReplace] = useState(false),
+    [memberCode, setMemberCode] = useState("");
+  const qr = useQuery({
+    queryKey: ["api", "/api/v1/owner/attendance/qr"],
+    queryFn: () =>
+      apiRequest<ApiEnvelope<GymQr>>("/api/v1/owner/attendance/qr"),
+    retry: false,
+  });
+  const rotate = useMutation({
+    mutationFn: () =>
+      apiRequest("/api/v1/owner/attendance/qr/rotate", {
+        method: "POST",
+        body: "{}",
+      }),
+    onSuccess: () => {
+      setReplace(false);
+      void qr.refetch();
+    },
+  });
+  const manual = useMutation({
+    mutationFn: async () => {
       let location;
-      try {
-        location = await currentLocation();
-      } catch {
-        /* The backend decides whether location is mandatory. */
+      if (qr.data?.data.locationRequired) {
+        const point = await deviceLocation();
+        location = {
+          coordinates: [point.longitude, point.latitude],
+          accuracyMeters: point.accuracyMeters,
+          capturedAt: point.capturedAt,
+        };
       }
-      return apiRequest<ApiEnvelope<ScanResult>>(
+      return apiRequest<ApiEnvelope<{ duplicate: boolean }>>(
         "/api/v1/owner/scanner/check-in",
         {
           method: "POST",
           idempotencyKey: crypto.randomUUID(),
-          body: JSON.stringify(
-            input.mode === "QR"
-              ? {
-                  qrToken: input.value,
-                  source: "QR",
-                  scannerId: "web-front-desk",
-                  location,
-                }
-              : {
-                  memberIdentifier: input.value,
-                  source: "MANUAL",
-                  scannerId: "web-front-desk",
-                  location,
-                },
-          ),
+          body: JSON.stringify({
+            memberIdentifier: memberCode.trim(),
+            source: "MANUAL",
+            location,
+          }),
         },
       );
     },
   });
-  const stopCamera = () => {
-    if (frameRef.current) cancelAnimationFrame(frameRef.current);
-    streamRef.current?.getTracks().forEach((track) => track.stop());
-    streamRef.current = null;
-  };
-  const submit = (token = value) => {
-    const cleaned = token.trim();
-    if (cleaned) {
-      stopCamera();
-      scan.mutate({ value: cleaned, mode });
-    }
-  };
-  const startCamera = async () => {
-    setCameraError("");
-    scan.reset();
-    if (!window.BarcodeDetector) {
-      setCameraError(
-        "This browser does not support camera QR detection. Paste the secure QR value or use member ID.",
-      );
-      return;
-    }
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment" },
-        audio: false,
-      });
-      streamRef.current = stream;
-      const video = videoRef.current;
-      if (!video) return;
-      video.srcObject = stream;
-      await video.play();
-      const detector = new window.BarcodeDetector({ formats: ["qr_code"] });
-      const detect = async () => {
-        try {
-          const codes = await detector.detect(video);
-          if (codes[0]?.rawValue) {
-            setValue(codes[0].rawValue);
-            submit(codes[0].rawValue);
-            return;
-          }
-        } catch {
-          /* Retry on the next animation frame. */
-        }
-        frameRef.current = requestAnimationFrame(detect);
-      };
-      detect();
-    } catch {
-      setCameraError(
-        "Camera permission is unavailable. Allow camera access or use manual check-in.",
-      );
-    }
-  };
-  useEffect(() => () => stopCamera(), []);
-  const error =
-    scan.error instanceof ApiError
-      ? scan.error.message
-      : "Unable to validate this attendance request.";
+  function download() {
+    const svg = document.querySelector("#gym-attendance-qr svg");
+    if (!svg) return;
+    const url = URL.createObjectURL(
+      new Blob([new XMLSerializer().serializeToString(svg)], {
+        type: "image/svg+xml",
+      }),
+    );
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "gym-attendance-qr.svg";
+    link.click();
+    URL.revokeObjectURL(url);
+  }
   return (
-    <div className="scanner-page">
-      <header className="page-heading scanner-heading">
+    <div className="page-stack">
+      <header className="page-heading">
         <div>
-          <span className="eyebrow">Secure front desk</span>
-          <h1>Scan member QR</h1>
+          <span className="eyebrow">Attendance</span>
+          <h1>Gym attendance QR</h1>
           <p>
-            Every submission is validated by the API against gym, membership,
-            duplicate and location rules.
+            Display this code at reception. Members scan it from their own
+            phone.
           </p>
         </div>
       </header>
-      <div className="scanner-layout">
-        <section className="scanner-frame panel">
-          {scan.isSuccess ? (
-            <div className="scan-result success">
-              <span>
-                <CheckCircle2 size={44} />
-              </span>
-              <h2>
-                {scan.data.data.duplicate
-                  ? "Already checked in"
-                  : "Check-in successful"}
-              </h2>
-              <p>
-                {scan.data.data.member?.displayName || "Member"} ·{" "}
-                {new Date(scan.data.data.event.occurredAt).toLocaleTimeString()}
-              </p>
-              <button
-                className="btn btn-primary"
-                onClick={() => {
-                  scan.reset();
-                  setValue("");
-                }}
-              >
-                <RefreshCw size={17} />
-                Scan next member
-              </button>
-            </div>
-          ) : scan.isError ? (
-            <div className="scan-result error">
-              <span>
-                <ShieldAlert size={44} />
-              </span>
-              <h2>Check-in blocked</h2>
-              <p>{error}</p>
-              <button
-                className="btn btn-secondary"
-                onClick={() => scan.reset()}
-              >
-                <RefreshCw size={17} />
-                Try again
-              </button>
-            </div>
-          ) : (
-            <div className="scanner-ready">
-              <span className="scanner-camera">
-                <Camera size={34} />
-              </span>
-              <h2>
-                {mode === "QR" ? "Camera QR scanner" : "Manual member check-in"}
-              </h2>
-              <p>
-                {mode === "QR"
-                  ? "Scan the member’s short-lived signed QR code."
-                  : "Enter an exact member code or public ID."}
-              </p>
-              {mode === "QR" && (
-                <>
-                  <div className="qr-frame active">
-                    <i />
-                    <i />
-                    <i />
-                    <i />
-                    <video
-                      ref={videoRef}
-                      muted
-                      playsInline
-                      style={{
-                        width: "100%",
-                        height: "100%",
-                        objectFit: "cover",
-                        borderRadius: 16,
-                      }}
-                    />
-                  </div>
-                  <button
-                    className="btn btn-primary"
-                    onClick={startCamera}
-                    disabled={scan.isPending}
-                  >
-                    <ScanLine size={18} />
-                    Start camera
-                  </button>
-                </>
-              )}
-              <label className="search-field" style={{ marginTop: 16 }}>
-                <input
-                  value={value}
-                  onChange={(event) => setValue(event.target.value)}
-                  placeholder={
-                    mode === "QR"
-                      ? "Paste secure QR value"
-                      : "Member ID or code"
-                  }
-                />
-              </label>
-              <button
-                className="btn btn-secondary"
-                onClick={() => submit()}
-                disabled={scan.isPending || value.trim().length < 3}
-              >
-                {scan.isPending ? "Validating…" : "Validate and check in"}
-              </button>
-              {cameraError && <p className="error-text">{cameraError}</p>}
-            </div>
-          )}
-        </section>
-        <aside className="scanner-side">
-          <section className="panel">
-            <header>
-              <h2>Check-in method</h2>
-            </header>
-            <button
-              className="btn btn-ghost modal-full-button"
-              onClick={() => {
-                stopCamera();
-                setMode(mode === "QR" ? "MANUAL" : "QR");
-                setValue("");
-                scan.reset();
+      {qr.isPending && <p role="status">Loading your gym QR...</p>}
+      {qr.isError && (
+        <div className="panel state-card" role="alert">
+          <p>{qr.error.message}</p>
+          <button
+            className="btn btn-secondary"
+            onClick={() => void qr.refetch()}
+          >
+            Retry
+          </button>
+        </div>
+      )}
+      <div className="owner-attendance-grid">
+        {qr.data && (
+          <section className="panel attendance-qr-card">
+            <h2>{qr.data.data.gymName}</h2>
+            <div
+              id="gym-attendance-qr"
+              style={{
+                display: "inline-flex",
+                padding: 20,
+                background: "#fff",
+                borderRadius: 16,
               }}
             >
-              {mode === "QR" ? <Keyboard size={17} /> : <Camera size={17} />}
-              Switch to {mode === "QR" ? "manual" : "QR"}
-            </button>
-          </section>
-          <section className="panel scanner-rules">
-            <h2>
-              <ShieldCheck size={19} />
-              Server validation
-            </h2>
-            <div>
-              <Check size={15} />
-              Signed, expiring QR
+              <QRCodeSVG
+                value={qr.data.data.token}
+                size={210}
+                marginSize={2}
+                level="M"
+              />
             </div>
-            <div>
-              <Check size={15} />
-              Correct gym scope
-            </div>
-            <div>
-              <Check size={15} />
-              Active subscription
-            </div>
-            <div>
-              <Check size={15} />
-              Duplicate protection
-            </div>
-            <div>
-              <MapPin size={15} />
-              Optional geofence and accuracy
+            <p>Persistent gym QR - Version {qr.data.data.revision}</p>
+            <p>
+              {qr.data.data.locationRequired
+                ? "Members must enable location and be near this gym."
+                : "Membership and daily duplicate checks are required for every scan."}
+            </p>
+            <div className="heading-actions">
+              <button className="btn btn-primary" onClick={download}>
+                Download QR
+              </button>
+              {permissions.includes("gym:update") && (
+                <button
+                  className="btn btn-secondary"
+                  onClick={() => setReplace(true)}
+                >
+                  Replace QR
+                </button>
+              )}
             </div>
           </section>
-        </aside>
+        )}
+        {permissions.includes("attendance:scan") && (
+          <section className="panel attendance-manual-card">
+            <h2>Manual attendance exception</h2>
+            <p>Use this when an eligible member cannot access their camera.</p>
+            <form
+              className="modal-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                manual.mutate();
+              }}
+            >
+              <label className="field">
+                <span>Member code</span>
+                <input
+                  className="input"
+                  required
+                  minLength={3}
+                  value={memberCode}
+                  onChange={(event) => setMemberCode(event.target.value)}
+                />
+              </label>
+              <button className="btn btn-secondary" disabled={manual.isPending}>
+                {manual.isPending ? "Recording..." : "Record check-in"}
+              </button>
+              {manual.isError && <p role="alert">{manual.error.message}</p>}
+              {manual.isSuccess && (
+                <p role="status">
+                  {manual.data.data.duplicate
+                    ? "This member is already checked in today."
+                    : "Attendance recorded."}
+                </p>
+              )}
+            </form>
+          </section>
+        )}
       </div>
+      <Modal
+        open={replace}
+        title="Replace gym QR?"
+        onClose={() => {
+          if (!rotate.isPending) setReplace(false);
+        }}
+      >
+        <p>
+          The previous printed or downloaded code will stop working. Display the
+          replacement code at reception.
+        </p>
+        {rotate.isError && <p role="alert">{rotate.error.message}</p>}
+        <button
+          className="btn btn-primary"
+          disabled={rotate.isPending}
+          onClick={() => rotate.mutate()}
+        >
+          {rotate.isPending
+            ? "Replacing..."
+            : "Replace and revoke previous code"}
+        </button>
+      </Modal>
     </div>
   );
 }

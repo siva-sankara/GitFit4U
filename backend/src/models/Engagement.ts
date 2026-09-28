@@ -34,10 +34,14 @@ const classSessionSchema = new Schema(
       default: "SCHEDULED",
     },
     room: String,
+    description: { type: String, maxlength: 3000 },
+    cancelledAt: Date,
+    cancellationReason: { type: String, maxlength: 500 },
   },
   { timestamps: true, versionKey: "version", optimisticConcurrency: true },
 );
 classSessionSchema.index({ gymId: 1, startsAt: 1 });
+classSessionSchema.index({ gymId: 1, status: 1, startsAt: -1 });
 
 const classBookingSchema = new Schema(
   {
@@ -82,6 +86,13 @@ const trainerSchema = new Schema(
     userId: { type: Schema.Types.ObjectId, ref: "User" },
     name: { type: String, required: true },
     photoUrl: String,
+    photoAttachmentId: { type: Schema.Types.ObjectId, ref: "Attachment" },
+    phone: String,
+    email: String,
+    experienceYears: { type: Number, min: 0, max: 70 },
+    availability: [
+      { day: { type: Number, min: 0, max: 6 }, from: String, to: String },
+    ],
     qualifications: [String],
     specializations: [String],
     bio: String,
@@ -120,6 +131,10 @@ const notificationSchema = new Schema(
     title: { type: String, required: true },
     message: { type: String, required: true },
     actionUrl: String,
+    actionLabel: { type: String, maxlength: 80 },
+    source: { type: String, maxlength: 160 },
+    event: { type: String, maxlength: 100 },
+    metadata: { type: Schema.Types.Mixed },
     entityType: {
       type: String,
       enum: [
@@ -153,6 +168,7 @@ const notificationSchema = new Schema(
     pushLeaseId: String,
     pushDeliveredTokens: { type: [String], select: false },
     readAt: Date,
+    archivedAt: Date,
     deliveredAt: Date,
   },
   { timestamps: true },
@@ -163,6 +179,7 @@ notificationSchema.index({
   pushLeaseUntil: 1,
 });
 notificationSchema.index({ userId: 1, readAt: 1, createdAt: -1 });
+notificationSchema.index({ userId: 1, archivedAt: 1, createdAt: -1, _id: -1 });
 notificationSchema.index(
   { userId: 1, dedupeKey: 1 },
   { unique: true, partialFilterExpression: { dedupeKey: { $type: "string" } } },
@@ -187,6 +204,8 @@ const reviewSchema = new Schema(
     title: String,
     body: { type: String, maxlength: 3000 },
     photoUrls: [String],
+    attachmentIds: [{ type: Schema.Types.ObjectId, ref: "Attachment" }],
+    editedAt: Date,
     status: {
       type: String,
       enum: ["PUBLISHED", "PENDING", "HIDDEN", "REMOVED"],
@@ -202,6 +221,7 @@ const reviewSchema = new Schema(
 );
 reviewSchema.index({ gymId: 1, userId: 1 }, { unique: true });
 reviewSchema.index({ gymId: 1, status: 1, createdAt: -1 });
+reviewSchema.index({ attachmentIds: 1 });
 
 const campaignSchema = new Schema(
   {
@@ -209,9 +229,15 @@ const campaignSchema = new Schema(
     gymId: {
       type: Schema.Types.ObjectId,
       ref: "Gym",
-      required: true,
+      required: function (this: any) {
+        return this.scope !== "PLATFORM";
+      },
       index: true,
     },
+    scope: { type: String, enum: ["GYM", "PLATFORM"], default: "GYM" },
+    idempotencyKey: { type: String, sparse: true, unique: true },
+    leaseId: String,
+    leaseUntil: Date,
     createdBy: { type: Schema.Types.ObjectId, ref: "User", required: true },
     name: { type: String, required: true },
     channel: {

@@ -1,6 +1,94 @@
 .notifications-page {
   min-width: 0;
 }
+.notification-preferences > summary {
+  cursor: pointer;
+  font-weight: 650;
+}
+.notification-preferences > summary > span {
+  margin-left: 10px;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-weight: 400;
+}
+.notification-preferences[open] > .notification-preference-row {
+  margin-top: 16px;
+}
+.notification-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+  padding-inline: 12px;
+}
+.notification-row .notification-item {
+  flex: 1;
+  min-width: 0;
+  border-bottom: none;
+  color: var(--text);
+}
+.notification-checkbox {
+  padding: 10px 2px;
+}
+.notification-delete {
+  display: grid;
+  place-items: center;
+  padding: 10px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: 8px;
+}
+.notification-delete:hover {
+  color: var(--text);
+  background: var(--surface-muted);
+}
+.notification-selection,
+.notification-selection label,
+.notification-confirm-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.notification-selection {
+  min-height: 42px;
+  margin-bottom: 8px;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  font-size: 0.8rem;
+}
+.notification-confirm-actions {
+  justify-content: flex-end;
+  margin-top: 20px;
+}
+.notification-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 20px;
+  margin: 18px 0;
+}
+.notification-detail-grid dt {
+  color: var(--text-muted);
+  font-size: 0.74rem;
+}
+.notification-detail-grid dd {
+  margin: 4px 0 0;
+  font-size: 0.9rem;
+}
+.notification-detail h3 {
+  font-size: 0.95rem;
+  margin: 14px 0 8px;
+}
+.notification-detail ul {
+  padding-left: 18px;
+  font-size: 0.85rem;
+}
+.notification-detail li {
+  margin-block: 6px;
+}
+.notifications-page .heading-actions {
+  flex-wrap: wrap;
+}
 .notifications-page .page-heading {
   align-items: flex-start;
   gap: 20px;

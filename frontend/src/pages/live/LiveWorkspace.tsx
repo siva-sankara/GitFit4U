@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { lazy, Suspense, useState } from "react";
+import { Link, Navigate, useLocation } from "react-router-dom";
 import {
   AreaChart,
   Area,
@@ -14,6 +14,7 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { useCurrentUser } from "../../api/hooks";
 import { Modal } from "../../components/Modal";
+import { Avatar } from "../../components/Avatar";
 import { apiRequest, setAccessToken } from "../../services/apiClient";
 import {
   useData,
@@ -29,15 +30,67 @@ import {
   type Field,
   type Row,
 } from "./LiveData";
-import { OwnerScannerPage } from "../owner/OwnerScannerPage";
 import { GymProfileEditor } from "../owner/GymProfileEditor";
-import { AttendanceQrPage } from "../user/AttendanceQrPage";
+import { OwnerClassManagement } from "../owner/OwnerClassManagement";
+import { UserClassesPage } from "../user/UserClassesPage";
+import { PlatformSubscriptionPage } from "../owner/PlatformSubscriptionPage";
 import { NotificationsApiPage } from "../shared/NotificationsApiPage";
 import { MessagesPage } from "../shared/MessagesPage";
+import { SupportTicketsPage } from "../shared/SupportTicketsPage";
+import { ProfileHub } from "../user/ProfileHub";
+import { AttendancePage, StreakKpi } from "../user/AttendancePage";
+import { InvoiceDownload } from "../../components/InvoiceDownload";
+import { PromotionPlacement } from "../../components/PromotionPlacement";
+import { PromotionManagement } from "../promotions/PromotionManagement";
 import { RegisterGymPage } from "../public/RegisterGymPage";
 import { MemberSubscriptions } from "../user/MemberSubscriptions";
+import { OwnerMembersPage } from "../owner/OwnerMembersPage";
+import { OwnerMemberDetailsPage } from "../owner/OwnerMemberDetailsPage";
+import { OwnerTrainersPage } from "../owner/OwnerTrainersPage";
+import {
+  AdminAccounts,
+  AdminMembers,
+  AdminTrainers,
+  AdminMembershipPlans,
+  AdminMemberships,
+  AdminSettings,
+  MembershipActions,
+  RefundAction,
+  GymStatusAction,
+} from "../admin/AdminManagement";
 import { StatusBadge } from "../../components/StatusBadge";
 import "../../styles/member-workspace.css";
+
+const OwnerDashboardPage = lazy(() =>
+  import("../owner/OwnerDashboardPage").then((module) => ({
+    default: module.OwnerDashboardPage,
+  })),
+);
+const RevenuePage = lazy(() =>
+  import("../owner/RevenuePage").then((module) => ({
+    default: module.RevenuePage,
+  })),
+);
+const AdminBroadcastPage = lazy(() =>
+  import("../shared/AdminBroadcastPage").then((module) => ({
+    default: module.AdminBroadcastPage,
+  })),
+);
+const OwnerScannerPage = lazy(() =>
+  import("../owner/OwnerScannerPage").then((module) => ({
+    default: module.OwnerScannerPage,
+  })),
+);
+const SocialProfilePage = lazy(() =>
+  import("../user/SocialProfilePage").then((module) => ({
+    default: module.SocialProfilePage,
+  })),
+);
+const AttendanceQrPage = lazy(() =>
+  import("../user/AttendanceQrPage").then((module) => ({
+    default: module.AttendanceQrPage,
+  })),
+);
 
 const col = (
   key: string,
@@ -84,10 +137,13 @@ const subscriptionCols = [
   col("gymId.name", "Gym"),
   col("userId.name", "Member"),
   col("planSnapshot.name", "Plan"),
-  col("startsAt", "Start", "date"),
-  col("endsAt", "End", "date"),
+  { ...col("startsAt", "Start"), render: (row: Row) => membershipDate(row.startsAt, row.gymId?.timezone) },
+  { ...col("endsAt", "End"), render: (row: Row) => membershipDate(row.endsAt, row.gymId?.timezone) },
   status,
 ];
+function membershipDate(value?: string, timezone = "Asia/Kolkata") {
+  return value && Number.isFinite(Date.parse(value)) ? new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: timezone }).format(new Date(value)) : "—";
+}
 const classCols = [
   name,
   col("gymId.name", "Gym"),
@@ -211,6 +267,7 @@ function Dashboard() {
             ))}
         </section>
       </QueryState>
+      {role === "USER" && <><StreakKpi /><PromotionPlacement placement="DASHBOARD" /></>}
       {canReadSummary && (
         <QueryState query={summary}>
           <section className="dashboard-chart-grid">
@@ -263,7 +320,7 @@ function Dashboard() {
             <Link className="btn btn-primary" to="/app/explore">
               Find a gym
             </Link>
-            <Link className="btn btn-secondary" to="/app/subscriptions">
+            <Link className="btn btn-secondary" to="/app/profile?section=membership">
               Memberships and QR
             </Link>
             <Link className="btn btn-secondary" to="/app/classes">
@@ -285,7 +342,7 @@ function Dashboard() {
           <>
             {permissions.includes("attendance:scan") && (
               <Link className="btn btn-primary" to="/owner/scanner">
-                Open scanner
+                View gym QR
               </Link>
             )}
             {permissions.includes("member:read") && (
@@ -296,74 +353,6 @@ function Dashboard() {
           </>
         )}
       </div>
-    </div>
-  );
-}
-function Profile() {
-  const query = useData<Row>("/api/v1/users/me");
-  const data = query.data?.data;
-  return (
-    <div className="page-stack">
-      <Heading title="Your profile" />
-      <QueryState query={query}>
-        {data && (
-          <section className="panel form-section">
-            <p>
-              {data.email || "Email not added"} ·{" "}
-              {data.phone || "Phone not added"}
-            </p>
-            <p>Joined {date(data.createdAt)}</p>
-            <EditForm
-              key={data.updatedAt}
-              endpoint="/api/v1/users/me"
-              method="PATCH"
-              initial={data}
-              fields={[
-                field("name", "Full name"),
-                field("profile.dateOfBirth", "Date of birth", "date", false),
-                {
-                  ...select(
-                    "profile.gender",
-                    ["MALE", "FEMALE", "NON_BINARY", "PREFER_NOT_TO_SAY"],
-                    "Gender",
-                  ),
-                  required: false,
-                },
-                field("profile.fitnessGoal", "Fitness goal", "text", false),
-                {
-                  ...field("profile.heightCm", "Height (cm)", "number", false),
-                  min: 50,
-                  max: 260,
-                },
-                {
-                  ...field("profile.weightKg", "Weight (kg)", "number", false),
-                  min: 20,
-                  max: 400,
-                },
-                field(
-                  "profile.emergencyContact.name",
-                  "Emergency contact",
-                  "text",
-                  false,
-                ),
-                field(
-                  "profile.emergencyContact.phone",
-                  "Emergency phone",
-                  "text",
-                  false,
-                ),
-                field(
-                  "profile.emergencyContact.relationship",
-                  "Relationship",
-                  "text",
-                  false,
-                ),
-              ]}
-            />
-          </section>
-        )}
-      </QueryState>
-      <Security />
     </div>
   );
 }
@@ -415,205 +404,6 @@ function GymProfile() {
     <>
       <GymProfileEditor classFields={classFields} planFields={planFields} />
       <Security />
-    </>
-  );
-}
-function MemberDetails({ id }: { id: string }) {
-  const query = useData<Row>(`/api/v1/owner/members/${encodeURIComponent(id)}`);
-  const data = query.data?.data;
-  return (
-    <div className="page-stack">
-      <Link to="/owner/members">Back to members</Link>
-      <QueryState query={query}>
-        {data && (
-          <>
-            <Heading
-              title={data.member.userId?.name || data.member.memberCode}
-            />
-            <section className="panel form-section">
-              <p>
-                {data.member.userId?.email} · {data.member.userId?.phone}
-              </p>
-              <EditForm
-                endpoint={`/api/v1/workspace/members/${id}`}
-                method="PATCH"
-                initial={data.member}
-                fields={[
-                  field("fitnessGoal", "Fitness goal", "text", false),
-                  {
-                    ...field(
-                      "assignedTrainerId",
-                      "Assigned trainer",
-                      "select",
-                      false,
-                    ),
-                    source: "/api/v1/workspace/records/trainers?limit=100",
-                  },
-                  select("status", [
-                    "ACTIVE",
-                    "INACTIVE",
-                    "SUSPENDED",
-                    "ARCHIVED",
-                  ]),
-                ]}
-              />
-              <Action
-                path="/api/v1/conversations"
-                body={{
-                  type: "DIRECT",
-                  participantIds: [data.member.userId._id],
-                }}
-                onDone={() => window.location.assign("/owner/messages")}
-              >
-                Start conversation
-              </Action>
-            </section>
-            <section className="panel">
-              <h2>Payments</h2>
-              <Table rows={data.payments} columns={paymentCols} />
-            </section>
-            <section className="panel">
-              <h2>Attendance</h2>
-              <Table
-                rows={data.attendance}
-                columns={[
-                  col("occurredAt", "Time", "date"),
-                  col("type", "Event", "status"),
-                  col("source", "Source"),
-                ]}
-              />
-            </section>
-          </>
-        )}
-      </QueryState>
-    </div>
-  );
-}
-function Classes() {
-  const sessions = useData<Row[]>("/api/v1/users/classes"),
-    bookings = useData<Row[]>("/api/v1/workspace/records/bookings?limit=100");
-  const [day, setDay] = useState("");
-  return (
-    <div className="page-stack">
-      <Heading title="Classes and bookings" />
-      <label className="field">
-        <span>Filter by date</span>
-        <input
-          className="input"
-          type="date"
-          value={day}
-          onChange={(e) => setDay(e.target.value)}
-        />
-      </label>
-      <QueryState query={sessions}>
-        <section className="panel">
-          <Table
-            rows={(sessions.data?.data || []).filter(
-              (r) => !day || String(r.startsAt).startsWith(day),
-            )}
-            columns={classCols}
-            actions={(row) => {
-              const booking = bookings.data?.data.find(
-                (b) => b.sessionId?._id === row._id && b.status === "BOOKED",
-              );
-              return booking ? (
-                <Action
-                  method="DELETE"
-                  path={`/api/v1/users/classes/${row.publicId}/bookings/${booking._id}`}
-                >
-                  Cancel booking
-                </Action>
-              ) : row.bookedCount < row.capacity ? (
-                <Action path={`/api/v1/users/classes/${row.publicId}/bookings`}>
-                  Book class
-                </Action>
-              ) : (
-                <span>Full</span>
-              );
-            }}
-          />
-        </section>
-      </QueryState>
-      <QueryState query={bookings}>
-        <section className="panel">
-          <h2>Your bookings</h2>
-          <Table
-            rows={bookings.data?.data || []}
-            columns={[
-              col("sessionId.name", "Class"),
-              col("sessionId.startsAt", "Starts", "date"),
-              status,
-            ]}
-          />
-        </section>
-      </QueryState>
-    </div>
-  );
-}
-function Support() {
-  const me = useCurrentUser();
-  const [ticket, setTicket] = useState<Row | null>(null);
-  return (
-    <>
-      <ResourcePage
-        title="Support tickets"
-        resource="support"
-        columns={[
-          col("subject", "Subject"),
-          col("requesterId.name", "Requester"),
-          col("priority", "Priority", "status"),
-          status,
-          created,
-        ]}
-        createPath="/api/v1/users/me/support-tickets"
-        fields={[
-          field("subject"),
-          field("message", "Describe the issue", "textarea"),
-          select("priority", ["LOW", "NORMAL", "HIGH", "URGENT"]),
-        ]}
-        actions={(row) => (
-          <button className="btn btn-secondary" onClick={() => setTicket(row)}>
-            Open thread
-          </button>
-        )}
-      />
-      <Modal
-        open={!!ticket}
-        title={ticket?.subject || "Support"}
-        onClose={() => setTicket(null)}
-      >
-        {ticket && (
-          <>
-            {ticket.messages?.map((m: Row, i: number) => (
-              <p key={i}>
-                {m.body}
-                <small> · {date(m.createdAt)}</small>
-              </p>
-            ))}
-            <EditForm
-              endpoint={`/api/v1/workspace/support/${ticket.publicId}/replies`}
-              fields={[
-                field("message", "Reply", "textarea"),
-                {
-                  ...select("status", [
-                    "OPEN",
-                    "IN_PROGRESS",
-                    "WAITING_FOR_USER",
-                    "RESOLVED",
-                    "CLOSED",
-                  ]),
-                  required: false,
-                },
-              ].filter(
-                (f) =>
-                  f.key !== "status" ||
-                  me.data?.data?.context?.role === "ADMIN",
-              )}
-              onSaved={() => setTicket(null)}
-            />
-          </>
-        )}
-      </Modal>
     </>
   );
 }
@@ -753,7 +543,7 @@ function TrainerClients() {
         title="Assigned clients"
         resource="members"
         columns={[
-          col("userId.name", "Name"),
+          { ...col("userId.name", "Name"), render: row => <span className="member-identity-inline"><Avatar user={row.userId} name={row.contact?.name} src={row.contact?.avatarUrl} thumbnailSrc={row.contact?.avatarThumbnailUrl} /><span>{row.contact?.name || row.userId?.name || "Member"}</span></span> },
           col("memberCode"),
           col("fitnessGoal", "Goal"),
           status,
@@ -896,22 +686,98 @@ export function LiveWorkspace() {
   const can = (p: string) => role === "admin" || permissions.includes(p);
   if (page === "notifications") return <NotificationsApiPage />;
   if (page === "messages") return <MessagesPage />;
-  if (page === "support") return <Support />;
+  if (page === "support") return <SupportTicketsPage />;
+  if (role === "app" && ["favorites", "payments", "invoices", "workouts", "subscriptions", "referrals"].includes(page)) {
+    const section = page === "invoices" ? "payments" : page === "subscriptions" ? "membership" : page;
+    return <Navigate to={`/app/profile?section=${section}`} replace />;
+  }
+  if (["owner", "admin"].includes(role) && (page === "offers" || page === "ads")) return <PromotionManagement kind={page} admin={role === "admin"} />;
   if (page === "security") return <Security />;
-  if (page === "profile" || (role === "admin" && page === "settings"))
-    return <Profile />;
+  if (role === "admin") {
+    if (page === "settings") return <AdminSettings />;
+    if (page === "broadcasts") return <AdminBroadcastPage />;
+    if (page === "notification-delivery")
+      return (
+        <ResourcePage
+          title="Notification delivery"
+          resource="notifications"
+          columns={[
+            col("userId.name", "Recipient"),
+            col("title", "Title"),
+            col("category", "Category"),
+            col("pushStatus", "Push delivery", "status"),
+            col("createdAt", "Created", "date"),
+          ]}
+          actions={(row) =>
+            !row.archivedAt && (
+              <Action
+                path={`/api/v1/admin/notifications/${row._id}/archive`}
+                confirmMessage="Archive this notification and stop pending push delivery?"
+              >
+                Archive
+              </Action>
+            )
+          }
+        />
+      );
+    if (page === "users" || page === "owners")
+      return <AdminAccounts owners={page === "owners"} />;
+    if (page === "members") return <AdminMembers />;
+    if (page === "trainers") return <AdminTrainers />;
+    if (page === "membership-plans") return <AdminMembershipPlans />;
+    if (page === "memberships" || page === "subscriptions")
+      return <AdminMemberships />;
+  }
+  if (role === "owner") {
+    if (page === "members" && path[2])
+      return <OwnerMemberDetailsPage id={path[2]} />;
+    if (page === "members") return <OwnerMembersPage />;
+    if (page === "trainers") return <OwnerTrainersPage />;
+  }
+  if (page === "profile" && !(role === "profile" ? path[1] : path[2]) && me.data?.data.context.role === "USER") return <ProfileHub security={<Security />} />;
+  if (page === "profile")
+    return (
+      <Suspense fallback={<p role="status">Loading profile…</p>}>
+        <SocialProfilePage profileId={role === "profile" ? path[1] : path[2]} />
+      </Suspense>
+    );
+  if (role === "owner" && ["home", "dashboard"].includes(page))
+    return <OwnerDashboardPage />;
   if (page === "invoices") return <Invoices />;
   if (page === "home" || page === "dashboard" || page === "reports")
     return <Dashboard />;
-  if (page === "scanner") return <OwnerScannerPage />;
-  if (page === "attendance" && path[2] === "qr") return <AttendanceQrPage />;
+  if (page === "scanner")
+    return (
+      <Suspense
+        fallback={
+          <section className="state-card" role="status">
+            Loading gym QR…
+          </section>
+        }
+      >
+        <OwnerScannerPage />
+      </Suspense>
+    );
+  if (page === "attendance" && path[2] === "qr")
+    return (
+      <Suspense
+        fallback={
+          <section className="state-card" role="status">
+            Loading attendance scanner…
+          </section>
+        }
+      >
+        <AttendanceQrPage />
+      </Suspense>
+    );
+  if (page === "attendance" && role === "app") return <AttendancePage />;
   if (page === "attendance")
     return (
       <ResourcePage
         title="Attendance"
         resource="attendance"
         columns={[
-          col("userId.name", "Member"),
+          { ...col("userId.name", "Member"), render: row => <span className="member-identity-inline"><Avatar user={row.userId} name={row.memberProfileId?.contact?.name} src={row.memberProfileId?.contact?.avatarUrl} thumbnailSrc={row.memberProfileId?.contact?.avatarThumbnailUrl} /><span>{row.memberProfileId?.contact?.name || row.userId?.name || "Member"}</span></span> },
           col("gymId.name", "Gym"),
           col("occurredAt", "Time", "date"),
           col("localDate", "Gym date"),
@@ -923,7 +789,7 @@ export function LiveWorkspace() {
   if (role === "app") {
     if (page === "subscriptions" || page === "checkout")
       return <MemberSubscriptions />;
-    if (page === "classes") return <Classes />;
+    if (page === "classes") return <UserClassesPage />;
     if (page === "favorites")
       return (
         <ResourcePage
@@ -981,6 +847,11 @@ export function LiveWorkspace() {
       <ResourcePage
         title={label(page)}
         resource={page}
+        actions={
+          page === "payments"
+            ? (row) => <><InvoiceDownload payment={row as { publicId: string; status: string }} />{role === "admin" && <RefundAction payment={row} />}</>
+            : undefined
+        }
         columns={
           page === "payments"
             ? paymentCols
@@ -999,38 +870,27 @@ export function LiveWorkspace() {
       <ResourcePage
         title="Subscriptions"
         resource="subscriptions"
+        actions={
+          role === "owner" && me.data?.data.context.role === "GYM_OWNER" && can("member:write")
+            ? (row) => <MembershipActions row={row} />
+            : undefined
+        }
         columns={subscriptionCols}
         statuses={[
           "ACTIVE",
           "EXPIRED",
           "FROZEN",
+          "DEACTIVATED",
           "CANCELLED",
           "PENDING_PAYMENT",
         ]}
       />
     );
   if (role === "owner") {
-    if (page === "gym-profile" || page === "settings") return <GymProfile />;
-    if (page === "members" && path[2]) return <MemberDetails id={path[2]} />;
-    if (page === "members")
-      return (
-        <ResourcePage
-          title="Members"
-          resource="members"
-          columns={memberCols.filter(
-            (column) =>
-              !column.key.includes("latestPaymentId") || can("finance:read"),
-          )}
-          createPath={can("member:write") ? "/api/v1/owner/members" : undefined}
-          fields={[
-            field("name", "Full name"),
-            field("phone", "Phone", "text", false),
-            field("email", "Email", "email", false),
-            field("fitnessGoal", "Fitness goal", "text", false),
-          ]}
-          statuses={["ACTIVE", "INACTIVE", "SUSPENDED", "ARCHIVED"]}
-        />
-      );
+    if (page === "settings")
+      return <Navigate to="/owner/gym-profile" replace />;
+    if (page === "gym-profile") return <GymProfile />;
+    if (page === "platform-subscription") return <PlatformSubscriptionPage />;
     if (page === "plans")
       return (
         <ResourcePage
@@ -1052,51 +912,7 @@ export function LiveWorkspace() {
           }
         />
       );
-    if (page === "classes")
-      return (
-        <ResourcePage
-          title="Classes"
-          resource="classes"
-          columns={classCols}
-          fields={classFields}
-          createPath={can("class:write") ? "/api/v1/owner/classes" : undefined}
-          updatePath={
-            can("class:write")
-              ? (r) => `/api/v1/workspace/classes/${r.publicId}`
-              : undefined
-          }
-        />
-      );
-    if (page === "trainers")
-      return (
-        <ResourcePage
-          title="Trainers"
-          resource="trainers"
-          columns={[
-            name,
-            col("qualifications"),
-            col("specializations"),
-            status,
-          ]}
-          createPath={can("class:write") ? "/api/v1/owner/trainers" : undefined}
-          fields={[
-            field("name"),
-            field("email", "Existing account email", "email"),
-            field(
-              "qualifications",
-              "Qualifications (one per line)",
-              "lines",
-              false,
-            ),
-            field(
-              "specializations",
-              "Specializations (one per line)",
-              "lines",
-              false,
-            ),
-          ]}
-        />
-      );
+    if (page === "classes") return <OwnerClassManagement />;
     if (page === "campaigns" || page === "whatsapp")
       return (
         <ResourcePage
@@ -1164,7 +980,7 @@ export function LiveWorkspace() {
     if (page === "revenue")
       return (
         <>
-          <Dashboard />
+          <RevenuePage />
           <ResourcePage
             title="Settlements"
             resource="settlements"
@@ -1227,6 +1043,14 @@ export function LiveWorkspace() {
         <ResourcePage
           title="Gyms"
           resource="gyms"
+          fields={[
+            field("name", "Gym name"),
+            field("description", "Description", "textarea", false),
+            field("address.city", "City", "text", false),
+            field("contact.phone", "Phone", "text", false),
+            field("contact.email", "Email", "email", false),
+          ]}
+          updatePath={(row) => `/api/v1/admin/gyms/${row.publicId}`}
           columns={[
             name,
             col("ownerId.name", "Owner"),
@@ -1234,22 +1058,7 @@ export function LiveWorkspace() {
             col("platformSubscriptionStatus", "Platform plan"),
             status,
           ]}
-          actions={(r) => (
-            <Action
-              path={`/api/v1/admin/gyms/${r.publicId}/${r.status === "SUSPENDED" ? "activate" : "suspend"}`}
-              body={{ reason: "Administrator changed gym availability" }}
-            >
-              {r.status === "SUSPENDED" ? "Reactivate" : "Suspend"}
-            </Action>
-          )}
-        />
-      );
-    if (page === "users" || page === "owners")
-      return (
-        <ResourcePage
-          title={label(page)}
-          resource={page}
-          columns={[name, col("email"), col("phone"), status, created]}
+          actions={(r) => <GymStatusAction gym={r} />}
         />
       );
     if (page === "platform-plans")

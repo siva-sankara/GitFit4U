@@ -6,10 +6,12 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { Link, useLocation, useParams } from "react-router-dom";
+import { useData, type Row } from "../live/LiveData";
 
 export function InfoPage({ type }: { type: "help" | "contact" | "legal" }) {
   const { document } = useParams();
   const location = useLocation();
+  const settings = useData<Row>("/api/v1/public/settings");
   const workspace = /^\/(app|owner|trainer|admin)\//.exec(
     location.pathname,
   )?.[1];
@@ -66,6 +68,11 @@ export function InfoPage({ type }: { type: "help" | "contact" | "legal" }) {
         access.
       </p>
       <div className="help-grid">
+        {settings.data?.data.maintenanceNotice && (
+          <p role="status" className="panel">
+            {settings.data.data.maintenanceNotice}
+          </p>
+        )}
         <article className="panel">
           <span>
             <CircleHelp size={23} />
@@ -99,9 +106,32 @@ export function InfoPage({ type }: { type: "help" | "contact" | "legal" }) {
           </span>
           <h2>Email</h2>
           <p>For general enquiries and documented follow-up.</p>
-          <a className="btn btn-secondary" href="mailto:support@getfit4u.in">
-            support@getfit4u.in
-          </a>
+          {settings.data?.data.supportEmail ? (
+            <a
+              className="btn btn-secondary"
+              href={`mailto:${settings.data.data.supportEmail}`}
+            >
+              {settings.data.data.supportEmail}
+            </a>
+          ) : (
+            <Link className="btn btn-secondary" to={supportPath}>
+              Message support
+            </Link>
+          )}
+          {settings.data?.data.supportPhone && (
+            <a
+              className="btn btn-secondary"
+              href={`tel:${settings.data.data.supportPhone}`}
+            >
+              {settings.data.data.supportPhone}
+            </a>
+          )}
+          {settings.isError && (
+            <p role="alert">
+              Contact settings could not be loaded. You can still use support
+              messaging.
+            </p>
+          )}
         </article>
       </div>
       <div className="privacy-note">

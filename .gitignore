@@ -1,0 +1,16 @@
+# Local secrets and generated outputs; configuration examples contain names only.
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+node_modules/
+dist/
+coverage/
+*.log
+*.tsbuildinfo
+*service-account*.json
+*service_account*.json
+*.pem
+*.key

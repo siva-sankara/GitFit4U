@@ -12,6 +12,7 @@ import { apiRequest, getAccessToken } from "./apiClient";
 import type { NotificationAlert } from "./notificationAlerts";
 const preference = "gfu_push_enabled",
   tokenKey = "gfu_push_token";
+const deviceKey = "gfu_push_device";
 export const pushOptedIn = () => localStorage.getItem(preference) === "true";
 export { firebaseConfigured };
 export async function pushSupported() {
@@ -52,10 +53,12 @@ export function syncPushToken() {
     if (!registration.active)
       await new Promise<void>((resolve, reject) => {
         const worker = registration.installing || registration.waiting;
-        if (!worker)
-          return reject(
+        if (!worker) {
+          reject(
             new Error("Notification service could not start. Please retry."),
           );
+          return;
+        }
         const timer = window.setTimeout(() => {
           worker.removeEventListener("statechange", changed);
           reject(new Error("Notification setup timed out. Please retry."));
@@ -83,9 +86,11 @@ export function syncPushToken() {
       );
     if (session !== getAccessToken() || !pushOptedIn()) return;
     const previousToken = localStorage.getItem(tokenKey);
+    const deviceId = localStorage.getItem(deviceKey) || crypto.randomUUID();
+    localStorage.setItem(deviceKey, deviceId);
     await apiRequest("/api/v1/devices", {
       method: "POST",
-      body: JSON.stringify({ token, platform: "WEB" }),
+      body: JSON.stringify({ token, platform: "WEB", deviceId }),
     });
     localStorage.setItem(tokenKey, token);
     if (previousToken && previousToken !== token)
@@ -148,6 +153,7 @@ export async function listenForPush(
         payload.data?.title ||
         "New notification",
       message: payload.notification?.body || payload.data?.body,
+      actionUrl: payload.data?.navigationPath,
     });
   });
 }

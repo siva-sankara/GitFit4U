@@ -2,6 +2,8 @@
 import { z } from "zod";
 import { Gym } from "../models/Gym.js";
 import { withGymMedia } from "../services/gymMediaService.js";
+import { withUserMedia, withTrainerMedia } from "../services/userMediaService.js";
+import { withReviewMedia } from "../services/reviewMediaService.js";
 import { MembershipPlan } from "../models/Commerce.js";
 import { ClassSession, Review, Trainer } from "../models/Engagement.js";
 import { paginationFromQuery, pageMeta } from "../utils/pagination.js";
@@ -11,7 +13,7 @@ export const publicEligibility = {
   platformSubscriptionStatus: "ACTIVE",
 };
 const fields =
-  "publicId name slug logoUrl coverImageUrl mediaAttachmentIds coverAttachmentId facilities address location rating startingPriceMinor currency openingHours timezone";
+  "publicId name slug logoUrl logoAttachmentId coverImageUrl mediaAttachmentIds coverAttachmentId facilities address location rating startingPriceMinor currency openingHours timezone";
 function literal(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -121,11 +123,14 @@ export async function gymDetails(req: Request, res: Response) {
       .limit(100)
       .lean(),
     Trainer.find({ gymId: gym._id, status: "ACTIVE" })
-      .select("publicId name photoUrl qualifications specializations bio")
+      .select("publicId name photoUrl photoAttachmentId qualifications specializations bio")
       .limit(100)
       .lean(),
     Review.find({ gymId: gym._id, status: "PUBLISHED" })
-      .select("publicId rating title body createdAt ownerResponse")
+      .select(
+        "publicId userId rating title body attachmentIds photoUrls createdAt editedAt ownerResponse",
+      )
+      .populate("userId", "publicId name avatarUrl avatarAttachmentId")
       .sort({ createdAt: -1 })
       .limit(100)
       .lean(),
@@ -136,8 +141,49 @@ export async function gymDetails(req: Request, res: Response) {
       gym: (await withGymMedia([gym]))[0],
       plans,
       classes,
-      trainers,
-      reviews,
+      trainers: await withTrainerMedia(trainers),
+      reviews: await reviewsWithAvatars(reviews),
+    },
+  });
+}
+
+async function reviewsWithAvatars(reviews: any[]) {
+  const people = await withUserMedia(reviews.map(review => review.userId).filter(Boolean));
+  return withReviewMedia(reviews.map(review => ({ ...review, userId: people.find(person => String(person._id) === String(review.userId?._id)) || review.userId })));
+}
+export async function gymReviews(req: Request, res: Response) {
+  const gym = await Gym.findOne({
+    slug: req.params.slug,
+    ...publicEligibility,
+  }).select("_id");
+  if (!gym)
+    throw new AppError(404, "GYM_NOT_FOUND", "This gym is not available.");
+  const { page, limit, skip } = paginationFromQuery(req.query);
+  const filter = { gymId: gym._id, status: "PUBLISHED" };
+  const [data, total, distribution] = await Promise.all([
+    Review.find(filter)
+      .select(
+        "publicId userId rating title body attachmentIds photoUrls createdAt editedAt ownerResponse",
+      )
+      .populate("userId", "publicId name avatarUrl avatarAttachmentId")
+      .sort({ createdAt: -1, _id: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean(),
+    Review.countDocuments(filter),
+    Review.aggregate([
+      { $match: filter },
+      { $group: { _id: "$rating", count: { $sum: 1 } } },
+    ]),
+  ]);
+  res.json({
+    success: true,
+    data: await reviewsWithAvatars(data),
+    meta: {
+      ...pageMeta(page, limit, total),
+      distribution: Object.fromEntries(
+        distribution.map((row: any) => [String(row._id), row.count]),
+      ),
     },
   });
 }

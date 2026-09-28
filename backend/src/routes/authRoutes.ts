@@ -4,8 +4,10 @@ import { z } from "zod";
 import * as controller from "../controllers/authController.js";
 import { requireAuth } from "../middleware/auth.js";
 import { validate } from "../middleware/validate.js";
+import { requireCsrfProtection } from "../middleware/csrf.js";
 
 export const authRoutes = Router();
+authRoutes.use(requireCsrfProtection);
 
 const otpLimiter = rateLimit({ windowMs: 15 * 60_000, limit: 20, standardHeaders: true, legacyHeaders: false });
 const loginLimiter = rateLimit({ windowMs: 15 * 60_000, limit: 10, standardHeaders: true, legacyHeaders: false });

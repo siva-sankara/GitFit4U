@@ -85,6 +85,8 @@ const planQuoteSchema = new Schema(
     totalMinor: { type: Number, required: true },
     currency: { type: String, default: "INR" },
     couponCode: String,
+    offerId: { type: Schema.Types.ObjectId, ref: "Offer" },
+    pricingSnapshot: { type: Schema.Types.Mixed, immutable: true },
     expiresAt: { type: Date, required: true },
   },
   { timestamps: true },
@@ -119,6 +121,7 @@ const subscriptionSchema = new Schema(
         "PENDING_PAYMENT",
         "ACTIVE",
         "FROZEN",
+        "DEACTIVATED",
         "GRACE",
         "EXPIRED",
         "CANCELLED",
@@ -131,13 +134,30 @@ const subscriptionSchema = new Schema(
     renewalAt: Date,
     cancelledAt: Date,
     cancellationReason: String,
-    freezePeriods: [{ startsAt: Date, endsAt: Date, reason: String }],
+    cancelledBy: { type: Schema.Types.ObjectId, ref: "User" },
+    deactivatedAt: Date,
+    deactivatedBy: { type: Schema.Types.ObjectId, ref: "User" },
+    deactivationReason: String,
+    reactivatedAt: Date,
+    reactivatedBy: { type: Schema.Types.ObjectId, ref: "User" },
+    reactivationReason: String,
+    freezePeriods: [
+      {
+        startsAt: Date,
+        endsAt: Date,
+        reason: String,
+        extendedDays: Number,
+        resumedAt: Date,
+      },
+    ],
     latestPaymentId: { type: Schema.Types.ObjectId, ref: "Payment" },
   },
   { timestamps: true, versionKey: "version", optimisticConcurrency: true },
 );
 subscriptionSchema.index({ userId: 1, status: 1, endsAt: 1 });
 subscriptionSchema.index({ gymId: 1, status: 1, endsAt: 1 });
+subscriptionSchema.index({ gymId: 1, type: 1, "planSnapshot.planId": 1 });
+subscriptionSchema.index({ type: 1, status: 1, endsAt: 1, _id: 1 });
 
 const subscriptionEventSchema = new Schema(
   {
@@ -174,8 +194,15 @@ const paymentSchema = new Schema(
     quoteId: { type: Schema.Types.ObjectId, ref: "PlanQuote" },
     subscriptionId: { type: Schema.Types.ObjectId, ref: "Subscription" },
     amountMinor: { type: Number, required: true, min: 0 },
+    pricingSnapshot: { type: Schema.Types.Mixed, immutable: true },
+    offerId: { type: Schema.Types.ObjectId, ref: "Offer", immutable: true },
+    offerReservationStatus: { type: String, enum: ["RESERVED", "REDEEMED"] },
     currency: { type: String, default: "INR" },
-    provider: { type: String, enum: ["RAZORPAY"], default: "RAZORPAY" },
+    provider: {
+      type: String,
+      enum: ["RAZORPAY", "OFFLINE"],
+      default: "RAZORPAY",
+    },
     providerOrderId: { type: String, unique: true, sparse: true },
     providerPaymentId: { type: String, unique: true, sparse: true },
     status: {
@@ -206,6 +233,7 @@ const paymentSchema = new Schema(
 );
 paymentSchema.index({ payerId: 1, createdAt: -1 });
 paymentSchema.index({ gymId: 1, status: 1, createdAt: -1 });
+paymentSchema.index({ offerId: 1, offerReservationStatus: 1, payerId: 1 });
 
 const providerEventSchema = new Schema(
   {

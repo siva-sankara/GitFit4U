@@ -4,9 +4,8 @@ import helmet from "helmet";
 import compression from "compression";
 import cookieParser from "cookie-parser";
 import rateLimit from "express-rate-limit";
-import { pinoHttp } from "pino-http";
 import { env } from "./config/env.js";
-import { logger } from "./config/logger.js";
+import { httpLogging } from "./middleware/httpLogging.js";
 import { razorpayWebhook } from "./controllers/checkoutController.js";
 import { apiRoutes } from "./routes/index.js";
 import { requestContext } from "./middleware/requestContext.js";
@@ -20,16 +19,7 @@ export const app = express();
 app.disable("x-powered-by");
 app.set("trust proxy", 1);
 app.use(requestContext);
-app.use(
-  pinoHttp({
-    logger,
-    redact: [
-      "req.headers.authorization",
-      "req.headers.cookie",
-      "res.headers.set-cookie",
-    ],
-  }),
-);
+app.use(httpLogging);
 app.use(
   helmet({
     contentSecurityPolicy: false,
@@ -46,6 +36,7 @@ app.use(
       "authorization",
       "idempotency-key",
       "x-request-id",
+      "x-csrf-protection",
     ],
   }),
 );

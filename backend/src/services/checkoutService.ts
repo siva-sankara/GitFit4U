@@ -10,19 +10,16 @@ import {
   payableGym,
 } from "./registrationService.js";
 import { paymentProvider } from "../integrations/payments/index.js";
+import { validatePlatformRenewalOrder } from "./platformRenewalService.js";
+import { calculateMembershipPricing, findEligibleOffer, reserveQuoteOffer } from "./promotionService.js";
 
 export async function createMembershipQuote(input: {
   userId: string;
   gymId: string;
   planId: string;
   couponCode?: string;
+  offerId?: string;
 }) {
-  if (input.couponCode)
-    throw new AppError(
-      422,
-      "COUPON_UNAVAILABLE",
-      "Coupon redemption is not available for this checkout.",
-    );
   const [gym, plan] = await Promise.all([
     Gym.findOne({
       _id: input.gymId,
@@ -42,13 +39,11 @@ export async function createMembershipQuote(input: {
       "This membership plan is not available.",
     );
 
-  const subtotalMinor = plan.priceMinor;
-  const discountMinor = Math.min(plan.discountMinor || 0, subtotalMinor);
-  const taxableMinor = subtotalMinor - discountMinor;
-  const taxMinor = Math.round(
-    (taxableMinor * (plan.taxRateBasisPoints || 0)) / 10_000,
-  );
-  const totalMinor = taxableMinor + taxMinor;
+  const offer = await findEligibleOffer({ ...input, plan });
+  const pricingSnapshot = calculateMembershipPricing(plan, offer);
+  const { subtotalMinor, discountMinor, taxMinor, totalMinor } = pricingSnapshot;
+  if (totalMinor < 100)
+    throw new AppError(422, "MINIMUM_ONLINE_PAYMENT", "Online checkout requires a final amount of at least INR 1. Contact the gym for a free membership.");
   const quote = await PlanQuote.create({
     publicId: nanoid(24),
     purchaserId: input.userId,
@@ -72,7 +67,9 @@ export async function createMembershipQuote(input: {
     taxMinor,
     totalMinor,
     currency: plan.currency,
-    couponCode: input.couponCode,
+    couponCode: offer?.code || offer?.publicId,
+    offerId: offer?._id,
+    pricingSnapshot,
     expiresAt: new Date(Date.now() + 15 * 60_000),
   });
   return quote;
@@ -105,7 +102,9 @@ export async function createCheckoutOrder(input: {
         "This quote has expired. Refresh the price.",
       );
     let registration: any;
-    if (quote.planSnapshot?.type === "PLATFORM") {
+    if (quote.planSnapshot?.type === "PLATFORM" && quote.planSnapshot?.renewal) {
+      await validatePlatformRenewalOrder(quote, input.userId, session);
+    } else if (quote.planSnapshot?.type === "PLATFORM") {
       registration = await GymRegistration.findOne({
         publicId: quote.planSnapshot.registrationId,
         ownerId: input.userId,
@@ -125,7 +124,9 @@ export async function createCheckoutOrder(input: {
       await Payment.exists({
         quoteId: quote._id,
         payerId: input.userId,
-        status: { $in: ["CAPTURED", "REFUNDED", "PARTIALLY_REFUNDED"] },
+        status: {
+          $in: ["CAPTURED", "REFUNDED", "PARTIALLY_REFUNDED", "REFUND_PENDING"],
+        },
       }).session(session)
     )
       throw new AppError(
@@ -142,9 +143,12 @@ export async function createCheckoutOrder(input: {
           status: { $in: ["FAILED", "CANCELLED"] },
           providerOrderId: { $exists: true, $ne: null },
         },
+        { offerId: { $exists: true }, offerReservationStatus: "RESERVED" },
       ],
     }).session(session);
     if (existing) {
+      if (existing.offerId && !existing.providerOrderId && ["FAILED", "CANCELLED"].includes(existing.status))
+        throw new AppError(409, "PROMOTION_ORDER_RECONCILIATION_REQUIRED", "This offer is reserved for a payment whose order could not be confirmed. Contact support with the payment reference before starting another payment.");
       if (registration) {
         registration.latestPaymentId = existing._id;
         registration.status = "PAYMENT_PENDING";
@@ -157,6 +161,7 @@ export async function createCheckoutOrder(input: {
       }
       return { payment: existing, created: false };
     }
+    await reserveQuoteOffer(quote, input.userId, session);
     const [payment] = await Payment.create(
       [
         {
@@ -169,6 +174,8 @@ export async function createCheckoutOrder(input: {
           gymId: quote.gymId,
           quoteId: quote._id,
           amountMinor: quote.totalMinor,
+          pricingSnapshot: quote.pricingSnapshot,
+          ...(quote.offerId ? { offerId: quote.offerId, offerReservationStatus: "RESERVED" } : {}),
           currency: quote.currency,
           status: "CREATED",
           metadata: { quoteSnapshot: quote.toObject() },

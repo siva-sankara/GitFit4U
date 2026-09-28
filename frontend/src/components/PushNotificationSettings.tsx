@@ -1,13 +1,12 @@
 import { useEffect, useState } from "react";
-import { apiRequest } from "../services/apiClient";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bell, BellRing, Volume2, VolumeX } from "lucide-react";
+import { apiRequest } from "../services/apiClient";
 import {
   notificationSoundEnabled,
   setNotificationSoundEnabled,
   playNotificationSound,
 } from "../services/notificationAlerts";
-import "../styles/notifications.css";
 import {
   disablePush,
   enablePush,
@@ -15,33 +14,35 @@ import {
   pushOptedIn,
   pushSupported,
 } from "../services/firebasePush";
+import "../styles/notifications.css";
+
 export function PushNotificationSettings() {
-  const [supported, setSupported] = useState<boolean | null>(null),
-    [enabled, setEnabled] = useState(pushOptedIn),
-    [busy, setBusy] = useState(false),
-    [message, setMessage] = useState("");
+  const client = useQueryClient();
+  const [supported, setSupported] = useState<boolean | null>(null);
+  const [optedIn, setOptedIn] = useState(pushOptedIn);
+  const [permission, setPermission] = useState(() =>
+    "Notification" in window ? Notification.permission : "unsupported",
+  );
   const [soundEnabled, setSoundEnabled] = useState(notificationSoundEnabled);
-  const [soundMessage, setSoundMessage] = useState("");
+  const [busy, setBusy] = useState(false),
+    [message, setMessage] = useState("");
   const server = useQuery({
     queryKey: ["push-config"],
     queryFn: () =>
-      apiRequest<{ data: { configured: boolean } }>("/api/v1/devices/status"),
+      apiRequest<{
+        data: {
+          configured: boolean;
+          registered: boolean;
+          activeDevices: number;
+        };
+      }>("/api/v1/devices/status"),
     retry: false,
+    refetchOnWindowFocus: true,
   });
-  useEffect(() => {
-    const update = () => {
-      setEnabled(pushOptedIn());
-      setSoundEnabled(notificationSoundEnabled());
-    };
-    window.addEventListener("gfu-push-change", update);
-    window.addEventListener("gfu-notification-sound", update);
-    window.addEventListener("storage", update);
-    return () => {
-      window.removeEventListener("gfu-push-change", update);
-      window.removeEventListener("gfu-notification-sound", update);
-      window.removeEventListener("storage", update);
-    };
-  }, []);
+  const enabled =
+    optedIn && permission === "granted" && server.data?.data.registered;
+  const available =
+    supported && firebaseConfigured() && server.data?.data.configured;
   useEffect(() => {
     let alive = true;
     void pushSupported()
@@ -51,140 +52,189 @@ export function PushNotificationSettings() {
       .catch(() => {
         if (alive) setSupported(false);
       });
+    const update = () => {
+      setOptedIn(pushOptedIn());
+      setSoundEnabled(notificationSoundEnabled());
+      setPermission(
+        "Notification" in window ? Notification.permission : "unsupported",
+      );
+    };
+    for (const event of [
+      "gfu-push-change",
+      "gfu-notification-sound",
+      "storage",
+      "focus",
+    ])
+      window.addEventListener(event, update);
     return () => {
       alive = false;
+      for (const event of [
+        "gfu-push-change",
+        "gfu-notification-sound",
+        "storage",
+        "focus",
+      ])
+        window.removeEventListener(event, update);
     };
   }, []);
-  async function change(reconnect = false) {
+  async function changePush() {
     setBusy(true);
     setMessage("");
     try {
-      if (enabled && !reconnect) await disablePush();
+      if (enabled) await disablePush();
       else await enablePush();
-      setEnabled(pushOptedIn());
+      await server.refetch();
+      setOptedIn(pushOptedIn());
+      setPermission(Notification.permission);
       setMessage(
         pushOptedIn()
-          ? "Browser notifications enabled on this device."
-          : "Browser notifications disabled on this device.",
+          ? "Browser notifications connected on this device."
+          : "Browser notifications disabled on this device. Other devices are unchanged.",
       );
     } catch (error) {
       setMessage(
         error instanceof Error
           ? error.message
-          : "Unable to update notifications. Please retry.",
+          : "Unable to update browser notifications.",
       );
     } finally {
-      setEnabled(pushOptedIn());
+      setBusy(false);
+    }
+  }
+  async function changeSound() {
+    const next = !soundEnabled;
+    // Invoke audio directly from the user gesture; permission never implies autoplay consent.
+    const preview = next ? playNotificationSound(true) : Promise.resolve(true);
+    setBusy(true);
+    setMessage("");
+    try {
+      await apiRequest("/api/v1/users/me", {
+        method: "PATCH",
+        body: JSON.stringify({ notificationPreferences: { sound: next } }),
+      });
+      setNotificationSoundEnabled(next);
+      setSoundEnabled(next);
+      await client.invalidateQueries({ queryKey: ["me"] });
+      const played = await preview;
+      setMessage(
+        next
+          ? played
+            ? "Notification sound enabled."
+            : "Sound preference saved. This browser blocked playback; allow sound in its site settings."
+          : "Notification sound disabled.",
+      );
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Unable to save sound preference.",
+      );
+    } finally {
       setBusy(false);
     }
   }
   return (
-    <section
-      className="panel notification-preferences"
-      aria-label="Notification preferences"
-      aria-busy={busy}
-    >
+    <details className="panel notification-preferences" aria-busy={busy}>
+      <summary>
+        Notification settings{" "}
+        <span>
+          {enabled ? "Push connected" : "Inbox available"} · Sound{" "}
+          {soundEnabled ? "on" : "off"}
+        </span>
+      </summary>
       <div className="notification-preference-row">
         <span className="notification-setting-icon" aria-hidden="true">
-          {enabled ? <BellRing size={22} /> : <Bell size={22} />}
+          {enabled ? <BellRing size={21} /> : <Bell size={21} />}
         </span>
         <div className="notification-setting-copy">
           <h2>Browser notifications</h2>
-          <p>Receive updates even when you're away from this tab.</p>
-          {!firebaseConfigured() || server.data?.data.configured === false ? (
-            <p className="notification-setting-hint">
-              Browser alerts are not available yet. Your inbox will continue to
-              receive updates.
+          <p>
+            Permission: {permission}. Push:{" "}
+            {enabled
+              ? "connected"
+              : server.isLoading
+                ? "checking"
+                : available
+                  ? "not connected"
+                  : "unavailable"}
+            .
+          </p>
+          {permission === "denied" && (
+            <p>
+              Notifications are blocked. Change this site's notification
+              permission in your browser settings, then return here.
             </p>
-          ) : supported === false ? (
-            <p className="notification-setting-hint">
-              Browser alerts are unavailable on this device. You can still read
-              all updates here.
-            </p>
-          ) : null}
+          )}
+          {!available && !server.isLoading && (
+            <p>Your in-app inbox still receives updates.</p>
+          )}
         </div>
         <div className="notification-setting-actions">
-          <button
-            type="button"
-            className="btn btn-secondary"
-            onClick={() => change()}
-            disabled={
-              busy ||
-              (!enabled &&
-                (!supported ||
-                  !firebaseConfigured() ||
-                  !server.data?.data.configured))
-            }
-          >
-            {busy
-              ? "Updating…"
-              : enabled
-                ? "Disable browser notifications"
-                : "Enable browser notifications"}
-          </button>
-          {enabled && (
+          {permission !== "denied" && (
             <button
-              type="button"
               className="btn btn-secondary"
-              disabled={busy || !server.data?.data.configured}
-              onClick={() => change(true)}
+              disabled={busy || (!enabled && !available)}
+              onClick={() => void changePush()}
             >
-              Reconnect notifications
+              {enabled
+                ? "Disable on this device"
+                : optedIn && permission === "granted"
+                  ? "Reconnect push"
+                  : "Enable browser notifications"}
             </button>
           )}
         </div>
       </div>
       {server.isError && (
         <p role="alert">
-          Unable to check notification availability.{" "}
+          Unable to check push status.{" "}
           <button
-            className="btn btn-secondary"
-            onClick={() => server.refetch()}
+            className="btn btn-ghost"
+            onClick={() => void server.refetch()}
           >
             Retry
           </button>
         </p>
       )}
-      {message && <p role="status">{message}</p>}
       <div className="notification-preference-row notification-sound-row">
         <span className="notification-setting-icon" aria-hidden="true">
-          {soundEnabled ? <Volume2 size={22} /> : <VolumeX size={22} />}
+          {soundEnabled ? <Volume2 size={21} /> : <VolumeX size={21} />}
         </span>
         <div className="notification-setting-copy">
-          <h2>Alert sound</h2>
-          <p>Play a short sound for new updates while you're using the app.</p>
+          <h2>Notification sound</h2>
+          <p>
+            Opt in to a short sound for new unread updates while this app is
+            focused.
+          </p>
         </div>
         <div className="notification-setting-actions">
           <button
-            type="button"
             className="btn btn-secondary"
             role="switch"
             aria-checked={soundEnabled}
-            aria-label="Alert sound"
-            onClick={() => {
-              setNotificationSoundEnabled(!soundEnabled);
-              setSoundEnabled(!soundEnabled);
-            }}
+            aria-label="Notification sound"
+            disabled={busy}
+            onClick={() => void changeSound()}
           >
             {soundEnabled ? "Sound on" : "Sound off"}
           </button>
-          <button
-            type="button"
-            className="btn btn-ghost"
-            onClick={async () => {
-              const played = await playNotificationSound(true);
-              setSoundMessage(
-                played
-                  ? "Test sound played."
-                  : "Sound could not play. Allow audio in your browser's site settings and try again.",
-              );
-            }}
-          >
-            Test sound
-          </button>
+          {soundEnabled && (
+            <button
+              className="btn btn-ghost"
+              onClick={async () =>
+                setMessage(
+                  (await playNotificationSound(true))
+                    ? "Test sound played."
+                    : "Allow sound in this browser's site settings.",
+                )
+              }
+            >
+              Test sound
+            </button>
+          )}
         </div>
       </div>
-      {soundMessage && <p role="status">{soundMessage}</p>}
-    </section>
+      {message && <p role="status">{message}</p>}
+    </details>
   );
 }

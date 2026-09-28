@@ -1,0 +1,13 @@
+.support-table-scroll { overflow-x: auto; }
+.support-ticket-list table { width: 100%; border-collapse: collapse; }
+.support-ticket-list th, .support-ticket-list td { padding: .8rem; border-bottom: 1px solid var(--border); text-align: left; }
+.support-ticket-list td small { display: block; color: var(--text-muted); margin-top: .3rem; }
+.support-ticket-list tr[aria-selected="true"] { background: color-mix(in srgb, var(--brand) 8%, transparent); }
+.support-ticket-toolbar, .support-ticket-pagination { display: flex; align-items: center; gap: .8rem; flex-wrap: wrap; margin-block: 1rem; }
+.support-ticket-toolbar h2 { flex: 1; }
+.support-ticket-timeline { padding-left: 1.25rem; border-left: 2px solid var(--border); list-style: none; }
+.support-ticket-timeline li { padding: .8rem 0; border-bottom: 1px solid var(--border); }
+.support-ticket-timeline header { display: flex; justify-content: space-between; gap: .7rem; flex-wrap: wrap; }
+.support-ticket-timeline time { font-size: .8rem; color: var(--text-muted); }
+.support-ticket-timeline p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.support-ticket-timeline a { display: block; }

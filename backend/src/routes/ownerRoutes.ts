@@ -1,6 +1,13 @@
 import { Router } from "express";
 import { z } from "zod";
 import * as controller from "../controllers/ownerController.js";
+import * as members from "../controllers/memberManagementController.js";
+import * as attendance from "../controllers/attendanceController.js";
+import {
+  ownerMemberCreateInput,
+  ownerMemberUpdateInput,
+  ownerTrainerInput,
+} from "./memberManagementSchemas.js";
 import {
   requireAuth,
   requireGymContext,
@@ -30,16 +37,23 @@ ownerRoutes.use(requireAuth);
 ownerRoutes.use((req, _res, next) => {
   const schemas: Record<string, any> = {
     "/gym": gymInput.partial(),
-    "/members": memberInput,
+    "/members":
+      req.method === "PATCH" ? ownerMemberUpdateInput : ownerMemberCreateInput,
     "/plans": planInput,
     "/classes": classInput,
-    "/trainers": trainerInput,
+    "/trainers":
+      req.method === "PATCH" ? ownerTrainerInput.partial() : ownerTrainerInput,
     "/campaigns": campaignInput,
     "/offers": offerInput,
     "/ads": adInput,
   };
   const base = "/" + req.path.split("/")[1];
-  if (["POST", "PATCH"].includes(req.method) && schemas[base]) {
+  if (
+    ["POST", "PATCH"].includes(req.method) &&
+    schemas[base] &&
+    !(base === "/members" && req.path.includes("/join/")) &&
+    !(base === "/classes" && req.path.endsWith("/cancel"))
+  ) {
     const schema =
       req.method === "PATCH" && base === "/plans"
         ? planInput.partial()
@@ -109,6 +123,26 @@ ownerRoutes.get(
   requirePermission("member:read"),
   controller.getMember,
 );
+ownerRoutes.patch(
+  "/members/:id",
+  requirePermission("member:write"),
+  members.updateMember,
+);
+ownerRoutes.post(
+  "/members/:id/join/:decision",
+  requirePermission("member:write"),
+  members.decideGymJoin,
+);
+ownerRoutes.get(
+  "/attendance/qr",
+  requirePermission("gym:read"),
+  attendance.getGymQr,
+);
+ownerRoutes.post(
+  "/attendance/qr/rotate",
+  requirePermission("gym:update"),
+  attendance.rotateGymQr,
+);
 ownerRoutes.get("/plans", requirePermission("gym:read"), controller.listPlans);
 ownerRoutes.post(
   "/plans",
@@ -164,6 +198,11 @@ ownerRoutes.post(
   requirePermission("class:write"),
   controller.createClass,
 );
+ownerRoutes.post(
+  "/classes/:id/cancel",
+  requirePermission("class:write"),
+  controller.cancelClass,
+);
 ownerRoutes.get(
   "/trainers",
   requirePermission("gym:read"),
@@ -173,6 +212,11 @@ ownerRoutes.post(
   "/trainers",
   requirePermission("class:write"),
   controller.createTrainer,
+);
+ownerRoutes.patch(
+  "/trainers/:id",
+  requirePermission("class:write"),
+  members.saveTrainer,
 );
 ownerRoutes.get(
   "/campaigns",
@@ -220,6 +264,7 @@ ownerRoutes.post(
   requirePermission("campaign:write"),
   controller.createAd,
 );
+ownerRoutes.patch("/ads/:id", requirePermission("campaign:write"), controller.updateAd);
 ownerRoutes.get(
   "/revenue",
   requirePermission("finance:read"),

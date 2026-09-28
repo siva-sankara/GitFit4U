@@ -41,7 +41,7 @@ beforeEach(() => {
       data:
         path === "/api/v1/owner/dashboard"
           ? { gymStatus: "ACTIVE", totalMembers: 1 }
-          : path.includes("/records/members")
+          : path.startsWith("/api/v1/owner/members?")
             ? [
                 {
                   _id: "member-id",
@@ -57,7 +57,10 @@ beforeEach(() => {
                   status: "ACTIVE",
                 },
               ]
-            : {},
+            : path === "/api/v1/owner/plans" ||
+                path === "/api/v1/owner/trainers"
+              ? []
+              : {},
     }),
   );
 });
@@ -78,7 +81,7 @@ async function render(path: string) {
   );
   for (let i = 0; i < 10; i++)
     await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 15));
+      await new Promise((resolve) => { setTimeout(resolve, 15); });
     });
 }
 it("restores owner member membership, visits, payment and join columns from API records", async () => {
@@ -89,19 +92,32 @@ it("restores owner member membership, visits, payment and join columns from API 
     "Member",
     "Member code",
     "Phone",
-    "Plan",
-    "Expires",
     "Membership",
+    "Expires",
     "Visits (30 days)",
     "Payment",
     "Joined",
-    "Member status",
+    "Actions",
   ]);
   expect(host.textContent).toContain("Member One");
   expect(host.textContent).toContain("Captured");
+  expect(host.textContent).toContain("Trainer: Not assigned");
+  expect(
+    host.querySelector(
+      'button[aria-label="Membership status: Active. Monthly"]',
+    ),
+  ).not.toBeNull();
+  expect(
+    host.querySelector('select[aria-label="Membership plan"]'),
+  ).not.toBeNull();
+  expect(
+    host.querySelector('select[aria-label="Assigned trainer"]'),
+  ).not.toBeNull();
   expect(
     host.querySelector('a[href="/owner/members/member-public"]'),
   ).not.toBeNull();
+  expect(host.querySelector('a[aria-label^="Call "]')).not.toBeNull();
+  expect(host.querySelector('button[aria-label^="Message "]')).not.toBeNull();
 });
 it("omits the finance column for restricted staff", async () => {
   mocks.role = "GYM_STAFF";
@@ -115,11 +131,11 @@ it("omits the finance column for restricted staff", async () => {
 });
 it("uses a compact gym status label and badge instead of an oversized heading", async () => {
   await render("/owner/dashboard");
-  expect(host.querySelector(".dashboard-gym-status h2")?.textContent).toBe(
+  expect(host.querySelector(".owner-status-card h2")?.textContent).toBe(
     "Gym status",
   );
   expect(
-    host.querySelector(".dashboard-gym-status .status-badge")?.textContent,
+    host.querySelector(".owner-status-card .status-badge")?.textContent,
   ).toBe("Active");
 });
 it("loads the nonfinancial staff dashboard without forbidden summary or scanner requests", async () => {

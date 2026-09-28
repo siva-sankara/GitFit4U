@@ -24,7 +24,7 @@ export class ApiError extends Error {
     super(message);
   }
 }
-type Options = RequestInit & { idempotencyKey?: string };
+type Options = RequestInit & { idempotencyKey?: string; responseType?: "blob" };
 async function send<T>(
   path: string,
   options: Options,
@@ -39,6 +39,7 @@ async function send<T>(
       signal: options.signal || controller.signal,
       headers: {
         "content-type": "application/json",
+        "x-csrf-protection": "1",
         ...(accessToken ? { authorization: `Bearer ${accessToken}` } : {}),
         ...(options.idempotencyKey
           ? { "idempotency-key": options.idempotencyKey }
@@ -49,6 +50,11 @@ async function send<T>(
     if (response.status === 401 && retry && !path.startsWith("/api/v1/auth/")) {
       await refreshSession();
       return send<T>(path, options, false);
+    }
+    if (response.ok && options.responseType === "blob") {
+      if (!response.headers.get("content-type")?.startsWith("application/pdf"))
+        throw new ApiError(response.status, "INVALID_DOWNLOAD", "The server did not return a valid invoice document.");
+      return await response.blob() as T;
     }
     const raw = response.status === 204 ? "" : await response.text();
     let payload: any;
@@ -65,15 +71,12 @@ async function send<T>(
     }
     if (!response.ok) {
       const validation = payload?.error?.details?.fieldErrors;
-      const suffix = validation
-        ? Object.values(validation).flat().filter(Boolean).join(" ")
-        : "";
+      const messages = validation ? Object.values(validation).flat().filter(Boolean).map(String) : [];
+      const description = [...new Set([payload?.error?.message || "Request failed.", ...messages])].join(" ");
       throw new ApiError(
         response.status,
         payload?.error?.code || "REQUEST_FAILED",
-        [payload?.error?.message || "Request failed.", suffix]
-          .filter(Boolean)
-          .join(" "),
+        description,
         payload?.error?.requestId,
         payload?.error?.details,
       );
@@ -114,6 +117,7 @@ export async function refreshSession() {
 }
 export const apiRequest = <T>(path: string, options: Options = {}) =>
   send<T>(path, options, true);
+export const apiDownload = (path: string) => send<Blob>(path, { responseType: "blob" }, true);
 export interface ApiEnvelope<T> {
   success: true;
   message?: string;
@@ -125,5 +129,7 @@ export interface ApiEnvelope<T> {
     pages?: number;
     hasMore?: boolean;
     nextCursor?: string;
+    timezone?: string;
+    serverNow?: string;
   };
 }

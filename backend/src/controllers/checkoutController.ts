@@ -1,7 +1,9 @@
 import type { Request, Response } from "express";
 import mongoose from "mongoose";
 import { nanoid } from "nanoid";
+import { redeemPaymentOffer } from "../services/promotionService.js";
 import { env } from "../config/env.js";
+import { platformRenewalQuote, activatePlatformRenewal } from "../services/platformRenewalService.js";
 import {
   Payment,
   PlanQuote,
@@ -11,6 +13,7 @@ import {
 } from "../models/Commerce.js";
 import { MemberProfile } from "../models/Member.js";
 import { Notification } from "../models/Engagement.js";
+import { emitDomainEvent } from "../services/domainEventService.js";
 import {
   createCheckoutOrder,
   createMembershipQuote,
@@ -18,7 +21,12 @@ import {
 import { sha256 } from "../utils/crypto.js";
 import { AppError } from "../utils/AppError.js";
 import { paymentProvider } from "../integrations/payments/index.js";
-import { Refund, Invoice } from "../models/Business.js";
+import { Refund } from "../models/Business.js";
+import { ensurePaymentInvoice } from "../services/invoiceService.js";
+import {
+  submitRefund,
+  reconcileRefundEvent,
+} from "../services/refundService.js";
 import { Gym } from "../models/Gym.js";
 import { User } from "../models/User.js";
 import { GymRegistration } from "../models/GymRegistration.js";
@@ -31,6 +39,11 @@ import {
 } from "../services/registrationService.js";
 
 export async function createPlatformQuote(req: Request, res: Response) {
+  if (req.body.renewal === true) {
+    if (req.auth?.role !== "GYM_OWNER" || !req.auth.gymId) throw new AppError(403, "RENEWAL_FORBIDDEN", "Select a gym you own before renewing.");
+    if (req.body.expectedGymId && req.body.expectedGymId !== req.auth.gymId) throw new AppError(409, "GYM_CONTEXT_CHANGED", "Your selected gym changed. Confirm the intended gym before renewing.");
+    return res.status(201).json({ success: true, data: await platformRenewalQuote(req.auth.userId, req.auth.gymId, req.body.planId) });
+  }
   const quote = await mongoose.connection.transaction(async (session) => {
     const registration = await GymRegistration.findOne({
       publicId: req.body.registrationId,
@@ -245,7 +258,9 @@ export async function verifyCheckout(req: Request, res: Response) {
       "Payment verification failed.",
     );
   if (
-    payment.status === "CAPTURED" &&
+    ["CAPTURED", "REFUNDED", "PARTIALLY_REFUNDED", "REFUND_PENDING"].includes(
+      payment.status,
+    ) &&
     payment.providerPaymentId === req.body.providerPaymentId
   )
     return res.json({
@@ -255,7 +270,9 @@ export async function verifyCheckout(req: Request, res: Response) {
   await Payment.updateOne(
     {
       _id: payment._id,
-      status: { $nin: ["CAPTURED", "REFUNDED", "PARTIALLY_REFUNDED"] },
+      status: {
+        $nin: ["CAPTURED", "REFUNDED", "PARTIALLY_REFUNDED", "REFUND_PENDING"],
+      },
     },
     { $set: { providerPaymentId: req.body.providerPaymentId } },
   );
@@ -308,52 +325,17 @@ export async function cancelCheckout(req: Request, res: Response) {
 }
 
 export async function refundPayment(req: Request, res: Response) {
-  const payment = await Payment.findOne({
-    publicId: req.params.id,
-    status: { $in: ["CAPTURED", "PARTIALLY_REFUNDED"] },
+  const refund = await submitRefund(req);
+  res.status(refund.status === "PROCESSING" ? 202 : 200).json({
+    success: true,
+    data: refund,
+    ...(refund.reconciliationRequired
+      ? {
+          message:
+            "Refund reserved; provider confirmation is pending. Do not initiate another refund for this amount.",
+        }
+      : {}),
   });
-  if (!payment?.providerPaymentId)
-    throw new AppError(
-      404,
-      "REFUNDABLE_PAYMENT_NOT_FOUND",
-      "A captured payment is required.",
-    );
-  const prior = await Refund.aggregate([
-    { $match: { paymentId: payment._id, status: "PROCESSED" } },
-    { $group: { _id: null, total: { $sum: "$amountMinor" } } },
-  ]);
-  if ((prior[0]?.total || 0) + req.body.amountMinor > payment.amountMinor)
-    throw new AppError(
-      409,
-      "REFUND_AMOUNT_EXCEEDED",
-      "Refund total cannot exceed the captured amount.",
-    );
-  const refund = await Refund.create({
-    publicId: nanoid(20),
-    paymentId: payment._id,
-    requestedBy: req.auth!.userId,
-    amountMinor: req.body.amountMinor,
-    currency: payment.currency,
-    reason: req.body.reason,
-    status: "PROCESSING",
-  });
-  try {
-    const result = await paymentProvider.refundPayment(
-      payment.providerPaymentId,
-      refund.amountMinor,
-      refund.publicId,
-    );
-    refund.providerRefundId = result.id;
-    refund.status = result.status === "processed" ? "PROCESSED" : "PROCESSING";
-    refund.processedAt = refund.status === "PROCESSED" ? new Date() : undefined;
-    await refund.save();
-  } catch (error) {
-    refund.status = "FAILED";
-    refund.failureReason = "Provider request failed";
-    await refund.save();
-    throw error;
-  }
-  res.status(201).json({ success: true, data: refund });
 }
 
 async function processProviderEvent(
@@ -366,6 +348,18 @@ async function processProviderEvent(
   providerEvent.status = "PROCESSING";
   providerEvent.attempts += 1;
   await providerEvent.save();
+
+  if (
+    ["refund.created", "refund.processed", "refund.failed"].includes(
+      payload.event,
+    )
+  ) {
+    await reconcileRefundEvent(payload.event, payload.payload?.refund?.entity);
+    providerEvent.status = "PROCESSED";
+    providerEvent.processedAt = new Date();
+    await providerEvent.save();
+    return;
+  }
 
   const paymentEntity = payload.payload?.payment?.entity;
   const providerPaymentId = paymentEntity?.id;
@@ -404,7 +398,14 @@ async function processProviderEvent(
       await providerEvent.save();
       return;
     }
-    if (payment.status !== "CAPTURED") {
+    if (
+      ![
+        "CAPTURED",
+        "REFUNDED",
+        "PARTIALLY_REFUNDED",
+        "REFUND_PENDING",
+      ].includes(payment.status)
+    ) {
       const quote =
         (await PlanQuote.findById(payment.quoteId)) ||
         payment.metadata?.quoteSnapshot;
@@ -420,10 +421,17 @@ async function processProviderEvent(
           const claimed = await Payment.findOneAndUpdate(
             {
               _id: payment._id,
-              status: { $nin: ["CAPTURED", "REFUNDED", "PARTIALLY_REFUNDED"] },
+              status: {
+                $nin: [
+                  "CAPTURED",
+                  "REFUNDED",
+                  "PARTIALLY_REFUNDED",
+                  "REFUND_PENDING",
+                ],
+              },
             },
             { $set: { status: "CAPTURED" } },
-            { session: dbSession, new: true },
+            { session: dbSession, returnDocument: "after" },
           );
           if (!claimed) return;
           payment = claimed;
@@ -433,7 +441,14 @@ async function processProviderEvent(
           payment.methodCategory = paymentEntity?.method;
           await payment.save({ session: dbSession });
 
+          await redeemPaymentOffer(payment, dbSession);
+
           if (quote.planSnapshot.type === "PLATFORM") {
+            if (quote.planSnapshot.renewal === true) {
+              const renewed = await activatePlatformRenewal(payment, quote, dbSession);
+              await ensurePaymentInvoice(payment, { session: dbSession, quote, subscription: renewed });
+              return;
+            }
             const registration = await GymRegistration.findOne({
               publicId: quote.planSnapshot.registrationId,
               ownerId: payment.payerId,
@@ -490,6 +505,7 @@ async function processProviderEvent(
               subscription,
               dbSession,
             );
+            await ensurePaymentInvoice(payment, { session: dbSession, quote, subscription });
             await SubscriptionEvent.create(
               [
                 {
@@ -559,6 +575,7 @@ async function processProviderEvent(
             { session: dbSession },
           ).then((items) => items[0]);
           member.currentSubscriptionId = subscription._id;
+          member.directAccess = false;
           await member.save({ session: dbSession });
           payment.subscriptionId = subscription._id;
           await payment.save({ session: dbSession });
@@ -573,54 +590,23 @@ async function processProviderEvent(
             ],
             { session: dbSession },
           );
-          const [gym, customer] = await Promise.all([
-            Gym.findById(quote.gymId).session(dbSession),
-            User.findById(payment.payerId).session(dbSession),
-          ]);
-          await Invoice.create(
-            [
-              {
-                publicId: nanoid(20),
-                number: `GFU-${payment.publicId}`,
-                gymId: quote.gymId,
-                userId: payment.payerId,
-                subscriptionId: subscription._id,
-                paymentId: payment._id,
-                supplierSnapshot: { name: gym?.name, address: gym?.address },
-                customerSnapshot: {
-                  name: customer?.name,
-                  email: customer?.email,
-                },
-                lines: [
-                  {
-                    description: quote.planSnapshot.name,
-                    quantity: 1,
-                    unitPriceMinor: quote.subtotalMinor - quote.discountMinor,
-                    taxMinor: quote.taxMinor,
-                    totalMinor: quote.totalMinor,
-                  },
-                ],
-                subtotalMinor: quote.subtotalMinor - quote.discountMinor,
-                taxMinor: quote.taxMinor,
-                totalMinor: quote.totalMinor,
-                currency: payment.currency,
-              },
-            ],
-            { session: dbSession },
-          );
-          await Notification.create(
-            [
-              {
-                userId: payment.payerId,
-                gymId: quote.gymId,
-                category: "SUBSCRIPTION",
-                title: "Membership active",
-                message: "Your membership is ready to use.",
-                actionUrl: `/app/subscriptions/${subscription.publicId}`,
-              },
-            ],
-            { session: dbSession },
-          );
+          await ensurePaymentInvoice(payment, { session: dbSession, quote, subscription });
+          await emitDomainEvent({
+            event: previous ? "membership.renewed" : "membership.activated",
+            userId: payment.payerId,
+            gymId: quote.gymId,
+            entityId: subscription.publicId,
+            actionUrl: `/app/subscriptions/${subscription.publicId}`,
+            session: dbSession,
+          });
+          await emitDomainEvent({
+            event: "payment.successful",
+            userId: payment.payerId,
+            gymId: quote.gymId,
+            entityId: payment.publicId,
+            actionUrl: "/app/payments",
+            session: dbSession,
+          });
         });
       } finally {
         await dbSession.endSession();
@@ -628,13 +614,22 @@ async function processProviderEvent(
     }
   } else if (
     payload.event === "payment.failed" &&
-    !["CAPTURED", "REFUNDED", "PARTIALLY_REFUNDED"].includes(payment.status)
+    !["CAPTURED", "REFUNDED", "PARTIALLY_REFUNDED", "REFUND_PENDING"].includes(
+      payment.status,
+    )
   ) {
     await mongoose.connection.transaction(async (session) => {
       const failed = await Payment.findOneAndUpdate(
         {
           _id: payment!._id,
-          status: { $nin: ["CAPTURED", "REFUNDED", "PARTIALLY_REFUNDED"] },
+          status: {
+            $nin: [
+              "CAPTURED",
+              "REFUNDED",
+              "PARTIALLY_REFUNDED",
+              "REFUND_PENDING",
+            ],
+          },
         },
         {
           $set: {
@@ -657,6 +652,16 @@ async function processProviderEvent(
           { $set: { status: "PAYMENT_FAILED", currentStep: "PAYMENT" } },
           { session },
         );
+      if (failed)
+        await emitDomainEvent({
+          event: "payment.failed",
+          userId: failed.payerId,
+          gymId: failed.gymId,
+          entityId: failed.publicId,
+          occurrenceId: providerPaymentId,
+          actionUrl: "/notifications",
+          session,
+        });
     });
   }
   providerEvent.status = "PROCESSED";

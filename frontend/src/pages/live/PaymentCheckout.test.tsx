@@ -1,5 +1,5 @@
 ﻿// @vitest-environment jsdom
-import { act } from "react";
+import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -10,13 +10,17 @@ vi.mock("../../services/apiClient", () => ({
   setAccessToken: vi.fn(),
 }));
 import { PaymentCheckout } from "./LivePublic";
+import { Modal } from "../../components/Modal";
 let host: HTMLDivElement,
   root: Root,
   client: QueryClient,
   state: string,
-  complete: ReturnType<typeof vi.fn<() => void>>;
+  complete: ReturnType<typeof vi.fn<() => void>>,
+  gatewayChanged: ReturnType<typeof vi.fn<(open: boolean) => void>>,
+  busyChanged: ReturnType<typeof vi.fn<(busy: boolean) => void>>;
 class Checkout {
   static last: Checkout;
+  static openHook: (() => void) | undefined;
   handlers: Record<string, (value: any) => void> = {};
   constructor(public options: any) {
     Checkout.last = this;
@@ -24,12 +28,16 @@ class Checkout {
   on(event: string, handler: (value: any) => void) {
     this.handlers[event] = handler;
   }
-  open() {}
+  open() { Checkout.openHook?.(); }
+  close = vi.fn();
 }
 beforeEach(() => {
   vi.resetAllMocks();
   state = "PENDING";
   complete = vi.fn();
+  gatewayChanged = vi.fn();
+  busyChanged = vi.fn();
+  Checkout.openHook = undefined;
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   Object.assign(window, { Razorpay: Checkout });
   host = document.createElement("div");
@@ -79,12 +87,12 @@ afterEach(async () => {
 async function until(check: () => boolean) {
   for (let i = 0; i < 80 && !check(); i++)
     await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 20));
+      await new Promise((resolve) => { setTimeout(resolve, 20); });
     });
   expect(check()).toBe(true);
 }
 function pay() {
-  return Array.from(host.querySelectorAll("button")).find(
+  return Array.from(document.querySelectorAll("button")).find(
     (b) => b.textContent === "Pay with Razorpay",
   )!;
 }
@@ -100,6 +108,8 @@ async function start(membership = false) {
           }
           quoteBody={{ registrationId: "registration-one", planId: "plan-one" }}
           onComplete={complete}
+          onGatewayOpenChange={gatewayChanged}
+          onBusyChange={busyChanged}
         />
       </QueryClientProvider>,
     ),
@@ -132,6 +142,7 @@ it("waits for backend capture, then completes exactly once", async () => {
     }),
   });
   expect(complete).not.toHaveBeenCalled();
+  expect(gatewayChanged).toHaveBeenLastCalledWith(false);
   state = "CAPTURED";
   await act(async () => {
     await client.invalidateQueries({ queryKey: ["payment", "payment-one"] });
@@ -158,7 +169,7 @@ it("records checkout dismissal and allows retry without showing activation", asy
   expect(Checkout.last.options.order_id).toBe("order-one");
   await act(async () => Checkout.last.options.modal.ondismiss());
 });
-it("shows gateway failure without calling activation", async () => {
+it("keeps the gateway open for retry after failure without calling activation", async () => {
   await start();
   await act(async () =>
     Checkout.last.handlers["payment.failed"]({
@@ -167,7 +178,11 @@ it("shows gateway failure without calling activation", async () => {
   );
   await until(() => host.textContent!.includes("Card declined"));
   expect(complete).not.toHaveBeenCalled();
-  expect(pay().disabled).toBe(false);
+  expect(gatewayChanged).toHaveBeenLastCalledWith(true);
+  expect(pay().disabled).toBe(true);
+  await act(async () => Checkout.last.options.modal.ondismiss());
+  await until(() => !pay().disabled);
+  expect(gatewayChanged).toHaveBeenLastCalledWith(false);
 });
 it("refreshes an expired quote before asking the owner to pay again", async () => {
   const original = mocks.request.getMockImplementation()!;
@@ -292,4 +307,102 @@ it("never completes member checkout when signature verification fails", async ()
   );
   await until(() => host.textContent!.includes("Payment verification failed"));
   expect(complete).not.toHaveBeenCalled();
+  expect(gatewayChanged).toHaveBeenLastCalledWith(false);
+});
+
+it("lets the gateway own synchronous focus and Escape, restoring the modal only on dismissal", async () => {
+  const outside = document.createElement("input");
+  outside.setAttribute("aria-label", "Gateway payment input");
+  document.body.append(outside);
+  const closed = vi.fn();
+  function CheckoutDialog() {
+    const [gatewayOpen, setGatewayOpen] = useState(false);
+    return (
+      <Modal open title="Membership checkout" onClose={closed} externalOverlayActive={gatewayOpen}>
+        <PaymentCheckout quotePath="/api/v1/checkout/quotes" quoteBody={{ planId: "plan-one" }} onGatewayOpenChange={setGatewayOpen} />
+      </Modal>
+    );
+  }
+  try {
+    Checkout.openHook = () => outside.focus();
+    await act(async () => root.render(<QueryClientProvider client={client}><CheckoutDialog /></QueryClientProvider>));
+    await until(() => Boolean(pay()));
+    const dialog = document.querySelector('[role="dialog"]')!;
+    outside.focus();
+    expect(dialog.contains(document.activeElement)).toBe(true);
+    await act(async () => pay().click());
+    expect(document.activeElement).toBe(outside);
+    expect(document.body.style.overflow).toBe("hidden");
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", cancelable: true }));
+    document.querySelector(".modal-backdrop")!.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    expect(closed).not.toHaveBeenCalled();
+    expect(dialog.getAttribute("aria-modal")).toBeNull();
+    await act(async () => Checkout.last.handlers["payment.failed"]({ error: { description: "Try another method" } }));
+    await until(() => Boolean(pay()) && document.body.textContent!.includes("Try another method"));
+    outside.focus();
+    expect(document.activeElement).toBe(outside);
+    expect(pay().disabled).toBe(true);
+    await act(async () => Checkout.last.options.modal.ondismiss());
+    await until(() => Boolean(pay()) && !pay().disabled);
+    expect(dialog.contains(document.activeElement)).toBe(true);
+    expect(dialog.getAttribute("aria-modal")).toBe("true");
+    outside.focus();
+    expect(dialog.contains(document.activeElement)).toBe(true);
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", cancelable: true }));
+    expect(closed).toHaveBeenCalledOnce();
+  } finally {
+    outside.remove();
+  }
+});
+
+it("releases gateway ownership if opening the provider throws", async () => {
+  Checkout.openHook = () => { throw new Error("Gateway could not open"); };
+  await start();
+  await until(() => host.textContent!.includes("Gateway could not open"));
+  expect(gatewayChanged.mock.calls.map(([open]) => open)).toEqual([true, false]);
+  expect(Checkout.last.close).toHaveBeenCalledOnce();
+  expect(pay().disabled).toBe(false);
+  expect(complete).not.toHaveBeenCalled();
+});
+
+it("closes the owned gateway and releases its focus flag when checkout unmounts", async () => {
+  await start();
+  const checkout = Checkout.last;
+  await act(async () => root.render(null));
+  expect(checkout.close).toHaveBeenCalledOnce();
+  expect(gatewayChanged).toHaveBeenLastCalledWith(false);
+  expect(complete).not.toHaveBeenCalled();
+});
+
+it("keeps retry verification busy after a gateway failure and activates only on backend capture", async () => {
+  const original = mocks.request.getMockImplementation()!;
+  let finishVerification!: (value: { data: { status: string } }) => void;
+  mocks.request.mockImplementation((path, ...args) => path === "/api/v1/checkout/verify"
+    ? new Promise((resolve) => { finishVerification = resolve; })
+    : original(path, ...args));
+  await start(true);
+  await act(async () => Checkout.last.handlers["payment.failed"]({ error: { description: "First method failed" } }));
+  await until(() => host.textContent!.includes("First method failed"));
+  expect(busyChanged).toHaveBeenLastCalledWith(false);
+  expect(pay().disabled).toBe(true);
+  let verification!: Promise<void>;
+  await act(async () => {
+    verification = Checkout.last.options.handler({
+      razorpay_order_id: "order-one", razorpay_payment_id: "provider-retry", razorpay_signature: "verified-retry",
+    });
+  });
+  expect(gatewayChanged).toHaveBeenLastCalledWith(false);
+  expect(busyChanged).toHaveBeenLastCalledWith(true);
+  const inProgress = Array.from(host.querySelectorAll("button")).find((button) => button.textContent?.startsWith("Checkout in progress"));
+  expect(inProgress?.disabled).toBe(true);
+  expect(complete).not.toHaveBeenCalled();
+  expect(mocks.request.mock.calls.filter(([path]) => path.endsWith("/orders"))).toHaveLength(1);
+  await act(async () => {
+    state = "CAPTURED";
+    finishVerification({ data: { status: "CAPTURED" } });
+    await verification;
+  });
+  await until(() => complete.mock.calls.length === 1);
+  expect(busyChanged).toHaveBeenLastCalledWith(false);
+  expect(complete).toHaveBeenCalledOnce();
 });

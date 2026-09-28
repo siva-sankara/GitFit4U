@@ -13,6 +13,7 @@ const state = vi.hoisted(() => ({
   readAll: vi.fn(),
   refetch: vi.fn(),
   query: vi.fn(),
+  remove: vi.fn(),
 }));
 vi.mock("../../components/PushNotificationSettings", () => ({
   PushNotificationSettings: () => null,
@@ -39,6 +40,7 @@ vi.mock("../../api/hooks", () => ({
     isPending: false,
     isError: false,
   }),
+  useDeleteNotifications: () => ({ mutate: state.remove, isPending: false, isError: false }),
 }));
 import { NotificationsApiPage } from "./NotificationsApiPage";
 let host: HTMLDivElement, root: Root;
@@ -75,7 +77,7 @@ const render = async () => {
   );
 };
 const button = (text: string) =>
-  [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+  [...document.querySelectorAll<HTMLButtonElement>("button")].find(
     (element) => element.textContent === text,
   )!;
 
@@ -87,14 +89,22 @@ it("renders readable categories and opens the exact notification with its safe a
     host.querySelector<HTMLButtonElement>(".notification-item")!.click(),
   );
   expect(state.read).toHaveBeenCalledWith("notification-1");
-  expect(host.querySelector('[role="dialog"]')?.textContent).toContain(
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain(
     "Welcome to your gym",
   );
   expect(button("View details")).toBeDefined();
   await act(async () =>
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })),
   );
-  expect(host.querySelector('[role="dialog"]')).toBeNull();
+  expect(document.querySelector('[role="dialog"]')).toBeNull();
+});
+it("requires confirmation before deleting all inbox notifications", async () => {
+  await render();
+  await act(async () => button("Delete all").click());
+  expect(state.remove).not.toHaveBeenCalled();
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain("including other pages and categories");
+  await act(async () => button("Confirm delete").click());
+  expect(state.remove).toHaveBeenCalledWith({ all: true, confirmed: true }, expect.any(Object));
 });
 it("resets pagination when changing filters", async () => {
   await render();

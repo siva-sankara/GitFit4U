@@ -1,4 +1,7 @@
 import type { Request, Response } from "express";
+import { emitDomainEvent } from "../services/domainEventService.js";
+import { platformMonthlyReceipts } from "../services/revenueService.js";
+import { storageProvider } from "../integrations/storage/mediaStore.js";
 import mongoose from "mongoose";
 import { Gym } from "../models/Gym.js";
 import { GymRegistration } from "../models/GymRegistration.js";
@@ -21,10 +24,12 @@ import {
 import { env } from "../config/env.js";
 
 export async function dashboard(req: Request, res: Response) {
+  const now = new Date();
   const monthStart = new Date(
-    new Date().getFullYear(),
-    new Date().getMonth(),
-    1,
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1),
+  );
+  const monthEnd = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1),
   );
   const [
     totalGyms,
@@ -44,13 +49,10 @@ export async function dashboard(req: Request, res: Response) {
     User.countDocuments({ roles: "GYM_OWNER" }),
     User.countDocuments({ roles: "USER" }),
     Subscription.countDocuments({ status: "ACTIVE" }),
-    Payment.aggregate([
-      { $match: { status: "CAPTURED", capturedAt: { $gte: monthStart } } },
-      { $group: { _id: null, total: { $sum: "$amountMinor" } } },
-    ]),
+    platformMonthlyReceipts(now),
     Payment.countDocuments({
       status: "FAILED",
-      createdAt: { $gte: monthStart },
+      createdAt: { $gte: monthStart, $lt: monthEnd },
     }),
   ]);
   res.json({
@@ -62,7 +64,12 @@ export async function dashboard(req: Request, res: Response) {
       totalOwners,
       totalUsers,
       activeSubscriptions,
-      monthlyRevenueMinor: revenue[0]?.total || 0,
+      monthlyRevenueMinor: revenue.netMinor,
+      monthlyGrossReceiptsMinor: revenue.grossMinor,
+      monthlyCohortRefundsMinor: revenue.refundMinor,
+      monthlyRevenueBasis: revenue.basis,
+      monthlyRevenueScope: revenue.scope,
+      monthlyRevenueTimezone: revenue.dateRangeTimezone,
       failedPayments,
     },
   });
@@ -171,6 +178,20 @@ export async function setGymStatus(req: Request, res: Response) {
     target.suspensionReason =
       status === "SUSPENDED" ? req.body.reason : undefined;
     await target.save({ session });
+    await emitDomainEvent({
+      event:
+        status === "ACTIVE"
+          ? "gym.activated"
+          : status === "SUSPENDED"
+            ? "gym.suspended"
+            : "gym.archived",
+      userId: target.ownerId,
+      gymId: target._id,
+      entityId: target.publicId,
+      occurrenceId: target.updatedAt.toISOString(),
+      actionUrl: "/owner/dashboard",
+      session,
+    });
     if (registration) {
       registration.status = status === "ACTIVE" ? "ACTIVE" : "SUSPENDED";
       if (status === "ACTIVE") registration.currentStep = "COMPLETE";
@@ -241,12 +262,14 @@ export async function healthOverview(_req: Request, res: Response) {
           "Configuration presence only; provider availability is not measured.",
       },
       storage: {
-        status:
+        provider: storageProvider(),
+        status: (
           env.OBJECT_STORAGE_ENDPOINT &&
-          env.OBJECT_STORAGE_ACCESS_KEY &&
-          env.OBJECT_STORAGE_SECRET_KEY
-            ? "CONFIGURED"
-            : "NOT_CONFIGURED",
+              env.OBJECT_STORAGE_ACCESS_KEY &&
+              env.OBJECT_STORAGE_SECRET_KEY
+        )
+          ? "CONFIGURED"
+          : "NOT_CONFIGURED",
       },
       maps: {
         provider: "LOCATIONIQ",

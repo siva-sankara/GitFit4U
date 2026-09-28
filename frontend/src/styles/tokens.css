@@ -1,8 +1,11 @@
 :root {
   /* Relative units respect the reader's browser font-size preference. */
-  --text-size-caption: 0.875rem;
-  --text-size-small: 1rem;
-  --text-size-body: 1.125rem;
+  --text-size-caption: 0.8125rem;
+  --text-size-small: 0.9375rem;
+  --text-size-body: 1rem;
+  --text-size-page: clamp(1.5rem, 1.15rem + 1.2vw, 2rem);
+  --text-size-section: clamp(1.125rem, 1rem + 0.6vw, 1.5rem);
+  --text-size-card: 1.0625rem;
   color-scheme: light;
   --font-display: "Plus Jakarta Sans", "Inter", "Segoe UI", Arial, sans-serif;
   --font-body: "Plus Jakarta Sans", "Inter", "Segoe UI", Arial, sans-serif;
@@ -61,7 +64,7 @@
   --glass: rgba(16, 31, 25, 0.74);
   --text: #f7fbf8;
   --text-secondary: #b9c8c0;
-  --text-muted: #7f9389;
+  --text-muted: #a4b5ab;
   --border: rgba(218, 255, 234, 0.12);
   --border-strong: rgba(218, 255, 234, 0.24);
   --shadow-sm: 0 10px 25px rgba(0, 0, 0, 0.18);

@@ -4,6 +4,9 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
+    "lint": "eslint . --max-warnings 0",
+    "db:migrate-social-media": "tsx src/scripts/migrate-social-media.ts",
+    "test:enhancements": "tsx src/scripts/verify-isolated-membership.ts --run-isolated",
     "dev": "tsx watch src/server.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server.js",
@@ -16,9 +19,11 @@
     "test:storage": "tsx src/scripts/check-storage.ts",
     "db:inspect": "node src/scripts/inspect-database.mjs",
     "db:migrate": "tsx src/scripts/migrate-indexes.ts",
+    "db:migrate-account-promotions": "tsx src/scripts/migrate-account-promotions.ts",
     "test:push": "tsx src/scripts/firebase-push-check.ts"
   },
   "dependencies": {
+    "@fontsource/noto-sans": "^5.3.0",
     "bcrypt": "^6.0.0",
     "bullmq": "^6.3.4",
     "compression": "^1.8.1",
@@ -28,6 +33,7 @@
     "express": "^5.2.1",
     "express-rate-limit": "^8.7.0",
     "firebase": "^12.18.0",
+    "firebase-admin": "^14.5.0",
     "google-auth-library": "^11.0.2",
     "helmet": "^8.3.0",
     "ioredis": "^6.0.0",
@@ -36,12 +42,26 @@
     "multer": "^2.3.0",
     "nanoid": "^6.0.1",
     "nodemon": "^3.1.14",
+    "pdfkit": "^0.20.2",
     "pino": "^10.3.1",
     "pino-http": "^11.0.0",
+    "sharp": "^0.35.4",
     "socket.io": "^4.8.3",
     "zod": "^4.5.4"
   },
+  "overrides": {
+    "gaxios@6.7.1": {
+      "uuid": "11.1.1"
+    }
+  },
+  "engines": {
+    "node": ">=22"
+  },
   "devDependencies": {
+    "@babel/core": "^7.29.7",
+    "@babel/eslint-parser": "^7.29.9",
+    "@babel/plugin-syntax-typescript": "^7.29.7",
+    "@eslint/js": "^9.39.5",
     "@types/bcrypt": "^6.0.0",
     "@types/compression": "^1.8.1",
     "@types/cookie-parser": "^1.4.10",
@@ -50,7 +70,10 @@
     "@types/jsonwebtoken": "^9.0.10",
     "@types/multer": "^2.2.0",
     "@types/node": "^26.4.1",
+    "@types/pdfkit": "^0.17.6",
     "@types/supertest": "^7.2.1",
+    "eslint": "^9.39.5",
+    "globals": "^17.12.0",
     "prettier": "^3.9.6",
     "supertest": "^7.2.2",
     "tsx": "^4.23.13",

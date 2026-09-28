@@ -1,4 +1,10 @@
-import { beforeEach, afterEach, expect, it, vi } from "vitest";
+import { beforeEach, expect, it, vi } from "vitest";
+const mocks = vi.hoisted(() => ({
+  send: vi.fn(),
+  initialize: vi.fn(),
+  cert: vi.fn(),
+  apps: vi.fn(),
+}));
 vi.mock("../../config/env.js", () => ({
   env: {
     FIREBASE_PROJECT_ID: "test-project",
@@ -7,73 +13,71 @@ vi.mock("../../config/env.js", () => ({
     CLIENT_ORIGIN: "https://gym.example.test,http://localhost:5173",
   },
 }));
-vi.mock("google-auth-library", () => ({
-  GoogleAuth: class {
-    getAccessToken = async () => "test-access-token";
-  },
+vi.mock("firebase-admin/app", () => ({
+  cert: mocks.cert,
+  getApps: mocks.apps,
+  initializeApp: mocks.initialize,
+}));
+vi.mock("firebase-admin/messaging", () => ({
+  getMessaging: () => ({ send: mocks.send }),
 }));
 import { FirebaseProvider, notificationLink } from "./firebaseProvider.js";
-const send = vi.fn();
 beforeEach(() => {
-  vi.stubGlobal("fetch", send);
-  send.mockReset();
+  vi.resetAllMocks();
+  mocks.apps.mockReturnValue([]);
+  mocks.send.mockResolvedValue("provider-id");
 });
-afterEach(() => vi.unstubAllGlobals());
-it("uses the HTTP v1 webpush link and a local navigation path", async () => {
-  send.mockResolvedValue(
-    new Response(JSON.stringify({ name: "provider-id" }), { status: 200 }),
-  );
+it("uses Firebase Admin SDK with safe local deep links and stable notification tags", async () => {
   const result = await new FirebaseProvider().send({
     token: "device",
     title: "Membership active",
     body: "Ready",
-    data: { notificationId: "id", navigationPath: "/app/subscriptions" },
+    data: { notificationId: "notice", navigationPath: "/messages/thread-id" },
   });
-  const body = JSON.parse(send.mock.calls[0][1].body);
-  expect(body.message.webpush.fcm_options.link).toBe(
-    "https://gym.example.test/app/subscriptions",
-  );
-  expect(body.message.data.navigationPath).toBe("/app/subscriptions");
+  expect(mocks.cert).toHaveBeenCalledWith({
+    projectId: "test-project",
+    clientEmail: "test@example.test",
+    privateKey: "test-key",
+  });
+  expect(mocks.send.mock.calls[0][0]).toMatchObject({
+    data: { navigationPath: "/messages/thread-id" },
+    webpush: {
+      fcmOptions: { link: "https://gym.example.test/messages/thread-id" },
+      notification: { tag: "notice", renotify: false },
+    },
+  });
   expect(result.providerMessageId).toBe("provider-id");
 });
-it("rejects external notification click destinations", () => {
-  expect(notificationLink("https://evil.test")).toBe(
-    "https://gym.example.test/notifications",
-  );
-  expect(notificationLink("//evil.test/path")).toBe(
-    "https://gym.example.test/notifications",
-  );
-});
-it("classifies invalid tokens without leaking provider responses", async () => {
-  send.mockResolvedValue(
-    new Response(
-      JSON.stringify({
-        error: {
-          details: [
-            {
-              "@type": "type.googleapis.com/google.firebase.fcm.v1.FcmError",
-              errorCode: "UNREGISTERED",
-            },
-          ],
-        },
-      }),
-      { status: 404 },
+it.each(["https://evil.test", "//evil.test/path", "/\\evil.test/path"])(
+  "rejects an external click target %s",
+  (path) =>
+    expect(notificationLink(path)).toBe(
+      "https://gym.example.test/notifications",
     ),
-  );
+);
+it.each([
+  "messaging/registration-token-not-registered",
+  "messaging/invalid-registration-token",
+])("deactivates invalid SDK tokens %s without exposing them", async (code) => {
+  mocks.send.mockRejectedValue({ code, message: "sensitive-token" });
   await expect(
     new FirebaseProvider().send({
       token: "secret",
       title: "Test",
       body: "Test",
     }),
-  ).rejects.toMatchObject({ code: "UNREGISTERED", retryable: false });
+  ).rejects.toMatchObject({
+    code: "UNREGISTERED",
+    retryable: false,
+    message: "Push notification delivery failed.",
+  });
 });
-it("retries quota and transient provider failures", async () => {
-  send.mockResolvedValue(
-    new Response(JSON.stringify({ error: { status: "RESOURCE_EXHAUSTED" } }), {
-      status: 429,
-    }),
-  );
+it.each([
+  "messaging/quota-exceeded",
+  "messaging/server-unavailable",
+  "app/network-error",
+])("retries transient SDK failure %s", async (code) => {
+  mocks.send.mockRejectedValue({ code });
   await expect(
     new FirebaseProvider().send({
       token: "device",

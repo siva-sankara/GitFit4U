@@ -1,5 +1,6 @@
 ﻿import { Router } from "express";
 import type { Request } from "express";
+import { saveGymClass } from "../services/classManagementService.js";
 import mongoose from "mongoose";
 import { z } from "zod";
 import { nanoid } from "nanoid";
@@ -56,17 +57,24 @@ import {
   progressInput,
 } from "./inputSchemas.js";
 import type { Permission } from "../constants/domain.js";
-import { presignedObjectUrl } from "../integrations/storage/s3ObjectStore.js";
+import { attachmentUrl } from "../integrations/storage/mediaStore.js";
+import { ensureSupportConversation, notifySupportReply } from "../services/supportConversationService.js";
+import { updateMember } from "../controllers/memberManagementController.js";
 import { allowedContacts } from "../services/contactService.js";
 import { refreshGymRating } from "../services/gymProjectionService.js";
+import { withGymMedia } from "../services/gymMediaService.js";
+import { withMemberMedia, withUserMedia } from "../services/userMediaService.js";
 import {
   registrationStatus,
   legacyRegistrationStates,
 } from "../services/registrationService.js";
 import { env } from "../config/env.js";
+import rateLimit from "express-rate-limit";
+import { downloadPaymentInvoice } from "../controllers/invoiceController.js";
 
 export const workspaceRoutes = Router();
 workspaceRoutes.use(requireAuth);
+workspaceRoutes.get("/payments/:id/invoice", rateLimit({ windowMs: 60000, limit: 15, keyGenerator: req => req.auth!.userId, standardHeaders: "draft-8", legacyHeaders: false }), downloadPaymentInvoice);
 workspaceRoutes.get("/registration-options", (_req, res) =>
   res.json({
     success: true,
@@ -108,7 +116,7 @@ workspaceRoutes.post(
     const data = await Campaign.findOneAndUpdate(
       { _id: campaign._id, status: "DRAFT" },
       { $set: { status: "QUEUED", "analytics.recipients": recipients } },
-      { new: true },
+      { returnDocument: "after" },
     );
     if (!data)
       throw new AppError(
@@ -134,10 +142,10 @@ workspaceRoutes.get("/documents/:id/url", async (req, res) => {
     throw new AppError(404, "DOCUMENT_NOT_FOUND", "Document not found.");
   res.json({
     success: true,
-    data: { url: presignedObjectUrl("GET", attachment.objectKey, 120) },
+    data: { url: attachmentUrl(attachment) },
   });
 });
-const person = "publicId name email phone avatarUrl";
+const person = "publicId name email phone avatarUrl avatarAttachmentId";
 type Resource = {
   model: any;
   select: string;
@@ -147,13 +155,25 @@ type Resource = {
   permission?: Permission;
 };
 const resources: Record<string, Resource> = {
+  notifications: {
+    model: Notification,
+    select:
+      "userId title message category readAt archivedAt pushStatus createdAt",
+    search: ["title", "message"],
+    populate: [{ path: "userId", select: "name publicId" }],
+  },
   members: {
     model: MemberProfile,
     select:
-      "publicId gymId userId memberCode status fitnessGoal currentSubscriptionId joinedAt createdAt",
+      "publicId gymId userId contact memberCode status fitnessGoal currentSubscriptionId assignedTrainerId trainerAssignedAt joinedAt createdAt",
     search: ["memberCode", "fitnessGoal"],
     populate: [
+      { path: "gymId", select: "name publicId" },
       { path: "userId", select: person },
+      {
+        path: "assignedTrainerId",
+        select: "name publicId status photoUrl photoAttachmentId",
+      },
       {
         path: "currentSubscriptionId",
         select: "publicId planSnapshot status startsAt endsAt",
@@ -164,7 +184,8 @@ const resources: Record<string, Resource> = {
   plans: {
     model: MembershipPlan,
     select:
-      "publicId code name description durationDays priceMinor discountMinor taxRateBasisPoints benefits freezeDaysAllowed status version createdAt",
+      "publicId gymId code name description durationDays priceMinor discountMinor taxRateBasisPoints benefits freezeDaysAllowed status version createdAt",
+    populate: [{ path: "gymId", select: "name publicId" }],
     search: ["name", "code"],
     permission: "gym:read",
   },
@@ -174,17 +195,18 @@ const resources: Record<string, Resource> = {
       "publicId type userId gymId planSnapshot status startsAt endsAt renewalAt freezePeriods createdAt",
     populate: [
       { path: "userId", select: person },
-      { path: "gymId", select: "name slug" },
+      { path: "gymId", select: "name slug publicId logoAttachmentId logoUrl timezone" },
     ],
     permission: "member:read",
   },
   payments: {
     model: Payment,
     select:
-      "publicId purpose payerId gymId amountMinor currency status methodCategory capturedAt failureDescription createdAt",
+      "publicId purpose payerId gymId subscriptionId amountMinor currency provider status methodCategory capturedAt failureDescription createdAt",
     populate: [
       { path: "payerId", select: "name publicId" },
       { path: "gymId", select: "name" },
+      { path: "subscriptionId", select: "planSnapshot.name" },
     ],
     permission: "finance:read",
   },
@@ -193,9 +215,9 @@ const resources: Record<string, Resource> = {
     select:
       "publicId memberProfileId userId gymId type occurredAt localDate source",
     populate: [
-      { path: "userId", select: "name publicId" },
+      { path: "userId", select: "name publicId avatarUrl avatarAttachmentId" },
       { path: "gymId", select: "name" },
-      { path: "memberProfileId", select: "memberCode" },
+      { path: "memberProfileId", select: "memberCode gymId contact.name contact.avatarUrl contact.avatarAttachmentId" },
     ],
     sort: "occurredAt",
     permission: "member:read",
@@ -214,7 +236,9 @@ const resources: Record<string, Resource> = {
   },
   trainers: {
     model: Trainer,
-    select: "publicId name userId qualifications specializations bio status",
+    select:
+      "publicId gymId name userId phone email experienceYears availability photoUrl qualifications specializations bio status",
+    populate: [{ path: "gymId", select: "name publicId" }],
     search: ["name"],
     permission: "gym:read",
   },
@@ -266,7 +290,7 @@ const resources: Record<string, Resource> = {
   gyms: {
     model: Gym,
     select:
-      "publicId name slug ownerId address status verificationStatus platformSubscriptionStatus createdAt",
+      "publicId name slug ownerId address contact description facilities location timezone status verificationStatus platformSubscriptionStatus createdAt",
     search: ["name", "address.city"],
     populate: [{ path: "ownerId", select: person }],
   },
@@ -390,11 +414,7 @@ export async function resourceScope(
   if (key === "support")
     return auth.role === "ADMIN" ? {} : { requesterId: auth.userId };
   if (auth.role === "ADMIN")
-    return key === "owners"
-      ? { roles: "GYM_OWNER" }
-      : key === "users"
-        ? { roles: "USER" }
-        : {};
+    return key === "owners" ? { roles: "GYM_OWNER" } : {};
   if (auth.role === "GYM_OWNER" || auth.role === "GYM_STAFF") {
     if (key === "registrations" && auth.role === "GYM_OWNER")
       return { ownerId: auth.userId };
@@ -572,7 +592,7 @@ workspaceRoutes.get("/records/:resource", async (req, res) => {
         $match: {
           gymId: {
             $in: data.map(
-              (member: { gymId: mongoose.Types.ObjectId }) => member.gymId,
+              (member: { gymId: any }) => member.gymId?._id || member.gymId,
             ),
           },
           memberProfileId: {
@@ -597,12 +617,30 @@ workspaceRoutes.get("/records/:resource", async (req, res) => {
       attendanceVisits30Days: visitCounts.get(String(member._id)) || 0,
     }));
   }
+  if (key === "members") memberRows = await withMemberMedia(memberRows);
+  if (key === "attendance") {
+    const people = await withUserMedia(data.map((row: any) => row.userId).filter(Boolean));
+    const members = await withMemberMedia(data.map((row: any) => row.memberProfileId).filter(Boolean));
+    memberRows = data.map((row: any) => ({ ...row,
+      userId: people.find(person => String(person._id) === String(row.userId?._id)) || row.userId,
+      memberProfileId: members.find(member => String(member._id) === String(row.memberProfileId?._id)) || row.memberProfileId,
+    }));
+  }
   res.json({
     success: true,
     data:
       key === "registrations"
         ? data.map((r: any) => ({ ...r, status: registrationStatus(r) }))
-        : memberRows,
+        : key === "subscriptions"
+          ? await Promise.all(
+              data.map(async (row: any) => ({
+                ...row,
+                gymId: row.gymId
+                  ? (await withGymMedia([row.gymId]))[0]
+                  : row.gymId,
+              })),
+            )
+          : memberRows,
     meta: pageMeta(page, limit, total),
   });
 });
@@ -615,7 +653,10 @@ workspaceRoutes.get("/summary", async (req, res) => {
   const paymentFilter = admin
     ? {}
     : owner
-      ? { gymId: new mongoose.Types.ObjectId(auth.gymId) }
+      ? {
+          gymId: new mongoose.Types.ObjectId(auth.gymId),
+          purpose: "MEMBERSHIP",
+        }
       : { payerId: new mongoose.Types.ObjectId(auth.userId) };
   const attendanceFilter = admin
     ? {}
@@ -630,7 +671,14 @@ workspaceRoutes.get("/summary", async (req, res) => {
       {
         $match: {
           ...paymentFilter,
-          status: { $in: ["CAPTURED", "PARTIALLY_REFUNDED", "REFUNDED"] },
+          status: {
+            $in: [
+              "CAPTURED",
+              "PARTIALLY_REFUNDED",
+              "REFUNDED",
+              "REFUND_PENDING",
+            ],
+          },
           capturedAt: { $gte: since },
         },
       },
@@ -664,7 +712,11 @@ workspaceRoutes.get("/summary", async (req, res) => {
       status: "ACTIVE",
       endsAt: { $gte: new Date() },
     }),
-    Notification.countDocuments({ userId: auth.userId, readAt: null }),
+    Notification.countDocuments({
+      userId: auth.userId,
+      readAt: null,
+      archivedAt: null,
+    }),
   ]);
   res.json({
     success: true,
@@ -681,33 +733,7 @@ workspaceRoutes.patch(
   requireRole("GYM_OWNER", "GYM_STAFF"),
   requireGymContext,
   requirePermission("member:write"),
-  async (req, res) => {
-    if (
-      req.body.assignedTrainerId &&
-      !(await Trainer.exists({
-        _id: req.body.assignedTrainerId,
-        gymId: req.auth!.gymId,
-        status: "ACTIVE",
-      }))
-    )
-      throw new AppError(
-        422,
-        "TRAINER_INVALID",
-        "Select a trainer at this gym.",
-      );
-    const data = await MemberProfile.findOneAndUpdate(
-      { publicId: req.params.id, gymId: req.auth!.gymId },
-      { $set: memberUpdate.parse(req.body) },
-      { new: true, runValidators: true },
-    );
-    if (!data) throw new AppError(404, "MEMBER_NOT_FOUND", "Member not found.");
-    await writeAudit(req, {
-      action: "member.updated",
-      entityType: "MemberProfile",
-      entityId: data.publicId,
-    });
-    res.json({ success: true, data });
-  },
+  updateMember,
 );
 workspaceRoutes.patch(
   "/classes/:id",
@@ -715,31 +741,11 @@ workspaceRoutes.patch(
   requireGymContext,
   requirePermission("class:write"),
   async (req, res) => {
-    const body = classInput.parse(req.body);
-    if (
-      body.trainerId &&
-      !(await Trainer.exists({ _id: body.trainerId, gymId: req.auth!.gymId }))
-    )
-      throw new AppError(
-        422,
-        "TRAINER_INVALID",
-        "Select a trainer at this gym.",
-      );
-    const data = await ClassSession.findOneAndUpdate(
-      {
-        publicId: req.params.id,
-        gymId: req.auth!.gymId,
-        bookedCount: { $lte: body.capacity },
-      },
-      { $set: body },
-      { new: true, runValidators: true },
-    );
-    if (!data)
-      throw new AppError(
-        409,
-        "CLASS_UPDATE_FAILED",
-        "Class unavailable or capacity is below current bookings.",
-      );
+    const data = await saveGymClass({
+      gymId: req.auth!.gymId!,
+      publicId: String(req.params.id),
+      body: req.body,
+    });
     res.json({ success: true, data });
   },
 );
@@ -757,6 +763,19 @@ workspaceRoutes.post("/support/:id/replies", async (req, res) => {
     ...(req.auth!.role === "ADMIN" ? {} : { requesterId: req.auth!.userId }),
   });
   if (!ticket) throw new AppError(404, "TICKET_NOT_FOUND", "Ticket not found.");
+  if (
+    ["RESOLVED", "CLOSED"].includes(ticket.status) &&
+    !(
+      req.auth!.role === "ADMIN" &&
+      body.status &&
+      !["RESOLVED", "CLOSED"].includes(body.status)
+    )
+  )
+    throw new AppError(
+      409,
+      "SUPPORT_CLOSED",
+      "Reopen the support conversation before replying.",
+    );
   ticket.messages.push({
     authorId: req.auth!.userId,
     body: body.message,
@@ -764,7 +783,12 @@ workspaceRoutes.post("/support/:id/replies", async (req, res) => {
   });
   if (req.auth!.role === "ADMIN" && body.status) ticket.status = body.status;
   await ticket.save();
-  res.json({ success: true, data: ticket });
+  const conversation = await ensureSupportConversation(ticket);
+  await notifySupportReply(ticket, conversation.publicId, ticket.messages.at(-1));
+  res.json({
+    success: true,
+    data: { ...ticket.toObject(), conversationId: conversation.publicId },
+  });
 });
 workspaceRoutes.post(
   "/platform-plans",
@@ -781,7 +805,7 @@ workspaceRoutes.patch(
     const data = await PlatformPlan.findByIdAndUpdate(
       req.params.id,
       { $set: platformInput.partial().parse(req.body) },
-      { new: true, runValidators: true },
+      { returnDocument: "after", runValidators: true },
     );
     if (!data) throw new AppError(404, "PLAN_NOT_FOUND", "Plan not found.");
     res.json({ success: true, data });
@@ -797,7 +821,7 @@ workspaceRoutes.patch(
     const data = await Review.findOneAndUpdate(
       { publicId: req.params.id },
       body,
-      { new: true },
+      { returnDocument: "after" },
     );
     if (!data) throw new AppError(404, "REVIEW_NOT_FOUND", "Review not found.");
     await refreshGymRating(data.gymId);

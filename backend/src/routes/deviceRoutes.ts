@@ -13,6 +13,7 @@ deviceRoutes.post(
       body: z.object({
         token: z.string().min(20).max(4096),
         platform: z.enum(["WEB", "ANDROID", "IOS"]),
+        deviceId: z.string().uuid().optional(),
       }),
       params: z.object({}),
       query: z.object({}),

@@ -1,16 +1,31 @@
-import { Router } from "express";
+import { Router, raw } from "express";
 import { z } from "zod";
 import { requireAuth } from "../middleware/auth.js";
 import { validate } from "../middleware/validate.js";
 import * as controller from "../controllers/uploadController.js";
 export const uploadRoutes = Router();
 uploadRoutes.use(requireAuth);
+uploadRoutes.put(
+  "/:id/bytes",
+  raw({
+    type: [
+      "image/jpeg",
+      "image/png",
+      "image/webp",
+      "application/pdf",
+      "video/mp4",
+    ],
+    limit: "50mb",
+  }),
+  controller.bytes,
+);
 uploadRoutes.post(
   "/",
   validate(
     z.object({
       body: z.object({
         registrationId: z.string().min(8).max(64).optional(),
+        gymId: z.string().regex(/^[a-f\d]{24}$/i).optional(),
         name: z.string().min(1).max(255),
         mimeType: z.enum([
           "image/jpeg",
@@ -22,6 +37,10 @@ uploadRoutes.post(
         size: z.number().int().positive().max(50_000_000),
         purpose: z.enum([
           "AVATAR",
+          "MEMBER_AVATAR",
+          "TRAINER_IMAGE",
+          "POST_IMAGE",
+          "STORY_IMAGE",
           "GYM_LOGO",
           "GYM_COVER",
           "GYM_GALLERY",

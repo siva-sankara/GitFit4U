@@ -1,12 +1,11 @@
-import { Menu, Moon, Sun, X } from "lucide-react";
+import { Menu, X } from "lucide-react";
 import { useState } from "react";
 import { Link, NavLink } from "react-router-dom";
 import { Brand } from "./Brand";
-import { useApp } from "../context/AppContext";
+import { ThemePicker } from "./ThemePicker";
 
 export function PublicHeader() {
   const [open, setOpen] = useState(false);
-  const { theme, toggleTheme } = useApp();
   return (
     <header className="public-header">
       <div className="container header-inner">
@@ -36,13 +35,7 @@ export function PublicHeader() {
           </Link>
         </nav>
         <div className="header-actions">
-          <button
-            className="icon-btn"
-            onClick={toggleTheme}
-            aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}
-          >
-            {theme === "dark" ? <Sun size={19} /> : <Moon size={19} />}
-          </button>
+          <ThemePicker />
           <Link className="btn btn-secondary desktop-only" to="/auth/login">
             Sign in
           </Link>

@@ -19,6 +19,8 @@ const conversationSchema = new Schema(
       { type: Schema.Types.ObjectId, ref: "User", required: true },
     ],
     title: { type: String, trim: true, maxlength: 120 },
+    supportTicketId: { type: Schema.Types.ObjectId, ref: "SupportTicket" },
+    directKey: { type: String },
     lastMessageId: { type: Schema.Types.ObjectId, ref: "Message" },
     lastMessageAt: { type: Date, index: true },
     archivedBy: [{ type: Schema.Types.ObjectId, ref: "User" }],
@@ -26,6 +28,17 @@ const conversationSchema = new Schema(
   { timestamps: true },
 );
 conversationSchema.index({ participants: 1, lastMessageAt: -1 });
+conversationSchema.index(
+  { supportTicketId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { supportTicketId: { $type: "objectId" } },
+  },
+);
+conversationSchema.index(
+  { directKey: 1 },
+  { unique: true, partialFilterExpression: { directKey: { $type: "string" } } },
+);
 
 const messageSchema = new Schema(
   {
@@ -63,9 +76,11 @@ const messageSchema = new Schema(
 );
 messageSchema.index({ conversationId: 1, createdAt: -1 });
 messageSchema.index({ senderId: 1, clientMessageId: 1 }, { unique: true });
+messageSchema.index({ "attachments.key": 1 });
 
 const deviceTokenSchema = new Schema(
   {
+    deviceId: { type: String, maxlength: 128, index: true },
     sessionId: { type: String, index: true },
     userId: {
       type: Schema.Types.ObjectId,
@@ -87,6 +102,7 @@ const deviceTokenSchema = new Schema(
   { timestamps: true },
 );
 deviceTokenSchema.index({ userId: 1, revokedAt: 1 });
+deviceTokenSchema.index({ userId: 1, sessionId: 1, revokedAt: 1 });
 
 export const Conversation =
   models.Conversation || model("Conversation", conversationSchema);

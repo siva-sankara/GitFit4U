@@ -9,6 +9,7 @@ export async function register(req: Request, res: Response) {
       $set: {
         userId: req.auth!.userId,
         sessionId: req.auth!.sessionId,
+        deviceId: req.body.deviceId,
         token: req.body.token,
         platform: req.body.platform,
         permission: "GRANTED",
@@ -16,18 +17,55 @@ export async function register(req: Request, res: Response) {
         revokedAt: null,
       },
     },
-    { upsert: true, new: true, runValidators: true },
+    { upsert: true, returnDocument: "after", runValidators: true },
   ).select("-token");
-  res.status(201).json({ success: true, data });
+  if (req.body.deviceId)
+    await DeviceToken.updateMany(
+      {
+        userId: req.auth!.userId,
+        deviceId: req.body.deviceId,
+        tokenHash: { $ne: sha256(req.body.token) },
+        revokedAt: null,
+      },
+      { $set: { revokedAt: new Date() } },
+    );
+  res
+    .status(201)
+    .json({
+      success: true,
+      data: {
+        _id: data._id,
+        platform: data.platform,
+        permission: data.permission,
+        lastSeenAt: data.lastSeenAt,
+      },
+    });
 }
 export async function revoke(req: Request, res: Response) {
   await DeviceToken.updateOne(
-    { tokenHash: sha256(req.body.token), userId: req.auth!.userId },
+    {
+      tokenHash: sha256(req.body.token),
+      userId: req.auth!.userId,
+      sessionId: req.auth!.sessionId,
+    },
     { $set: { revokedAt: new Date() } },
   );
   res.status(204).send();
 }
 
-export async function status(_req: Request, res: Response) {
-  res.json({ success: true, data: { configured: pushConfigured() } });
+export async function status(req: Request, res: Response) {
+  const activeDevices = await DeviceToken.countDocuments({
+    userId: req.auth!.userId,
+    sessionId: req.auth!.sessionId,
+    revokedAt: null,
+    permission: "GRANTED",
+  });
+  res.json({
+    success: true,
+    data: {
+      configured: pushConfigured(),
+      registered: activeDevices > 0,
+      activeDevices,
+    },
+  });
 }

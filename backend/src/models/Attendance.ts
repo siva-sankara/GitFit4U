@@ -4,72 +4,153 @@ const { Schema, model, models } = mongoose;
 const gymScannerSchema = new Schema(
   {
     publicId: { type: String, required: true, unique: true },
-    gymId: { type: Schema.Types.ObjectId, ref: "Gym", required: true, index: true },
+    gymId: {
+      type: Schema.Types.ObjectId,
+      ref: "Gym",
+      required: true,
+      index: true,
+    },
     name: { type: String, required: true },
+    kind: { type: String, enum: ["DEVICE", "GYM_IDENTITY"], default: "DEVICE" },
     status: { type: String, enum: ["ACTIVE", "DISABLED"], default: "ACTIVE" },
     secretVersion: { type: Number, default: 1 },
-    lastSeenAt: Date
+    lastSeenAt: Date,
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 gymScannerSchema.index({ gymId: 1, status: 1 });
+gymScannerSchema.index(
+  { gymId: 1, kind: 1 },
+  { unique: true, partialFilterExpression: { kind: "GYM_IDENTITY" } },
+);
 
 const attendanceEventSchema = new Schema(
   {
     publicId: { type: String, required: true, unique: true },
-    gymId: { type: Schema.Types.ObjectId, ref: "Gym", required: true, index: true },
-    memberProfileId: { type: Schema.Types.ObjectId, ref: "MemberProfile", required: true, index: true },
-    userId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
-    type: { type: String, enum: ["CHECK_IN", "CHECK_OUT", "CORRECTION"], required: true },
+    gymId: {
+      type: Schema.Types.ObjectId,
+      ref: "Gym",
+      required: true,
+      index: true,
+    },
+    memberProfileId: {
+      type: Schema.Types.ObjectId,
+      ref: "MemberProfile",
+      required: true,
+      index: true,
+    },
+    userId: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+      index: true,
+    },
+    type: {
+      type: String,
+      enum: ["CHECK_IN", "CHECK_OUT", "CORRECTION"],
+      required: true,
+    },
     occurredAt: { type: Date, required: true, default: Date.now },
     localDate: { type: String, required: true },
     source: { type: String, enum: ["QR", "MANUAL", "IMPORT"], required: true },
     scannerId: { type: Schema.Types.ObjectId, ref: "GymScanner" },
     qrNonce: { type: String, unique: true, sparse: true },
     idempotencyKey: { type: String },
+    dailyKey: { type: String },
     supersedesEventId: { type: Schema.Types.ObjectId, ref: "AttendanceEvent" },
     reason: String,
-    createdBy: { type: Schema.Types.ObjectId, ref: "User", required: true }
-    ,locationEvidence: {
-      point: { type: { type: String, enum: ["Point"] }, coordinates: [{ type: Number }] },
-      accuracyMeters: Number, distanceMeters: Number, allowedRadiusMeters: Number, capturedAt: Date
-    }
+    createdBy: { type: Schema.Types.ObjectId, ref: "User", required: true },
+    locationEvidence: {
+      point: {
+        type: { type: String, enum: ["Point"] },
+        coordinates: [{ type: Number }],
+      },
+      accuracyMeters: Number,
+      distanceMeters: Number,
+      allowedRadiusMeters: Number,
+      capturedAt: Date,
+    },
   },
-  { timestamps: true, immutable: true }
+  { timestamps: true, immutable: true },
 );
 attendanceEventSchema.index({ gymId: 1, memberProfileId: 1, occurredAt: -1 });
 attendanceEventSchema.index({ gymId: 1, localDate: 1, occurredAt: -1 });
-attendanceEventSchema.index({ gymId: 1, idempotencyKey: 1 }, { unique: true, sparse: true });
+attendanceEventSchema.index({ supersedesEventId: 1, type: 1, occurredAt: 1 });
+attendanceEventSchema.index(
+  { gymId: 1, idempotencyKey: 1 },
+  { unique: true, sparse: true },
+);
+attendanceEventSchema.index({ dailyKey: 1 }, { unique: true, sparse: true });
 
 const attendanceProjectionSchema = new Schema(
   {
     gymId: { type: Schema.Types.ObjectId, ref: "Gym", required: true },
-    memberProfileId: { type: Schema.Types.ObjectId, ref: "MemberProfile", required: true },
+    memberProfileId: {
+      type: Schema.Types.ObjectId,
+      ref: "MemberProfile",
+      required: true,
+    },
     localDate: { type: String, required: true },
     firstCheckInAt: Date,
     lastCheckOutAt: Date,
-    visitCount: { type: Number, default: 0 }
+    visitCount: { type: Number, default: 0 },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
-attendanceProjectionSchema.index({ gymId: 1, memberProfileId: 1, localDate: 1 }, { unique: true });
+attendanceProjectionSchema.index(
+  { gymId: 1, memberProfileId: 1, localDate: 1 },
+  { unique: true },
+);
 
 const streakProjectionSchema = new Schema(
   {
-    gymId: { type: Schema.Types.ObjectId, ref: "Gym", required: true },
-    memberProfileId: { type: Schema.Types.ObjectId, ref: "MemberProfile", required: true },
+    scope: { type: String, enum: ["GYM", "USER"], default: "GYM" },
+    userId: { type: Schema.Types.ObjectId, ref: "User" },
+    timezone: String,
+    gymId: { type: Schema.Types.ObjectId, ref: "Gym" },
+    memberProfileId: {
+      type: Schema.Types.ObjectId,
+      ref: "MemberProfile",
+    },
     currentStreak: { type: Number, default: 0 },
     longestStreak: { type: Number, default: 0 },
     totalVisits: { type: Number, default: 0 },
     lastAttendanceDate: String,
-    calculatedAt: Date
+    calculatedAt: Date,
+    calculationVersion: Number,
+    sourceEventId: { type: Schema.Types.ObjectId, ref: "AttendanceEvent" },
+    lastCheckIn: Date,
   },
-  { timestamps: true }
+  { timestamps: true },
 );
-streakProjectionSchema.index({ gymId: 1, memberProfileId: 1 }, { unique: true });
+streakProjectionSchema.index(
+  { gymId: 1, memberProfileId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      gymId: { $type: "objectId" },
+      memberProfileId: { $type: "objectId" },
+    },
+  },
+);
+streakProjectionSchema.index(
+  { userId: 1 },
+  { unique: true, partialFilterExpression: { scope: "USER" } },
+);
+attendanceEventSchema.index({ userId: 1, type: 1, occurredAt: -1 });
+attendanceEventSchema.index({
+  userId: 1,
+  type: 1,
+  createdAt: -1,
+  occurredAt: -1,
+});
 
-export const GymScanner = models.GymScanner || model("GymScanner", gymScannerSchema);
-export const AttendanceEvent = models.AttendanceEvent || model("AttendanceEvent", attendanceEventSchema);
+export const GymScanner =
+  models.GymScanner || model("GymScanner", gymScannerSchema);
+export const AttendanceEvent =
+  models.AttendanceEvent || model("AttendanceEvent", attendanceEventSchema);
 export const AttendanceProjection =
-  models.AttendanceProjection || model("AttendanceProjection", attendanceProjectionSchema);
-export const StreakProjection = models.StreakProjection || model("StreakProjection", streakProjectionSchema);
+  models.AttendanceProjection ||
+  model("AttendanceProjection", attendanceProjectionSchema);
+export const StreakProjection =
+  models.StreakProjection || model("StreakProjection", streakProjectionSchema);

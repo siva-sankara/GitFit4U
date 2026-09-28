@@ -2,6 +2,7 @@
 import mongoose from "mongoose";
 import assert from "node:assert/strict";
 import request from "supertest";
+import { isolatedScriptDatabase } from "./isolatedScriptDatabase.js";
 Object.assign(process.env, {
   NODE_ENV: "test",
   LOG_LEVEL: "silent",
@@ -16,7 +17,8 @@ const { RoleAssignment } = await import("../models/Auth.js");
 const { Attachment } = await import("../models/Business.js");
 const { createSession } = await import("../services/tokenService.js");
 const { OWNER_DEFAULT_PERMISSIONS } = await import("../constants/domain.js");
-const databaseName = `gfu_profile_${Date.now()}`;
+const testDatabase = isolatedScriptDatabase("gfg");
+const { databaseName } = testDatabase;
 let checks = 0;
 const check = (value: unknown, message: string) => {
   assert.ok(value, message);
@@ -29,8 +31,8 @@ async function call(
   body?: any,
   status = 200,
 ) {
-  let req = (request(app) as any)
-    [method]("/api/v1" + path)
+  const agent = request(app) as any;
+  let req = agent[method]("/api/v1" + path)
     .set("idempotency-key", crypto.randomUUID());
   if (token) req = req.auth(token, { type: "bearer" });
   if (body !== undefined) req = req.send(body);
@@ -44,8 +46,10 @@ async function call(
   return res.body.data;
 }
 const originalFetch = globalThis.fetch;
-let storedMime = "image/jpeg",
-  storedSize = 20;
+const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
+const mp4 = Buffer.from("00000014667479706d7034320000000069736f6d", "hex");
+let storedMime = "image/png",
+  storedSize = png.length;
 globalThis.fetch = async (url, init) => {
   if (
     String(url).startsWith("https://storage.example.test") &&
@@ -58,14 +62,19 @@ globalThis.fetch = async (url, init) => {
         "content-length": String(storedSize),
       },
     });
+  if (String(url).startsWith("https://storage.example.test") && (!init?.method || init.method === "GET")) {
+    return new Response(new Uint8Array(storedMime === "video/mp4" ? mp4 : png), { status: 200, headers: { "content-type": storedMime } });
+  }
   return originalFetch(url, init);
 };
 try {
   await mongoose.connect(process.env.MONGO_URI!, {
     dbName: databaseName,
     serverSelectionTimeoutMS: 15000,
+    autoCreate: false,
+    autoIndex: false,
   });
-  await Promise.all(Object.values(mongoose.models).map((m) => m.init()));
+  await testDatabase.initialize();
   async function owner(n: number) {
     const user = await User.create({
       publicId: `profile-owner-${n}`,
@@ -114,9 +123,9 @@ try {
     member.accessToken,
     {
       purpose: "GYM_GALLERY",
-      name: "photo.jpg",
-      mimeType: "image/jpeg",
-      size: 20,
+      name: "photo.png",
+      mimeType: "image/png",
+      size: png.length,
     },
     403,
   );
@@ -138,9 +147,9 @@ try {
     one.token,
     {
       purpose: "GYM_GALLERY",
-      name: "photo.jpg",
-      mimeType: "image/jpeg",
-      size: 20,
+      name: "photo.png",
+      mimeType: "image/png",
+      size: png.length,
     },
     201,
   );
@@ -151,7 +160,7 @@ try {
     { mediaAttachmentIds: [photo.attachment._id] },
     422,
   );
-  storedSize = 19;
+  storedSize = png.length - 1;
   await call(
     "post",
     `/uploads/${photo.attachment.publicId}/complete`,
@@ -159,7 +168,7 @@ try {
     {},
     409,
   );
-  storedSize = 20;
+  storedSize = png.length;
   await call(
     "post",
     `/uploads/${photo.attachment.publicId}/complete`,
@@ -193,6 +202,7 @@ try {
     201,
   );
   storedMime = "video/mp4";
+  storedSize = mp4.length;
   await call(
     "post",
     `/uploads/${video.attachment.publicId}/complete`,
@@ -384,12 +394,10 @@ try {
   );
 } finally {
   globalThis.fetch = originalFetch;
-  if (
-    mongoose.connection.name === databaseName &&
-    /^gfu_profile_\d+$/.test(databaseName)
-  ) {
-    await mongoose.connection.dropDatabase();
-    console.log("Temporary profile database removed.");
+  try {
+    if (await testDatabase.cleanup())
+      console.log("Temporary profile database removed.");
+  } finally {
+    await mongoose.disconnect();
   }
-  await mongoose.disconnect();
 }

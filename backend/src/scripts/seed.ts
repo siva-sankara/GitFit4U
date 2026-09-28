@@ -18,19 +18,19 @@ async function seed() {
   const admin = await User.findOneAndUpdate(
     { email: "admin@getfit4u.in" },
     { $set: { publicId: "admin-demo", name: "Aarav Admin", roles: ["ADMIN"], activeRole: "ADMIN", status: "ACTIVE" } },
-    { upsert: true, new: true, setDefaultsOnInsert: true }
+    { upsert: true, returnDocument: "after", setDefaultsOnInsert: true }
   );
   const owner = await User.findOneAndUpdate(
     { phone: "+919999000001" },
     { $set: { publicId: "owner-demo", name: "Meera Kapoor", roles: ["GYM_OWNER"], activeRole: "GYM_OWNER", status: "ACTIVE" } },
-    { upsert: true, new: true, setDefaultsOnInsert: true }
+    { upsert: true, returnDocument: "after", setDefaultsOnInsert: true }
   );
   const memberUser = await User.findOneAndUpdate(
     { phone: "+919999000002" },
     { $set: { publicId: "member-demo", name: "Rohan Sharma", roles: ["USER"], activeRole: "USER", status: "ACTIVE" } },
-    { upsert: true, new: true, setDefaultsOnInsert: true }
+    { upsert: true, returnDocument: "after", setDefaultsOnInsert: true }
   );
-  const trainerUser = await User.findOneAndUpdate({ email: "trainer@getfit4u.in" }, { $set: { publicId: "trainer-demo", name: "Arjun Verma", roles: ["TRAINER"], activeRole: "TRAINER", status: "ACTIVE" } }, { upsert: true, new: true, setDefaultsOnInsert: true });
+  const trainerUser = await User.findOneAndUpdate({ email: "trainer@getfit4u.in" }, { $set: { publicId: "trainer-demo", name: "Arjun Verma", roles: ["TRAINER"], activeRole: "TRAINER", status: "ACTIVE" } }, { upsert: true, returnDocument: "after", setDefaultsOnInsert: true });
 
   const gym = await Gym.findOneAndUpdate(
     { slug: "forge-fitness-kondapur" },
@@ -58,7 +58,7 @@ async function seed() {
         publishedAt: new Date()
       }
     },
-    { upsert: true, new: true, setDefaultsOnInsert: true }
+    { upsert: true, returnDocument: "after", setDefaultsOnInsert: true }
   );
 
   await RoleAssignment.findOneAndUpdate(
@@ -72,9 +72,9 @@ async function seed() {
     { upsert: true }
   );
   await RoleAssignment.findOneAndUpdate({ userId: trainerUser._id, role:"TRAINER", gymId:gym._id }, { permissions:TRAINER_DEFAULT_PERMISSIONS,status:"ACTIVE" }, { upsert:true });
-  await Trainer.findOneAndUpdate({ gymId:gym._id,userId:trainerUser._id }, { $set:{ publicId:"trainer-arjun-demo",name:"Arjun Verma",qualifications:["Certified Personal Trainer"],specializations:["Strength","HIIT"],status:"ACTIVE" } }, { upsert:true,new:true,setDefaultsOnInsert:true });
+  await Trainer.findOneAndUpdate({ gymId:gym._id,userId:trainerUser._id }, { $set:{ publicId:"trainer-arjun-demo",name:"Arjun Verma",qualifications:["Certified Personal Trainer"],specializations:["Strength","HIIT"],status:"ACTIVE" } }, { upsert:true,returnDocument: "after",setDefaultsOnInsert:true });
   const passwordHash=await bcrypt.hash("GetFit4U123",12);
-  for (const [user,subject] of [[admin,"admin@getfit4u.in"],[trainerUser,"trainer@getfit4u.in"]] as const) await AuthIdentity.findOneAndUpdate({ userId:user._id,provider:"PASSWORD" }, { $set:{ providerSubject:subject,verifiedAt:new Date(),passwordHash } }, { upsert:true,new:true });
+  for (const [user,subject] of [[admin,"admin@getfit4u.in"],[trainerUser,"trainer@getfit4u.in"]] as const) await AuthIdentity.findOneAndUpdate({ userId:user._id,provider:"PASSWORD" }, { $set:{ providerSubject:subject,verifiedAt:new Date(),passwordHash } }, { upsert:true,returnDocument: "after" });
 
   const plan = await MembershipPlan.findOneAndUpdate(
     { gymId: gym._id, code: "UNLIMITED-MONTHLY", version: 1 },
@@ -93,13 +93,13 @@ async function seed() {
         status: "ACTIVE"
       }
     },
-    { upsert: true, new: true, setDefaultsOnInsert: true }
+    { upsert: true, returnDocument: "after", setDefaultsOnInsert: true }
   );
 
   const member = await MemberProfile.findOneAndUpdate(
     { gymId: gym._id, userId: memberUser._id },
     { $set: { publicId: "member-rohan-demo", memberCode: "GFU-24018", status: "ACTIVE", fitnessGoal: "Build strength" } },
-    { upsert: true, new: true, setDefaultsOnInsert: true }
+    { upsert: true, returnDocument: "after", setDefaultsOnInsert: true }
   );
   const startsAt = new Date();
   startsAt.setDate(startsAt.getDate() - 8);
@@ -119,7 +119,7 @@ async function seed() {
         renewalAt: endsAt
       }
     },
-    { upsert: true, new: true, setDefaultsOnInsert: true }
+    { upsert: true, returnDocument: "after", setDefaultsOnInsert: true }
   );
   member.currentSubscriptionId = subscription._id;
   await member.save();

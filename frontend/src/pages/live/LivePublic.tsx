@@ -4,6 +4,7 @@ import { LocationPicker } from "../../components/LocationPicker";
 import { GymDetailsView } from "../public/GymDetailsView";
 import { deviceLocation, validCoordinates } from "../../services/location";
 import { useState, useEffect, useRef } from "react";
+import { flushSync } from "react-dom";
 import {
   Link,
   useNavigate,
@@ -19,6 +20,9 @@ import {
 } from "../../services/apiClient";
 import { QueryState, useData, money, EditForm, type Row } from "./LiveData";
 import { Modal } from "../../components/Modal";
+import { ReviewEditor } from "../../components/ReviewEditor";
+import { GymIdentity } from "../../components/GymIdentity";
+import { GymOffers, PromotionPlacement } from "../../components/PromotionPlacement";
 export function DatabaseGymCard({ gym }: { gym: Row }) {
   const { favorites, toggleFavorite } = useApp();
   const navigate = useNavigate();
@@ -59,7 +63,9 @@ export function DatabaseGymCard({ gym }: { gym: Row }) {
         </button>
       </div>
       <div className="gym-card-content">
-        <h3>{gym.name}</h3>
+        <h3>
+          <GymIdentity name={gym.name} logoUrl={gym.logoUrl} />
+        </h3>
         <p>
           {[gym.address?.locality, gym.address?.city]
             .filter(Boolean)
@@ -227,20 +233,22 @@ export function LiveExplore() {
         </div>
       </header>
       <form
-        className="table-toolbar"
+        className="table-toolbar explore-filter-toolbar"
         onSubmit={(e) => {
           e.preventDefault();
           filter("q", q);
         }}
       >
-        <input
-          className="input"
-          aria-label="Search gyms"
-          placeholder="Gym, locality or city"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-        />
-        <button className="btn btn-primary">Search</button>
+        <div className="explore-search">
+          <input
+            className="input"
+            aria-label="Search gyms"
+            placeholder="Gym, locality or city"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+          />
+          <button className="btn btn-primary">Search</button>
+        </div>
         <label className="field">
           <span>Minimum rating</span>
           <select
@@ -326,6 +334,7 @@ export function LiveExplore() {
           Reset filters
         </button>
       </div>
+      <PromotionPlacement placement="EXPLORE" />
       {geoError && <p role="alert">{geoError}</p>}
       <details className="panel form-section">
         <summary>Search near an address or choose a map pin</summary>
@@ -435,21 +444,39 @@ export function PaymentCheckout({
   quoteBody,
   onComplete,
   onBusyChange,
+  onGatewayOpenChange,
 }: {
   quotePath: string;
   quoteBody: Row;
   onComplete?: () => void;
   onBusyChange?: (busy: boolean) => void;
+  onGatewayOpenChange?: (open: boolean) => void;
 }) {
   const [paymentId, setPaymentId] = useState(""),
-    [message, setMessage] = useState("");
+    [message, setMessage] = useState(""),
+    [gatewayOpen, setGatewayOpen] = useState(false),
+    [verifying, setVerifying] = useState(false);
+  const [couponInput, setCouponInput] = useState(""), [couponCode, setCouponCode] = useState("");
+  const membershipCheckout = !quotePath.includes("platform");
+  const gatewayCallback = useRef(onGatewayOpenChange);
+  gatewayCallback.current = onGatewayOpenChange;
+  const gatewayCleanup = useRef<(() => void) | null>(null);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      gatewayCleanup.current?.();
+      gatewayCallback.current?.(false);
+    };
+  }, []);
   const client = useQueryClient();
   const quote = useQuery({
-    queryKey: ["quote", quotePath, quoteBody],
+    queryKey: ["quote", quotePath, quoteBody, couponCode],
     queryFn: () =>
       apiRequest<ApiEnvelope<Row>>(quotePath, {
         method: "POST",
-        body: JSON.stringify(quoteBody),
+        body: JSON.stringify({ ...quoteBody, ...(membershipCheckout && couponCode ? { couponCode } : {}) }),
       }),
     retry: false,
     staleTime: 15 * 60 * 1000,
@@ -497,6 +524,7 @@ export function PaymentCheckout({
       );
       if (!order.data.razorpayKeyId)
         throw new Error("Online payment is not configured.");
+      if (!mounted.current) return;
       setPaymentId(order.data.paymentId);
       if (quotePath.includes("platform"))
         void client.invalidateQueries({
@@ -504,6 +532,13 @@ export function PaymentCheckout({
         });
       await new Promise<void>((resolve, reject) => {
         let received = false;
+        const releaseGateway = () => {
+          gatewayCleanup.current = null;
+          if (mounted.current) {
+            setGatewayOpen(false);
+            gatewayCallback.current?.(false);
+          }
+        };
         const widget = new (window as any).Razorpay({
           key: order.data.razorpayKeyId,
           order_id: order.data.providerOrderId,
@@ -514,6 +549,8 @@ export function PaymentCheckout({
           prefill: order.data.prefill,
           handler: async (result: Row) => {
             received = true;
+            setVerifying(true);
+            releaseGateway();
             try {
               const verified = await apiRequest<ApiEnvelope<Row>>(
                 "/api/v1/checkout/verify",
@@ -539,10 +576,13 @@ export function PaymentCheckout({
               resolve();
             } catch (e) {
               reject(e);
+            } finally {
+              if (mounted.current) setVerifying(false);
             }
           },
           modal: {
             ondismiss: async () => {
+              releaseGateway();
               if (received) return;
               try {
                 await apiRequest(
@@ -569,15 +609,31 @@ export function PaymentCheckout({
         widget.on("payment.failed", (r: Row) =>
           reject(new Error(r.error?.description || "Payment failed.")),
         );
-        widget.open();
+        gatewayCleanup.current = () => {
+          received = true;
+          widget.close?.();
+          resolve();
+        };
+        try {
+          // Commit before open(): the gateway can focus its body-mounted iframe synchronously.
+          flushSync(() => {
+            setGatewayOpen(true);
+            gatewayCallback.current?.(true);
+          });
+          widget.open();
+        } catch (error) {
+          reject(error);
+          gatewayCleanup.current?.();
+          releaseGateway();
+        }
       });
     },
   });
   const completed = useRef("");
   useEffect(() => {
-    onBusyChange?.(pay.isPending);
+    onBusyChange?.(pay.isPending || verifying);
     return () => onBusyChange?.(false);
-  }, [pay.isPending, onBusyChange]);
+  }, [pay.isPending, verifying, onBusyChange]);
   useEffect(() => {
     if (
       payment.data?.data.status === "CAPTURED" &&
@@ -595,6 +651,13 @@ export function PaymentCheckout({
       currency: quote.data?.data.currency || "INR",
     }).format((amount || 0) / 100);
   return (
+    <>
+    {membershipCheckout && <form className="checkout-coupon" onSubmit={event => { event.preventDefault(); if (!paymentId && !pay.isPending) { setMessage(""); setCouponCode(couponInput.trim().toUpperCase()); } }}>
+      <label className="field"><span>Offer / coupon code</span><input className="input" value={couponInput} maxLength={64} autoComplete="off" disabled={!!paymentId || pay.isPending} onChange={event => setCouponInput(event.target.value)} /></label>
+      <div className="heading-actions"><button type="submit" className="btn btn-secondary" disabled={!!paymentId || pay.isPending || !couponInput.trim() || quote.isFetching}>Apply code</button>
+        {couponCode && <button type="button" className="btn btn-ghost" disabled={!!paymentId || pay.isPending} onClick={() => { setCouponCode(""); setCouponInput(""); }}>Remove code</button>}</div>
+      {!!paymentId && <p className="subtle">Pricing is locked to this payment attempt. Check its status before starting another purchase.</p>}
+    </form>}
     <QueryState query={quote}>
       {quote.data && (
         <>
@@ -627,6 +690,7 @@ export function PaymentCheckout({
               <strong>{checkoutMoney(quote.data.data.totalMinor)}</strong>
             </div>
           </div>
+          {quote.data.data.pricingSnapshot?.offer && <section className="form-section"><strong>Applied: {quote.data.data.pricingSnapshot.offer.name}</strong><p>Offer saving: {checkoutMoney(quote.data.data.pricingSnapshot.offerDiscountMinor)}</p>{quote.data.data.pricingSnapshot.offer.terms && <p className="subtle">{quote.data.data.pricingSnapshot.offer.terms}</p>}</section>}
           {payment.data?.data.status === "CAPTURED" ? (
             <>
               <h3>Payment captured</h3>
@@ -649,6 +713,9 @@ export function PaymentCheckout({
               className="btn btn-primary"
               disabled={
                 pay.isPending ||
+                quote.isFetching ||
+                gatewayOpen ||
+                verifying ||
                 (["PENDING", "AUTHORIZED"].includes(
                   payment.data?.data.status,
                 ) &&
@@ -657,7 +724,7 @@ export function PaymentCheckout({
               }
               onClick={() => pay.mutate()}
             >
-              {pay.isPending ? "Checkout in progress…" : "Pay with Razorpay"}
+              {pay.isPending || verifying ? "Checkout in progress…" : "Pay with Razorpay"}
             </button>
           )}
           {pay.isError && (
@@ -687,6 +754,7 @@ export function PaymentCheckout({
         </>
       )}
     </QueryState>
+    </>
   );
 }
 export function LiveGymDetails() {
@@ -704,18 +772,41 @@ export function LiveGymDetails() {
       refetchInterval: 30000,
     });
   const [plan, setPlan] = useState<Row | null>(null),
+    [checkoutBusy, setCheckoutBusy] = useState(false),
+    [gatewayOpen, setGatewayOpen] = useState(false),
     [review, setReview] = useState(false),
+    [reviewBusy, setReviewBusy] = useState(false),
     navigate = useNavigate(),
     { favorites, toggleFavorite } = useApp();
   const [params, setParams] = useSearchParams();
   const data = query.data?.data,
     gym = data?.gym;
+  const [reviewPage, setReviewPage] = useState(1);
+  const reviewsQuery = useData<Row[]>(
+    `/api/v1/public/gyms/${encodeURIComponent(slug || "")}/reviews?page=${reviewPage}&limit=10`,
+    !!gym,
+  );
+  const ownReview = useData<Row | null>(
+    `/api/v1/users/me/reviews?gymId=${encodeURIComponent(gym?.publicId || "")}`,
+    !!gym && !!getAccessToken(),
+  );
+  const client = useQueryClient();
+  const join = useMutation({
+    mutationFn: () =>
+      apiRequest("/api/v1/users/me/gym-join-requests", {
+        method: "POST",
+        body: JSON.stringify({ gymId: gym.publicId }),
+      }),
+    onSuccess: () => client.invalidateQueries({ queryKey: ["api"] }),
+  });
   const requestedPlan = params.get("plan");
   const [planNotice, setPlanNotice] = useState("");
   useEffect(() => {
     setPlan(null);
     setReview(false);
     setPlanNotice("");
+    setReviewPage(1);
+    join.reset();
   }, [slug]);
   useEffect(() => {
     if (!data || !requestedPlan || !getAccessToken()) return;
@@ -736,14 +827,29 @@ export function LiveGymDetails() {
       <QueryState query={query}>
         {gym && (
           <>
-            {planNotice && (
+            {(planNotice || ownReview.isError) && (
               <p className="container form-alert" role="status">
-                {planNotice}
+                {planNotice ||
+                  "Your review could not be loaded. Refresh this page before submitting a new review."}
+                {ownReview.isError && (
+                  <button
+                    className="btn btn-secondary"
+                    onClick={() => ownReview.refetch()}
+                  >
+                    Retry loading your review
+                  </button>
+                )}
               </p>
             )}
             <GymDetailsView
               key={gym.publicId}
-              data={data!}
+              data={{
+                ...data,
+                reviews: reviewsQuery.data?.data || data?.reviews,
+                ownReview: ownReview.data?.data,
+                reviewDistribution: (reviewsQuery.data?.meta as any)
+                  ?.distribution,
+              }}
               saved={favorites.includes(gym.publicId)}
               onFavorite={() =>
                 getAccessToken()
@@ -767,18 +873,45 @@ export function LiveGymDetails() {
                   navigate(authPath("/auth/login", `/gyms/${slug}`));
                   return;
                 }
-                setReview(true);
+                if (!ownReview.isFetching && !ownReview.isError)
+                  setReview(true);
+              }}
+              onJoin={() => {
+                if (!getAccessToken())
+                  navigate(authPath("/auth/login", `/gyms/${slug}#gym-plans`));
+                else join.mutate();
+              }}
+              joinPending={join.isPending}
+              joinStatus={
+                join.isSuccess
+                  ? "Your join request has been sent. The gym will contact you about access and membership options."
+                  : undefined
+              }
+              joinError={join.isError ? join.error.message : undefined}
+              reviewDisabled={ownReview.isFetching || ownReview.isError}
+              reviewsState={{
+                page: reviewPage,
+                pages: reviewsQuery.data?.meta?.pages || 1,
+                loading: reviewsQuery.isFetching,
+                error: reviewsQuery.isError
+                  ? reviewsQuery.error.message
+                  : undefined,
+                onPage: setReviewPage,
               }}
             />
+            <div className="container page-stack"><GymOffers gymId={gym.publicId} /><PromotionPlacement placement="GYM_PROFILE" gymId={gym.publicId} /></div>
             <Modal
               open={!!plan}
               title="Membership checkout"
-              onClose={() => setPlan(null)}
+              externalOverlayActive={gatewayOpen}
+              onClose={() => { if (!checkoutBusy && !gatewayOpen) setPlan(null); }}
             >
               {plan && (
                 <PaymentCheckout
                   quotePath="/api/v1/checkout/quotes"
                   quoteBody={{ gymId: gym._id, planId: plan._id }}
+                  onBusyChange={setCheckoutBusy}
+                  onGatewayOpenChange={setGatewayOpen}
                   onComplete={() =>
                     navigate("/app/subscriptions", {
                       state: { joinedGymName: gym.name },
@@ -789,31 +922,21 @@ export function LiveGymDetails() {
             </Modal>
             <Modal
               open={review}
-              title="Review this gym"
-              onClose={() => setReview(false)}
+              title={
+                ownReview.data?.data ? "Edit your review" : "Review this gym"
+              }
+              onClose={() => { if (!reviewBusy) setReview(false); }}
             >
               {review && (
-                <EditForm
-                  endpoint="/api/v1/users/me/reviews"
-                  fields={[
-                    {
-                      key: "rating",
-                      label: "Rating (1–5)",
-                      type: "number",
-                      min: 1,
-                      max: 5,
-                      required: true,
-                    },
-                    { key: "title", label: "Title" },
-                    {
-                      key: "body",
-                      label: "Your review",
-                      type: "textarea",
-                      required: true,
-                    },
-                  ]}
-                  transform={(body) => ({ ...body, gymId: gym.publicId })}
-                  onSaved={() => setReview(false)}
+                <ReviewEditor
+                  gymId={gym.publicId}
+                  onBusyChange={setReviewBusy}
+                  initial={ownReview.data?.data || {}}
+                  onSaved={() => {
+                    setReview(false);
+                    void ownReview.refetch();
+                    void reviewsQuery.refetch();
+                  }}
                 />
               )}
             </Modal>

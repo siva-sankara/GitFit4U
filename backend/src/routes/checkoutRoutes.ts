@@ -14,7 +14,7 @@ checkoutRoutes.post(
       body: z.object({
         registrationId: z.string().min(1),
         planId: z.string().regex(/^[a-f\d]{24}$/i),
-      }),
+      }).strict().or(z.object({ renewal: z.literal(true), planId: z.string().regex(/^[a-f\d]{24}$/i), expectedGymId: z.string().regex(/^[a-f\d]{24}$/i).optional() }).strict()),
       params: z.object({}),
       query: z.object({}),
     }),
@@ -41,7 +41,8 @@ checkoutRoutes.post(
         gymId: z.string(),
         planId: z.string(),
         couponCode: z.string().max(30).optional(),
-      }),
+        offerId: z.string().max(30).optional(),
+      }).strict(),
       params: z.object({}),
       query: z.object({}),
     }),

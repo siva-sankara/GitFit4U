@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import mongoose from "mongoose";
 import request from "supertest";
+import { isolatedScriptDatabase } from "./isolatedScriptDatabase.js";
 Object.assign(process.env, {
   NODE_ENV: "test",
   LOG_LEVEL: "silent",
@@ -22,7 +23,8 @@ const { createSession } = await import("../services/tokenService.js");
 const { paymentProvider } = await import("../integrations/payments/index.js");
 const { migratePaymentRegistrations } =
   await import("../services/registrationMigrationService.js");
-const databaseName = `gfu_registration_${Date.now()}`;
+const testDatabase = isolatedScriptDatabase("gfr");
+const { databaseName } = testDatabase;
 let checks = 0,
   orders = 0,
   failOrder = false;
@@ -53,9 +55,10 @@ async function call(
   body?: unknown,
   status = 200,
 ) {
-  let r = (request(app) as any)
-    [method]("/api/v1" + path)
-    .set("idempotency-key", crypto.randomUUID());
+  const agent = request(app) as any;
+  let r = agent[method]("/api/v1" + path)
+    .set("idempotency-key", crypto.randomUUID())
+    .set("x-csrf-protection", "1");
   if (token) r = r.auth(token, { type: "bearer" });
   if (body !== undefined) r = r.send(body);
   const result = await r;
@@ -106,8 +109,10 @@ try {
   await mongoose.connect(process.env.MONGO_URI!, {
     dbName: databaseName,
     serverSelectionTimeoutMS: 15000,
+    autoCreate: false,
+    autoIndex: false,
   });
-  await Promise.all(Object.values(mongoose.models).map((m) => m.init()));
+  await testDatabase.initialize();
   const owner = await call("post", "/auth/register", undefined, {
     name: "Gym applicant",
     email: "owner@registration.example",
@@ -270,6 +275,11 @@ try {
     ).data.status === "DRAFT",
     "No document or approval required to select a plan",
   );
+  await call("post", "/checkout/platform/quotes", token, {
+    registrationId: registration.publicId,
+    planId: plan._id,
+    priceMinor: 1,
+  }, 422);
   const quote = (
     await call(
       "post",
@@ -278,7 +288,6 @@ try {
       {
         registrationId: registration.publicId,
         planId: plan._id,
-        priceMinor: 1,
       },
       201,
     )
@@ -688,12 +697,10 @@ try {
     `PASS: ${checks} payment registration checks; ${orders} simulated gateway orders; no real charges.`,
   );
 } finally {
-  if (
-    mongoose.connection.name === databaseName &&
-    /^gfu_registration_\d+$/.test(databaseName)
-  ) {
-    await mongoose.connection.dropDatabase();
-    console.log("Temporary registration database removed.");
+  try {
+    if (await testDatabase.cleanup())
+      console.log("Temporary registration database removed.");
+  } finally {
+    await mongoose.disconnect();
   }
-  await mongoose.disconnect();
 }

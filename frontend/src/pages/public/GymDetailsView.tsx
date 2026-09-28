@@ -1,5 +1,6 @@
 ﻿import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
+import { Avatar } from "../../components/Avatar";
 import {
   ArrowLeft,
   ArrowUpRight,
@@ -19,6 +20,8 @@ import {
   X,
 } from "lucide-react";
 import { GymLocation } from "../../components/GymLocation";
+import { GymIdentity } from "../../components/GymIdentity";
+import { ClassCard } from "../../components/ClassCard";
 import { validCoordinates } from "../../services/location";
 import type { Row } from "../live/LiveData";
 import "../../styles/gym-details.css";
@@ -78,12 +81,30 @@ export function GymDetailsView({
   onFavorite,
   onChoosePlan,
   onReview,
+  onJoin,
+  joinPending,
+  joinStatus,
+  joinError,
+  reviewsState,
+  reviewDisabled,
 }: {
   data: Row;
   saved: boolean;
   onFavorite: () => void;
   onChoosePlan: (plan: Row) => void;
   onReview: () => void;
+  onJoin?: () => void;
+  joinPending?: boolean;
+  joinStatus?: string;
+  joinError?: string;
+  reviewsState?: {
+    page: number;
+    pages: number;
+    loading: boolean;
+    error?: string;
+    onPage: (page: number) => void;
+  };
+  reviewDisabled?: boolean;
 }) {
   const gym = data.gym,
     plans: Row[] = data.plans || [],
@@ -173,7 +194,9 @@ export function GymDetailsView({
       <header className="gd-heading">
         <div>
           <span className="gd-kicker">FIND YOUR EVERYDAY STRONG</span>
-          <h1>{gym.name}</h1>
+          <h1>
+            <GymIdentity name={gym.name} logoUrl={gym.logoUrl} />
+          </h1>
           <div className="gd-meta">
             <span>
               <MapPin size={17} />
@@ -278,8 +301,9 @@ export function GymDetailsView({
               </span>
             </div>
             <p>
-              Choose a plan to join this gym. Your membership starts after
-              payment is verified.
+              {plans.length
+                ? "Choose a plan to join this gym. Your membership starts after payment is verified."
+                : "Send a join request to the gym. Its team will confirm access and available membership options."}
             </p>
             <div className="gd-plans">
               {plans.map((p) => (
@@ -296,6 +320,9 @@ export function GymDetailsView({
                     <small>for the full plan</small>
                   </p>
                   {p.description && <p>{p.description}</p>}
+                  {!!p.trialDays && (
+                    <p className="chip">{p.trialDays}-day trial included</p>
+                  )}
                   <ul>
                     {p.benefits?.map((b: string) => (
                       <li key={b}>
@@ -303,6 +330,21 @@ export function GymDetailsView({
                         <span>{b}</span>
                       </li>
                     ))}
+                    {!!p.freezeDaysAllowed && (
+                      <li>
+                        <Check size={16} />
+                        <span>Up to {p.freezeDaysAllowed} freeze days</span>
+                      </li>
+                    )}
+                    {!!p.personalTrainingSessions && (
+                      <li>
+                        <Check size={16} />
+                        <span>
+                          {p.personalTrainingSessions} personal training
+                          sessions
+                        </span>
+                      </li>
+                    )}
                   </ul>
                   <p className="gd-fine-print">
                     Taxes and discounts calculated at checkout.
@@ -321,8 +363,26 @@ export function GymDetailsView({
               <div className="gd-empty">
                 <CalendarDays />
                 <div>
-                  <h3>Memberships coming soon</h3>
-                  <p>Contact the gym for current membership options.</p>
+                  <h3>Join this gym</h3>
+                  <p>
+                    No online plans are published yet. Request to join without
+                    purchasing a plan.
+                  </p>
+                  {onJoin && (
+                    <button
+                      className="btn btn-primary"
+                      disabled={joinPending || !!joinStatus}
+                      onClick={onJoin}
+                    >
+                      {joinPending
+                        ? "Sending request..."
+                        : joinStatus
+                          ? "Request sent"
+                          : "Join Gym"}
+                    </button>
+                  )}
+                  {joinStatus && <p role="status">{joinStatus}</p>}
+                  {joinError && <p role="alert">{joinError}</p>}
                 </div>
               </div>
             )}
@@ -371,36 +431,9 @@ export function GymDetailsView({
                 View timetable <ArrowUpRight size={16} />
               </Link>
             </div>
-            <div className="gd-class-list">
+            <div className="class-grid">
               {classes.map((c) => (
-                <article key={c.publicId} className="gd-class">
-                  <div className="gd-class-date">
-                    <span>
-                      {localDate(c.startsAt, timezone, { month: "short" })}
-                    </span>
-                    <strong>
-                      {localDate(c.startsAt, timezone, { day: "2-digit" })}
-                    </strong>
-                  </div>
-                  <div className="gd-class-info">
-                    <span className="gd-kicker">
-                      {c.category?.replaceAll("_", " ")}
-                    </span>
-                    <h3>{c.name}</h3>
-                    <p>
-                      <Clock3 size={14} />
-                      {localDate(c.startsAt, timezone, {
-                        hour: "numeric",
-                        minute: "2-digit",
-                      })}
-                      {c.room && ` · ${c.room}`}
-                    </p>
-                  </div>
-                  <span className="gd-class-spaces">
-                    <Users size={15} />
-                    {Math.max(0, c.capacity - (c.bookedCount || 0))} spots left
-                  </span>
-                </article>
+                <ClassCard key={c.publicId} session={{ ...c, gymId: { name: gym.name, timezone } }} />
               ))}
             </div>
             {!classes.length && (
@@ -415,6 +448,7 @@ export function GymDetailsView({
               </small>
             )}
           </section>
+          {gym.terms?.text && <section className="gd-section" aria-labelledby="gym-terms-heading"><h2 id="gym-terms-heading">Gym terms and conditions</h2><p style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{gym.terms.text}</p></section>}
           {!!trainers.length && (
             <section className="gd-section">
               <span className="gd-kicker">MEET YOUR SUPPORT TEAM</span>
@@ -422,15 +456,7 @@ export function GymDetailsView({
               <div className="gd-trainers">
                 {trainers.map((t) => (
                   <article key={t.publicId}>
-                    {t.photoUrl ? (
-                      <MediaImage
-                        src={t.photoUrl}
-                        alt={t.name}
-                        className="gd-avatar"
-                      />
-                    ) : (
-                      <span className="gd-avatar">{t.name?.charAt(0)}</span>
-                    )}
+                    <Avatar name={t.name} src={t.photoUrl} thumbnailSrc={t.photoThumbnailUrl} size={48} />
                     <div>
                       <h3>{t.name}</h3>
                       <p>
@@ -512,8 +538,12 @@ export function GymDetailsView({
                 <span className="gd-kicker">FROM THE COMMUNITY</span>
                 <h2>Member experiences</h2>
               </div>
-              <button className="btn btn-secondary" onClick={onReview}>
-                Write a review
+              <button
+                className="btn btn-secondary"
+                disabled={reviewDisabled}
+                onClick={onReview}
+              >
+                {data.ownReview ? "Edit your review" : "Write a review"}
               </button>
             </div>
             {!!gym.rating?.count && (
@@ -527,9 +557,45 @@ export function GymDetailsView({
                 </div>
               </div>
             )}
+            {data.reviewDistribution && (
+              <div
+                className="review-distribution"
+                aria-label="Rating distribution"
+              >
+                {[5, 4, 3, 2, 1].map((rating) => (
+                  <div key={rating}>
+                    <span>{rating} stars</span>
+                    <meter
+                      min={0}
+                      max={Math.max(1, gym.rating?.count || 0)}
+                      value={data.reviewDistribution[rating] || 0}
+                      aria-label={`${rating} stars`}
+                    />
+                    <span>{data.reviewDistribution[rating] || 0}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {data.ownReview && (
+              <div className="gd-own-review panel form-section">
+                <strong>Your review</strong>
+                <span>
+                  {data.ownReview.rating} / 5 ·{" "}
+                  {data.ownReview.status.toLowerCase()}
+                </span>
+                <p>{data.ownReview.body}</p>
+                <button className="btn btn-secondary" onClick={onReview}>
+                  Edit your review
+                </button>
+              </div>
+            )}
+            {reviewsState?.error && <p role="alert">{reviewsState.error}</p>}
+            {reviewsState?.loading && <p role="status">Loading reviews...</p>}
             {reviews.map((r) => (
               <article className="gd-review" key={r.publicId}>
                 <div>
+                  <Avatar user={r.userId} />
+                  <strong>{r.userId?.name || "Gym member"}</strong>
                   <span className="gd-review-rating">
                     <Star size={15} fill="currentColor" />
                     {r.rating} / 5
@@ -541,9 +607,14 @@ export function GymDetailsView({
                       day: "numeric",
                     })}
                   </time>
+                  {r.editedAt && <small>Edited</small>}
                 </div>
                 {r.title && <h3>{r.title}</h3>}
                 <p>{r.body}</p>
+                {!!(r.images?.length || r.photoUrls?.length) && <div className="review-photo-grid">
+                  {(r.images || []).map((photo: Row, index: number) => <a key={photo.id} href={photo.url} target="_blank" rel="noopener noreferrer"><img src={photo.thumbnailUrl || photo.url} alt={`Review photo ${index + 1}`} width={96} height={96} loading="lazy" /></a>)}
+                  {(r.photoUrls || []).filter((url: string) => /^https:\/\//i.test(url)).map((url: string, index: number) => <img key={url} src={url} alt={`Legacy review photo ${index + 1}`} width={96} height={96} loading="lazy" referrerPolicy="no-referrer" />)}
+                </div>}
                 {r.ownerResponse?.body && (
                   <blockquote>
                     <strong>Response from the gym</strong>
@@ -556,6 +627,30 @@ export function GymDetailsView({
               <div className="gd-empty">
                 <Star />
                 <p>Be the first to share your experience at this gym.</p>
+              </div>
+            )}
+            {reviewsState && reviewsState.pages > 1 && (
+              <div className="table-footer">
+                <button
+                  className="btn btn-secondary"
+                  disabled={reviewsState.page <= 1 || reviewsState.loading}
+                  onClick={() => reviewsState.onPage(reviewsState.page - 1)}
+                >
+                  Previous reviews
+                </button>
+                <span>
+                  Page {reviewsState.page} of {reviewsState.pages}
+                </span>
+                <button
+                  className="btn btn-secondary"
+                  disabled={
+                    reviewsState.page >= reviewsState.pages ||
+                    reviewsState.loading
+                  }
+                  onClick={() => reviewsState.onPage(reviewsState.page + 1)}
+                >
+                  More reviews
+                </button>
               </div>
             )}
           </section>

@@ -1,0 +1,414 @@
+/* Shared hierarchy: functional page titles, quieter sections, expressive public hero. */
+.page-heading h1,
+.workspace .page-heading h1,
+.gd-heading h1,
+.explore-toolbar h1,
+.member-profile-header h1,
+.auth-card h1,
+.info-page > h1 {
+  font-size: var(--text-size-page);
+  line-height: 1.25;
+  letter-spacing: -0.035em;
+  margin: 6px 0 10px;
+  overflow-wrap: anywhere;
+}
+.hero-copy h1,
+.auth-story h1,
+.onboarding-aside h1 {
+  font-size: clamp(2rem, 1.4rem + 2.5vw, 3.5rem);
+  line-height: 1.12;
+  letter-spacing: -0.045em;
+}
+.workspace-content h2,
+.gd-section h2,
+.gd-join-card h2,
+.section-heading h2 {
+  font-size: var(--text-size-section);
+  line-height: 1.3;
+}
+.workspace-content h3,
+.gd-section h3 {
+  font-size: var(--text-size-card);
+  line-height: 1.4;
+}
+.page-heading {
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px 22px;
+}
+.page-heading > div:first-child {
+  flex: 1 1 250px;
+  min-width: 0;
+}
+.page-heading p {
+  line-height: 1.6;
+  max-width: 70ch;
+}
+.heading-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.heading-actions .btn,
+.page-heading > .btn,
+.table-toolbar .btn {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.table-toolbar {
+  align-items: end;
+  gap: 12px;
+}
+.table-toolbar > .btn {
+  min-height: 44px;
+}
+.theme-picker select {
+  background: var(--surface-solid);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  padding: 8px 10px;
+  min-height: 40px;
+  max-width: 150px;
+  font-size: 0.8125rem;
+}
+.gym-identity {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  max-width: 100%;
+  vertical-align: middle;
+}
+.gym-identity-logo {
+  width: 42px;
+  height: 42px;
+  flex: 0 0 42px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-solid);
+  color: var(--brand-strong);
+  overflow: hidden;
+  font-size: 1rem;
+  font-weight: 800;
+}
+.gym-identity-logo img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.gym-identity-copy {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+.gym-identity-copy strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.35;
+}
+.gym-identity-copy small {
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1.4;
+  opacity: 0.8;
+}
+.sidebar-access {
+  min-width: 0;
+  padding: 14px 12px;
+}
+.sidebar-access .gym-identity {
+  width: 100%;
+}
+.sidebar-access .gym-identity-copy {
+  flex: 1;
+}
+.sidebar-access .gym-identity-copy strong {
+  color: #f8fafc;
+  font-size: 0.9375rem;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.sidebar-access .gym-identity-copy small {
+  color: #cbd5e1;
+}
+.gym-logo-preview .gym-identity-logo {
+  width: 88px;
+  height: 88px;
+  flex-basis: 88px;
+  font-size: 1.7rem;
+}
+.workspace-content {
+  position: relative;
+  isolation: isolate;
+}
+.workspace-content > :not(.gym-watermark) {
+  position: relative;
+  z-index: 1;
+}
+.gym-watermark {
+  position: fixed;
+  right: 4vw;
+  top: 30vh;
+  width: min(48vw, 550px);
+  height: min(48vw, 550px);
+  object-fit: contain;
+  opacity: 0.025;
+  pointer-events: none;
+  user-select: none;
+  z-index: 0;
+}
+[data-theme="dark"] .gym-watermark {
+  opacity: 0.035;
+}
+.gd-heading .gym-identity-logo {
+  width: 54px;
+  height: 54px;
+  flex-basis: 54px;
+}
+.gd-heading .gym-identity-copy strong {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.gd-plans {
+  align-items: start;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 245px), 1fr));
+  gap: 18px;
+}
+.gd-plan {
+  padding: 22px;
+  border-radius: 18px;
+  background: linear-gradient(140deg, var(--surface-solid), var(--bg-soft));
+  height: auto;
+  box-shadow: var(--shadow-sm);
+}
+.gd-plan .gd-price {
+  font-size: clamp(1.65rem, 1.25rem + 1vw, 2rem);
+  margin: 18px 0;
+  overflow-wrap: anywhere;
+}
+.gd-plan ul {
+  flex: initial;
+  padding: 0 0 14px;
+}
+.gd-plan li {
+  line-height: 1.5;
+}
+.gd-plan p {
+  line-height: 1.6;
+}
+.gd-plan .btn {
+  margin-top: 8px;
+  min-height: 44px;
+  white-space: normal;
+}
+.gym-map-actions {
+  display: grid;
+  grid-template-columns: minmax(100px, 0.65fr) minmax(170px, 1fr) minmax(
+      150px,
+      1fr
+    );
+  align-items: stretch;
+}
+.gym-map-actions > * {
+  width: 100%;
+  min-height: 44px;
+  height: auto;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  line-height: 1.35;
+}
+.gym-map-actions select {
+  display: block;
+}
+.explore-filter-toolbar {
+  display: grid;
+  grid-template-columns:
+    minmax(230px, 2fr) minmax(115px, 1fr) minmax(155px, 1fr)
+    minmax(140px, 1fr);
+  width: 100%;
+  align-items: end;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface-solid);
+}
+.explore-filter-toolbar > * {
+  min-width: 0;
+  margin: 0;
+}
+.explore-filter-toolbar input,
+.explore-filter-toolbar select {
+  width: 100%;
+  min-height: 44px;
+}
+.explore-search {
+  display: flex;
+  gap: 8px;
+}
+.explore-search input {
+  min-width: 0;
+  flex: 1;
+}
+.explore-search .btn {
+  padding-inline: 14px;
+}
+.revenue-kpis {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+.revenue-kpi {
+  padding: 18px 20px;
+  display: grid;
+  gap: 8px;
+}
+.revenue-kpi > span {
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+}
+.revenue-kpi > strong {
+  font-size: clamp(1.3rem, 1rem + 0.8vw, 1.8rem);
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+.revenue-chart {
+  height: 280px;
+  width: 100%;
+  font-size: 0.75rem;
+}
+.review-distribution {
+  display: grid;
+  gap: 6px;
+  max-width: 420px;
+  margin: 12px 0 24px;
+}
+.review-distribution > div {
+  display: grid;
+  grid-template-columns: 55px 1fr 35px;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.8125rem;
+}
+.review-distribution meter {
+  width: 100%;
+  height: 12px;
+}
+.gd-own-review {
+  margin-block: 16px;
+  display: grid;
+  gap: 8px;
+}
+.gd-review > div {
+  flex-wrap: wrap;
+  gap: 8px 14px;
+}
+.gd-review > div strong {
+  margin-right: auto;
+}
+.gd-review-summary > strong {
+  font-size: 2.4rem;
+}
+[data-theme="dark"] .gd-review-rating,
+[data-theme="dark"] .gd-review-summary span,
+[data-theme="dark"] .gd-meta a svg {
+  color: #f3c768;
+}
+[data-theme="dark"] .auth-desktop,
+[data-theme="dark"] .auth-desktop > .auth-card {
+  background: var(--bg);
+  color: var(--text);
+}
+[data-theme="dark"] .auth-card p,
+[data-theme="dark"] .auth-links {
+  color: var(--text-secondary);
+}
+[data-theme="dark"] .auth-card .field input,
+[data-theme="dark"] .auth-card .password-field {
+  background: var(--surface-solid);
+  border-color: var(--border-strong);
+}
+@media (min-width: 768px) and (max-width: 1100px) {
+  .sidebar .sidebar-access {
+    display: flex;
+    justify-content: center;
+    padding: 8px 0;
+    margin-inline: 0;
+    border: 0;
+  }
+  .sidebar-access .gym-identity {
+    justify-content: center;
+  }
+  .sidebar-access .gym-identity-copy {
+    display: none;
+  }
+}
+@media (max-width: 1050px) {
+  .explore-filter-toolbar {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .explore-search {
+    grid-column: 1/-1;
+  }
+  .gym-map-actions {
+    grid-template-columns: 1fr 1fr;
+  }
+  .gym-map-actions select {
+    grid-column: 1/-1;
+  }
+}
+@media (max-width: 680px) {
+  .revenue-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .revenue-kpi {
+    padding: 15px;
+  }
+  .page-heading {
+    flex-direction: row;
+    align-items: flex-start;
+  }
+  .page-heading > div:first-child {
+    flex-basis: 100%;
+  }
+  .explore-filter-toolbar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding: 12px;
+  }
+  .explore-filter-toolbar > .field:last-child {
+    grid-column: 1/-1;
+  }
+  .theme-picker select {
+    max-width: 112px;
+    padding: 7px;
+  }
+  .gd-heading .gym-identity-logo {
+    width: 44px;
+    height: 44px;
+    flex-basis: 44px;
+  }
+  .revenue-chart {
+    height: 240px;
+  }
+  .gym-watermark {
+    width: 75vw;
+    height: 75vw;
+    right: 0;
+  }
+}
+@media (max-width: 420px) {
+  .gym-map-actions {
+    grid-template-columns: 1fr;
+  }
+  .revenue-kpi > span {
+    font-size: 0.8125rem;
+  }
+  .header-actions {
+    gap: 6px;
+  }
+}

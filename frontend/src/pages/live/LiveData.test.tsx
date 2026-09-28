@@ -34,7 +34,7 @@ async function render(element: React.ReactNode) {
 }
 async function flush() {
   await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 20));
+      await new Promise((resolve) => { setTimeout(resolve, 20); });
   });
 }
 it("renders accessible status labels with distinct success, pending and expired colors", async () => {
@@ -130,4 +130,27 @@ it("keeps provider errors visible instead of showing a successful save", async (
     "Payment provider is not configured",
   );
   expect(host.textContent).not.toContain("Saved successfully");
+});
+it("reuses a financial request key after an uncertain response and rotates only after success", async () => {
+  mocks.request
+    .mockRejectedValueOnce(new Error("Network response unavailable"))
+    .mockResolvedValue({ success: true, data: {} });
+  await render(<EditForm endpoint="/refunds" fields={[]} />);
+  const submit = async () => {
+    await act(async () => {
+      host
+        .querySelector("form")!
+        .dispatchEvent(
+          new Event("submit", { bubbles: true, cancelable: true }),
+        );
+    });
+    await flush();
+  };
+  await submit();
+  const firstKey = mocks.request.mock.calls[0][1].idempotencyKey;
+  expect(firstKey).toBeTruthy();
+  await submit();
+  expect(mocks.request.mock.calls[1][1].idempotencyKey).toBe(firstKey);
+  await submit();
+  expect(mocks.request.mock.calls[2][1].idempotencyKey).not.toBe(firstKey);
 });

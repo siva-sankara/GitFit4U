@@ -3,8 +3,6 @@ import "../styles/workspace-navigation.css";
 import {
   Bell,
   Menu,
-  Moon,
-  Sun,
   X,
   LayoutDashboard,
   Users,
@@ -16,11 +14,18 @@ import {
   ShieldCheck,
   Building2,
   LogOut,
+  Compass,
+  UserRound,
+  LifeBuoy,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Brand } from "../components/Brand";
+import { Avatar } from "../components/Avatar";
+import { GymIdentity } from "../components/GymIdentity";
+import { ThemePicker } from "../components/ThemePicker";
+import { useData, type Row } from "../pages/live/LiveData";
 import { useApp } from "../context/AppContext";
 import { useCurrentUser, useNotifications } from "../api/hooks";
 import { apiRequest, setAccessToken } from "../services/apiClient";
@@ -29,26 +34,21 @@ const navigation: Record<string, Array<[string, string, string?]>> = {
   USER: [
     ["Home", "home"],
     ["Explore gyms", "explore"],
-    ["Subscriptions", "subscriptions"],
     ["Attendance", "attendance"],
+    ["Scan gym QR", "attendance/qr"],
     ["Classes", "classes"],
-    ["Workouts", "workouts"],
-    ["Favorites", "favorites"],
-    ["Payments", "payments"],
-    ["Invoices", "invoices"],
-    ["Referrals", "referrals"],
     ["Notifications", "notifications"],
     ["Messages", "messages"],
     ["Support", "support"],
   ],
   GYM_OWNER: [
     ["Dashboard", "dashboard", "gym:read"],
-    ["Gym profile", "gym-profile", "gym:update"],
+    ["Gym Profile Settings", "gym-profile", "gym:update"],
     ["Members", "members", "member:read"],
     ["Plans", "plans", "gym:read"],
     ["Subscriptions", "subscriptions", "member:read"],
     ["Attendance", "attendance", "member:read"],
-    ["Scanner", "scanner", "attendance:scan"],
+    ["Gym QR", "scanner", "attendance:scan"],
     ["Classes", "classes", "gym:read"],
     ["Trainers", "trainers", "gym:read"],
     ["Payments", "payments", "finance:read"],
@@ -60,7 +60,6 @@ const navigation: Record<string, Array<[string, string, string?]>> = {
     ["Advertisements", "ads", "campaign:write"],
     ["Messages", "messages"],
     ["Notifications", "notifications"],
-    ["Settings", "settings", "gym:update"],
     ["Support", "support"],
   ],
   TRAINER: [
@@ -79,6 +78,10 @@ const navigation: Record<string, Array<[string, string, string?]>> = {
     ["Registrations", "registrations"],
     ["Gyms", "gyms"],
     ["Owners", "owners"],
+    ["Trainers", "trainers"],
+    ["Members", "members"],
+    ["Membership plans", "membership-plans"],
+    ["Memberships", "memberships"],
     ["Users", "users"],
     ["Platform plans", "platform-plans"],
     ["Subscriptions", "subscriptions"],
@@ -87,16 +90,20 @@ const navigation: Record<string, Array<[string, string, string?]>> = {
     ["Refunds", "refunds"],
     ["Campaigns", "whatsapp"],
     ["Advertisements", "ads"],
+    ["Offers", "offers"],
     ["Reviews", "reviews"],
     ["Monitoring", "monitoring"],
     ["Audit logs", "audit"],
     ["Support", "support"],
     ["Notifications", "notifications"],
+    ["Broadcasts", "broadcasts"],
+    ["Notification delivery", "notification-delivery"],
+    ["Settings", "settings"],
   ],
 };
 export function WorkspaceLayout() {
   const [drawer, setDrawer] = useState(false),
-    { theme, toggleTheme, toast } = useApp(),
+    { toast, toastActionUrl, dismissToast } = useApp(),
     me = useCurrentUser(),
     notifications = useNotifications(),
     client = useQueryClient(),
@@ -118,7 +125,24 @@ export function WorkspaceLayout() {
     location.pathname === `${prefix}/profile`
       ? "My profile"
       : "GETFIT4U");
-  const gym = assignments.find((a) => a.gymId?._id === context?.gymId)?.gymId;
+  const mobileChoices = role === "USER"
+    ? [["Home", "home", LayoutDashboard], ["Explore", "explore", Compass], ["Attendance", "attendance", Activity], ["Messages", "messages", MessageCircle], ["Profile", "profile", UserRound]] as const
+    : role === "GYM_OWNER"
+      ? [["Dashboard", "dashboard", LayoutDashboard], ["Members", "members", Users], ["Attendance", "attendance", Activity], ["Messages", "messages", MessageCircle]] as const
+      : role === "TRAINER"
+        ? [["Dashboard", "dashboard", LayoutDashboard], ["Clients", "clients", Users], ["Schedule", "schedule", CalendarDays], ["Messages", "messages", MessageCircle]] as const
+        : [["Dashboard", "dashboard", LayoutDashboard], ["Gyms", "gyms", Building2], ["Users", "users", Users], ["Support", "support", LifeBuoy]] as const;
+  const mobileRows = mobileChoices.filter(([, page]) => page === "profile" || rows.some(([, route]) => route === page));
+  const ownerGym = useData<Row>(
+    "/api/v1/owner/gym",
+    role === "GYM_OWNER" &&
+      !!context?.gymId &&
+      !!context.permissions.includes("gym:read"),
+  );
+  const gym =
+    role === "GYM_OWNER" && String(ownerGym.data?.data?._id) === context?.gymId
+      ? ownerGym.data?.data
+      : assignments.find((a) => a.gymId?._id === context?.gymId)?.gymId;
   const roleLabel =
     activeRole === "USER"
       ? "Member"
@@ -129,17 +153,12 @@ export function WorkspaceLayout() {
           : activeRole === "ADMIN"
             ? "Administrator"
             : "Trainer";
-  const initials = (user?.name || "Member")
-    .split(" ")
-    .map((part) => part[0])
-    .slice(0, 2)
-    .join("");
   const unread =
     notifications.data?.data.filter((notification) => !notification.readAt)
       .length || 0;
   useEffect(() => {
     setDrawer(false);
-  }, [location.pathname]);
+  }, [location.pathname, location.search]);
   useEffect(() => {
     if (!drawer) return;
     const close = (event: KeyboardEvent) => {
@@ -180,8 +199,18 @@ export function WorkspaceLayout() {
           </button>
         </div>
         <div className="sidebar-access">
-          <span>{roleLabel}</span>
-          <strong>{gym?.name || "GETFIT4U"}</strong>
+          {gym ? (
+            <GymIdentity
+              name={gym.name}
+              logoUrl={gym.logoUrl}
+              subtitle={roleLabel}
+            />
+          ) : (
+            <>
+              <strong>GETFIT4U</strong>
+              <span>{roleLabel}</span>
+            </>
+          )}
         </div>
         <nav className="sidebar-nav" aria-label="Workspace navigation">
           {rows.map(([text, page], i) => (
@@ -226,7 +255,7 @@ export function WorkspaceLayout() {
             aria-label={`Open profile for ${user?.name || "Member"}`}
             title={user?.name || "My profile"}
           >
-            <span className="avatar">{initials}</span>
+            <Avatar user={user} size={36} />
             <span className="profile-name">
               <strong>{user?.name || "Member"}</strong>
               <small>My profile</small>
@@ -260,13 +289,7 @@ export function WorkspaceLayout() {
             <strong>{title}</strong>
           </div>
           <div className="topbar-actions">
-            <button
-              className="icon-btn"
-              aria-label="Toggle theme"
-              onClick={toggleTheme}
-            >
-              {theme === "dark" ? <Sun /> : <Moon />}
-            </button>
+            <ThemePicker />
             <button
               className="icon-btn workspace-notification-button"
               aria-label="Notifications"
@@ -288,26 +311,44 @@ export function WorkspaceLayout() {
               aria-label={`Open profile for ${user?.name || "Member"}`}
               title="My profile"
             >
-              <span className="avatar">{initials}</span>
+              <Avatar user={user} size={32} />
               <strong>{user?.name || "Member"}</strong>
             </NavLink>
           </div>
         </header>
         <main id="workspace-content" className="workspace-content">
+          {role === "GYM_OWNER" && gym?.logoUrl && (
+            <img
+              className="gym-watermark"
+              src={gym.logoUrl}
+              alt=""
+              aria-hidden="true"
+            />
+          )}
           <Outlet />
         </main>
       </div>
       <nav className="mobile-bottom-nav" aria-label="Mobile navigation">
-        {rows.slice(0, 5).map(([text, page]) => (
-          <NavLink key={page} to={`${prefix}/${page}`}>
+        {mobileRows.map(([text, page, Icon]) => (
+          <NavLink key={page} to={`${prefix}/${page}`} className={({ isActive }) => isActive || (page === "profile" && location.pathname === "/profile") ? "active" : undefined} aria-label={text}>
+            <Icon size={21} aria-hidden="true" />
             <span>{text}</span>
           </NavLink>
         ))}
+        {role !== "USER" && <button type="button" aria-label="More navigation" aria-expanded={drawer} onClick={() => setDrawer(value => !value)}><Menu size={21} aria-hidden="true" /><span>More</span></button>}
       </nav>
       {toast && (
-        <div className="toast" role="status">
-          <ShieldCheck />
-          {toast}
+        <div className="toast" role="status" aria-live="polite">
+          <ShieldCheck aria-hidden="true" />
+          <span>{toast}</span>
+          {toastActionUrl && (
+            <NavLink className="btn btn-secondary" to={toastActionUrl} onClick={dismissToast}>
+              Open notification
+            </NavLink>
+          )}
+          <button type="button" className="btn btn-secondary" aria-label="Dismiss notification" onClick={dismissToast}>
+            <X size={16} aria-hidden="true" />
+          </button>
         </div>
       )}
     </div>

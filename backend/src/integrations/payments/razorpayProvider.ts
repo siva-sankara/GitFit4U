@@ -84,7 +84,12 @@ export class RazorpayProvider implements PaymentProvider {
       `/payments/${encodeURIComponent(paymentId)}/refund`,
       {
         method: "POST",
-        body: JSON.stringify({ amount: amountMinor, notes: { receipt } }),
+        headers: { "X-Refund-Idempotency": receipt },
+        body: JSON.stringify({
+          amount: amountMinor,
+          receipt,
+          notes: { receipt },
+        }),
       },
     );
   }

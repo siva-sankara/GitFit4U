@@ -59,19 +59,19 @@ async function render() {
 async function until(check: () => boolean) {
   for (let i = 0; i < 60 && !check(); i++)
     await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 15));
+      await new Promise((resolve) => { setTimeout(resolve, 15); });
     });
   expect(check()).toBe(true);
 }
 async function click(text: string) {
-  const button = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+  const button = [...document.querySelectorAll<HTMLButtonElement>("button")].find(
     (entry) => entry.textContent === text,
   );
   expect(button).toBeTruthy();
   await act(async () => button!.click());
 }
 async function reason() {
-  const textarea = host.querySelector("textarea")!;
+  const textarea = document.querySelector("[role=dialog] textarea")!;
   await act(async () => {
     Object.getOwnPropertyDescriptor(
       HTMLTextAreaElement.prototype,
@@ -95,7 +95,7 @@ it("shows a useful empty state without inventing memberships", async () => {
   expect(host.textContent).toContain("You have no gym subscriptions yet");
   expect(host.querySelector('a[href="/app/explore"]')).not.toBeNull();
 });
-it("renders real plan details and member QR for a current active membership", async () => {
+it("renders real plan details and gym scanner access for a current active membership", async () => {
   await render();
   await until(() => host.textContent!.includes("Oak Gym"));
   expect(host.textContent).toContain("Monthly plan");
@@ -125,7 +125,7 @@ it("offers pending payment continuation for the saved plan without enabling acce
   expect(
     host.querySelector('a[href="/app/gyms/oak-gym?plan=plan-public"]'),
   ).not.toBeNull();
-  expect(host.textContent).not.toContain("Member QR");
+  expect(host.textContent).not.toContain("Scan gym QR");
   expect(
     [...host.querySelectorAll("button")].some(
       (entry) => entry.textContent === "Cancel",
@@ -141,7 +141,7 @@ it("handles missing gym and plan references without rendering zero prices or cra
   await until(() => host.textContent!.includes("Gym unavailable"));
   expect(host.textContent).toContain("Not available");
   expect(host.querySelector('a[href="/app/support"]')).not.toBeNull();
-  expect(host.textContent).not.toContain("Member QR");
+  expect(host.textContent).not.toContain("Scan gym QR");
 });
 it("retains cards while loading the next page and disables repeated pagination", async () => {
   mocks.request.mockImplementation((path: string) =>
@@ -192,26 +192,26 @@ it("shows submitting feedback, blocks duplicates, and closes after backend succe
   await click("Cancel");
   await reason();
   await click("Confirm request");
-  await until(() => host.textContent!.includes("Submitting…"));
+  await until(() => document.body.textContent!.includes("Submitting…"));
   expect(
     host.querySelector<HTMLButtonElement>('button[type="button"]')?.disabled,
   ).toBe(false);
   expect(
-    [...host.querySelectorAll("button")].find(
+    [...document.querySelectorAll("button")].find(
       (entry) => entry.textContent === "Submitting…",
     )?.disabled,
   ).toBe(true);
-  expect(host.querySelector("[role=dialog]")).not.toBeNull();
+  expect(document.querySelector("[role=dialog]")).not.toBeNull();
   await act(async () =>
     complete({
       success: true,
       data: { ...membership, gymId: "gym-id", status: "CANCELLED" },
     }),
   );
-  await until(() => host.querySelector("[role=dialog]") === null);
+  await until(() => document.querySelector("[role=dialog]") === null);
   expect(host.textContent).toContain("Membership cancelled.");
   expect(host.textContent).toContain("Oak Gym");
-  expect(host.textContent).not.toContain("Member QR");
+  expect(host.textContent).not.toContain("Scan gym QR");
   expect(invalidate.mock.calls[0][0]).toMatchObject({
     queryKey: ["api"],
     predicate: expect.any(Function),
@@ -233,9 +233,9 @@ it("keeps a failed cancellation dialog open and preserves active membership acce
   await click("Cancel");
   await reason();
   await click("Confirm request");
-  await until(() => host.textContent!.includes("Please retry later"));
-  expect(host.querySelector("[role=dialog]")).not.toBeNull();
-  expect(host.textContent).toContain("Member QR");
+  await until(() => document.body.textContent!.includes("Please retry later"));
+  expect(document.querySelector("[role=dialog]")).not.toBeNull();
+  expect(host.textContent).toContain("Scan gym QR");
   expect(host.textContent).not.toContain("Membership cancelled.");
 });
 it("hides the freeze action after its allowance has been consumed", async () => {
@@ -260,4 +260,25 @@ it("hides the freeze action after its allowance has been consumed", async () => 
       (entry) => entry.textContent === "Freeze",
     ),
   ).toBe(false);
+});
+it("lets a frozen member reactivate and refreshes access only after server confirmation", async () => {
+  const frozen = { ...membership, status: "FROZEN" };
+  mocks.request.mockImplementation((_path: string, options?: RequestInit) =>
+    Promise.resolve({
+      success: true,
+      data: options?.method === "POST" ? membership : [frozen],
+    }),
+  );
+  await render();
+  await until(() => host.textContent!.includes("Reactivate"));
+  vi.spyOn(client, "invalidateQueries").mockReturnValue(new Promise(() => {}));
+  await click("Reactivate");
+  await reason();
+  await click("Confirm request");
+  await until(() => host.textContent!.includes("Membership reactivated."));
+  expect(mocks.request).toHaveBeenCalledWith(
+    "/api/v1/users/me/subscriptions/monthly/reactivate",
+    expect.objectContaining({ method: "POST" }),
+  );
+  expect(host.textContent).toContain("Scan gym QR");
 });
