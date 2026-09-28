@@ -13,6 +13,7 @@ vi.mock("./ProfileEditor", () => ({ ProfileEditor: () => <p>Profile editor</p> }
 vi.mock("../../components/ThemePicker", () => ({ ThemePicker: () => <p>Light Dark</p> }));
 vi.mock("../../components/PushNotificationSettings", () => ({ PushNotificationSettings: () => null }));
 vi.mock("../../components/PwaSettings", () => ({ PwaSettings: () => <p>Install GETFIT4U</p> }));
+vi.mock("../../components/WhatsAppPreferences", () => ({ WhatsAppPreferences: () => <p>WhatsApp preferences</p> }));
 import { ProfileHub } from "./ProfileHub";
 it.each(["", "?section=bookings", "?section=settings", "?section=personal"])("preserves all account sections with focused section rendering: %s", async search => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });

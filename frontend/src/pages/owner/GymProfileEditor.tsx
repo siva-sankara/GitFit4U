@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { Modal } from "../../components/Modal";
 import { GymLogoEditor } from "./GymLogoEditor";
 import { GymTermsEditor } from "./GymTermsEditor";
+import { WhatsAppConnectionSettings } from "../../components/WhatsAppConnectionSettings";
 import { OwnerClassManagement } from "./OwnerClassManagement";
 import { Link } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -99,6 +100,7 @@ export function GymProfileEditor({
         {[
           "Details",
           "Logo",
+          "WhatsApp",
           "Memberships",
           "Media",
           "Location",
@@ -119,6 +121,7 @@ export function GymProfileEditor({
               gym={gym.data.data}
               disabled={!canEdit}
             />
+            {canEdit && <WhatsAppConnectionSettings />}
             <section id="gym-details" className="panel form-section page-stack">
               <h2>About your gym</h2>
               <fieldset disabled={!canEdit} className="profile-fieldset">

@@ -8,6 +8,7 @@ import { env } from "./config/env.js";
 import { connectDatabase } from "./config/db.js";
 import { httpLogging } from "./middleware/httpLogging.js";
 import { razorpayWebhook } from "./controllers/checkoutController.js";
+import { webhook as whatsappWebhook, webhookChallenge as whatsappWebhookChallenge } from "./controllers/whatsappController.js";
 import { apiRoutes } from "./routes/index.js";
 import { requestContext } from "./middleware/requestContext.js";
 import { notFound } from "./middleware/notFound.js";
@@ -53,6 +54,14 @@ app.post(
   express.raw({ type: "application/json", limit: "512kb" }),
   ensureDatabase,
   razorpayWebhook,
+);
+
+app.get("/api/v1/webhooks/whatsapp", whatsappWebhookChallenge);
+app.post(
+  "/api/v1/webhooks/whatsapp",
+  express.raw({ type: "application/json", limit: "512kb" }),
+  ensureDatabase,
+  whatsappWebhook,
 );
 
 app.use(express.json({ limit: "1mb" }));

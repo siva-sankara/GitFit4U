@@ -48,9 +48,26 @@ const schema = z
     FIREBASE_PRIVATE_KEY: z.string().optional(),
     MSG91_AUTH_KEY: z.string().optional(),
     MSG91_TEMPLATE_ID: z.string().optional(),
+    WHATSAPP_MODE: z.enum(["disabled", "dry_run", "live"]).default("disabled"),
+    WHATSAPP_APP_ID: z.string().optional(),
+    WHATSAPP_APP_SECRET: z.string().optional(),
     WHATSAPP_ACCESS_TOKEN: z.string().optional(),
     WHATSAPP_PHONE_NUMBER_ID: z.string().optional(),
+    WHATSAPP_WABA_ID: z.string().optional(),
     WHATSAPP_VERIFY_TOKEN: z.string().optional(),
+    WHATSAPP_API_VERSION: z
+      .string()
+      .regex(/^v\d+\.\d+$/)
+      .default("v26.0"),
+    WHATSAPP_DEFAULT_LANGUAGE: z.string().min(2).max(20).default("en_US"),
+    WHATSAPP_EMBEDDED_SIGNUP_CONFIG_ID: z.string().optional(),
+    WHATSAPP_CREDENTIAL_ENCRYPTION_KEY: z
+      .preprocess((value) => value || undefined, z.string().min(32).optional()),
+    WHATSAPP_WEBHOOK_RETENTION_DAYS: z.coerce.number().int().min(1).max(90).default(30),
+    WHATSAPP_WORKER_ENABLED: z
+      .enum(["true", "false"])
+      .default("false")
+      .transform((value) => value === "true"),
     OBJECT_STORAGE_ENDPOINT: z.string().optional(),
     OBJECT_STORAGE_BUCKET: z.string().default("getfit4u-media"),
     OBJECT_STORAGE_ACCESS_KEY: z.string().optional(),
@@ -80,6 +97,23 @@ const schema = z
     LOG_LEVEL: z.string().default("info"),
   })
   .superRefine((value, context) => {
+    if (value.WHATSAPP_MODE === "live") {
+      for (const key of [
+        "WHATSAPP_APP_ID",
+        "WHATSAPP_APP_SECRET",
+        "WHATSAPP_VERIFY_TOKEN",
+        "WHATSAPP_EMBEDDED_SIGNUP_CONFIG_ID",
+        "WHATSAPP_CREDENTIAL_ENCRYPTION_KEY",
+      ] as const) {
+        if (!value[key]) {
+          context.addIssue({
+            code: "custom",
+            path: [key],
+            message: `${key} is required when WHATSAPP_MODE=live.`,
+          });
+        }
+      }
+    }
     if (value.NODE_ENV !== "production") return;
     for (const key of [
       "JWT_ACCESS_SECRET",

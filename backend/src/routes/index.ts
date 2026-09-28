@@ -13,6 +13,7 @@ import { deviceRoutes } from "./deviceRoutes.js";
 import { uploadRoutes } from "./uploadRoutes.js";
 import { socialRoutes } from "./socialRoutes.js";
 import { workspaceRoutes } from "./workspaceRoutes.js";
+import { whatsappRoutes } from "./whatsappRoutes.js";
 
 export const apiRoutes = Router();
 apiRoutes.use("/workspace", workspaceRoutes);
@@ -29,3 +30,4 @@ apiRoutes.use("/locations", locationRoutes);
 apiRoutes.use("/devices", deviceRoutes);
 apiRoutes.use("/uploads", uploadRoutes);
 apiRoutes.use("/social", socialRoutes);
+apiRoutes.use("/whatsapp", whatsappRoutes);

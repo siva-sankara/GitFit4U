@@ -7,7 +7,7 @@ vi.mock("../services/apiClient", () => ({ apiRequest: mocks.request }));
 vi.mock("react-router-dom", () => ({ useNavigate: () => mocks.navigate }));
 import { MemberQuickActions } from "./MemberQuickActions";
 let host: HTMLDivElement, root: Root;
-const member = { userId: { _id: "registered-user", name: "Jane", phone: "9876543210", status: "ACTIVE" }, contact: { phone: "9111111111" } };
+const member = { publicId: "member-public-id", userId: { _id: "registered-user", name: "Jane", phone: "9876543210", status: "ACTIVE" }, contact: { phone: "9111111111" } };
 beforeEach(() => {
   vi.clearAllMocks(); Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   host = document.createElement("div"); document.body.append(host); root = createRoot(host);
@@ -27,12 +27,23 @@ it("disables unavailable calls and messages without generating invalid links", a
 it("opens only the WhatsApp composer using the authorized normalized phone", async () => {
   const rowClick = vi.fn();
   await act(async () => { root.render(<div onClick={rowClick}><MemberQuickActions member={member} expanded /></div>); });
-  const link = host.querySelector<HTMLAnchorElement>('a[aria-label="WhatsApp Jane"]')!;
+  const link = host.querySelector<HTMLAnchorElement>('a[aria-label="Open WhatsApp app for Jane"]')!;
   expect(link.href).toBe("https://wa.me/919876543210");
   expect(link.rel).toContain("noopener");
   await act(async () => { link.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true })); });
   expect(rowClick).not.toHaveBeenCalled();
   expect(mocks.request).not.toHaveBeenCalled();
+});
+it("opens a tenant-authorized business API conversation separately from the external app", async () => {
+  mocks.request.mockResolvedValue({ data: { publicId: "wa-thread" } });
+  await act(async () => { root.render(<MemberQuickActions member={member} expanded />); });
+  const button = host.querySelector<HTMLButtonElement>('button[aria-label="Send WhatsApp to Jane"]')!;
+  await act(async () => { button.click(); });
+  expect(mocks.request).toHaveBeenCalledWith(
+    "/api/v1/whatsapp/gym/members/member-public-id/conversation",
+    { method: "POST", body: "{}" },
+  );
+  expect(mocks.navigate).toHaveBeenCalledWith("/messages?channel=whatsapp&conversation=wa-thread");
 });
 it("deduplicates fast clicks, stops row navigation, and opens the exact existing conversation", async () => {
   let resolve!: (value: any) => void;
