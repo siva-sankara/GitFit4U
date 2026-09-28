@@ -12,6 +12,7 @@
     "resolveJsonModule": true,
     "sourceMap": true,
     "declaration": true,
+    "typeRoots": ["./node_modules/@types"],
     "types": ["node"]
   },
   "include": ["src/**/*.ts"],
