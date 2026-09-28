@@ -21,6 +21,35 @@ npm run build
 docker build -t getfit4u-api .
 ```
 
+## Vercel TypeScript builds
+
+Set the Vercel project's **Root Directory** to `backend` (relative to the
+GitFit4U repository root). The `vercel.json` in this directory sets the install
+command to `npm ci --include=dev`, so TypeScript and `@types/node` are installed
+even when `NODE_ENV=production` or npm's omit setting excludes development
+dependencies. Both packages are already declared in `devDependencies` and the
+lockfile.
+
+Vercel's TypeScript 7 transpiler creates a temporary `tsconfig.json` outside the
+project that extends this backend's config. Without an explicit type root,
+compiling through that temporary config can report
+`TS2688: Cannot find type definition file for 'node'` even when the package is
+installed and `npm run build` passes. Keep both settings in `tsconfig.json`:
+
+```json
+"typeRoots": ["./node_modules/@types"],
+"types": ["node"]
+```
+
+The relative `typeRoots` path stays anchored to the backend config when inherited.
+After pushing these configurations, redeploy without the existing build cache.
+Confirm that the installation log shows `npm ci --include=dev`.
+
+These settings address build dependency installation and type resolution. The current runtime
+also initializes MongoDB, Socket.IO, and recurring maintenance/push delivery in
+`src/server.ts`; a successful TypeScript build alone does not verify those
+services on Vercel.
+
 ## Production prerequisites
 
 - MongoDB Atlas cluster with a geospatial index-capable tier
