@@ -3,6 +3,7 @@ import { useCurrentUser } from "../../api/hooks";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest, type ApiEnvelope } from "../../services/apiClient";
 import { Modal } from "../../components/Modal";
+import { PhoneInput } from "../../components/PhoneInput";
 import { StatusBadge } from "../../components/StatusBadge";
 import { Avatar } from "../../components/Avatar";
 import { MediaImageEditor } from "../../components/MediaImageEditor";
@@ -50,6 +51,7 @@ export function OwnerTrainersPage() {
   });
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!event.currentTarget.reportValidity()) return;
     const data = new FormData(event.currentTarget),
       text = (name: string) => String(data.get(name) || "").trim();
     save.mutate({
@@ -179,14 +181,14 @@ export function OwnerTrainersPage() {
             ).map(([name, label, type]) => (
               <label className="field" key={name}>
                 <span>{label}</span>
-                <input
+                {name === "phone" ? <PhoneInput name={name} defaultValue={editing.phone || editing.userId?.phone || ""} /> : <input
                   className="input"
                   name={name}
                   type={type}
                   required={name === "name" || name === "email"}
                   readOnly={name === "email" && !!editing.publicId}
                   defaultValue={editing[name] || editing.userId?.[name] || ""}
-                />
+                />}
               </label>
             ))}
             <label className="field">

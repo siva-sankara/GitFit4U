@@ -1,8 +1,11 @@
+import { PageHeader } from "../../components/PageHeader";
+import { CompactFilters } from "../../components/CompactFilters";
 import { useEffect, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
 import { apiRequest, type ApiEnvelope } from "../../services/apiClient";
 import { Modal } from "../../components/Modal";
+import { PhoneInput } from "../../components/PhoneInput";
 import { StatusBadge } from "../../components/StatusBadge";
 import { useCurrentUser } from "../../api/hooks";
 import { Avatar } from "../../components/Avatar";
@@ -80,6 +83,7 @@ export function MemberEditor({
   });
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!event.currentTarget.reportValidity()) return;
     if (imageBusy || save.isPending) return;
     const form = new FormData(event.currentTarget),
       text = (name: string) => String(form.get(name) || "").trim();
@@ -141,7 +145,8 @@ export function MemberEditor({
         ).map(([key, label, type]) => (
           <label className="field" key={key}>
             <span>{label}</span>
-            <input
+            {key === "phone" ? <PhoneInput name={key}
+              defaultValue={member?.contact?.phone || member?.userId?.phone || member?.phone || ""} /> : <input
               className="input"
               name={key}
               type={type}
@@ -153,7 +158,7 @@ export function MemberEditor({
                 member?.[key] ||
                 ""
               }
-            />
+            />}
           </label>
         ))}
         {(endpoint.startsWith("/api/v1/owner/") || uploadGymId) && <div className="full-width">
@@ -172,10 +177,9 @@ export function MemberEditor({
         </label>
         <label className="field">
           <span>Emergency phone</span>
-          <input
+          <PhoneInput
             className="input"
             name="emergencyPhone"
-            type="tel"
             defaultValue={member?.emergencyContact?.phone}
           />
         </label>
@@ -350,7 +354,7 @@ export function OwnerMembersPage() {
     : new Date();
   return (
     <div className="page-stack">
-      <header className="page-heading">
+      <PageHeader>
         <div>
           <span className="eyebrow">Gym operations</span>
           <h1>Members</h1>
@@ -361,7 +365,7 @@ export function OwnerMembersPage() {
             Create member
           </button>
         )}
-      </header>
+      </PageHeader>
       <div className="panel member-filter-toolbar">
         <label className="search-field">
           <span className="sr-only">Search members</span>
@@ -373,6 +377,7 @@ export function OwnerMembersPage() {
             }}
           />
         </label>
+        <CompactFilters activeCount={[status, planId, trainerId].filter(Boolean).length} onReset={() => setList({ status: "", planId: "", trainerId: "", page: 1 })}>
         <select
           className="select"
           aria-label="Membership status"
@@ -428,6 +433,7 @@ export function OwnerMembersPage() {
             </option>
           ))}
         </select>
+        </CompactFilters>
       </div>
       {(plans.isError || trainers.isError) && (
         <p role="alert">

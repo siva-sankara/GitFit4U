@@ -4,20 +4,10 @@ import { OtpChallenge } from "../models/Auth.js";
 import { randomDigits, hashOtp, safeEqualHex } from "../utils/crypto.js";
 import { AppError } from "../utils/AppError.js";
 import { sendOtpSms } from "./smsService.js";
+import { normalizeAccountPhone } from "../utils/accountIdentity.js";
 
 export function normalizePhone(input: string): string {
-  const cleaned = input.replace(/[\s()-]/g, "");
-  const phone = cleaned.startsWith("+")
-    ? cleaned
-    : `+91${cleaned.replace(/^0+/, "")}`;
-  if (!/^\+[1-9]\d{7,14}$/.test(phone)) {
-    throw new AppError(
-      422,
-      "INVALID_PHONE",
-      "Enter a valid mobile number with country code.",
-    );
-  }
-  return phone;
+  return normalizeAccountPhone(input);
 }
 
 export async function requestOtp(phoneInput: string, purpose = "LOGIN") {

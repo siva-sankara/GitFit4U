@@ -1,3 +1,4 @@
+import { PageHeader } from "../../components/PageHeader";
 import { useRef, useState, type FormEvent } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useCurrentUser } from "../../api/hooks";
@@ -340,7 +341,7 @@ export function OwnerClassManagement({
       className={embedded ? "panel form-section page-stack" : "page-stack"}
       id={embedded ? "gym-classes" : undefined}
     >
-      <header className="page-heading">
+      <PageHeader>
         <div>
           {embedded ? (
             <h2>Classes and group sessions</h2>
@@ -354,7 +355,7 @@ export function OwnerClassManagement({
             Create class
           </button>
         )}
-      </header>
+      </PageHeader>
       {read && (
         <>
           <label className="field class-status-filter">

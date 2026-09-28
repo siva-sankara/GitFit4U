@@ -1,8 +1,8 @@
+import { PageHeader } from "../../components/PageHeader";
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import {
-  ArrowLeft,
   Archive,
   ArchiveRestore,
   MessageSquare,
@@ -14,6 +14,7 @@ import { apiRequest, type ApiEnvelope } from "../../services/apiClient";
 import { useCurrentUser } from "../../api/hooks";
 import { uploadMedia } from "../../services/mediaUpload";
 import { Avatar } from "../../components/Avatar";
+import { BackIconButton } from "../../components/BackIconControl";
 import { QueryState, date, type Row } from "../live/LiveData";
 import "../../styles/messaging.css";
 
@@ -321,7 +322,7 @@ export function MessagesPage({
   const uploadingHere = upload.isPending && upload.variables?.scope === scope.current;
   return (
     <div className="page-stack messaging-page">
-      <header className="page-heading">
+      <PageHeader>
         <div>
           <span className="eyebrow">Communication</span>
           <h1>{supportOnly ? "Support conversations" : "Messages"}</h1>
@@ -331,7 +332,7 @@ export function MessagesPage({
               : "Stay in touch with your gym and training team."}
           </p>
         </div>
-      </header>
+      </PageHeader>
       {notice && (
         <p role="status" className="chat-notice">
           {notice}
@@ -581,13 +582,11 @@ export function MessagesPage({
           ) : (
             <>
               <header className="chat-header">
-                <button
+                <BackIconButton
                   className="btn btn-secondary chat-back"
-                  aria-label="Back to conversations"
+                  label="Back to conversations"
                   onClick={() => open("")}
-                >
-                  <ArrowLeft size={18} />
-                </button>
+                />
                 <div className="chat-heading">
                   <strong>{name(current)}</strong>
                   {contactPhone(current) && <small className="chat-contact-phone">{contactPhone(current)}</small>}

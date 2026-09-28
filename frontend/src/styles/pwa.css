@@ -3,3 +3,14 @@
 .pwa-notice>span{flex:1;min-width:160px}.pwa-notice>svg{flex-shrink:0}.pwa-notice .btn{min-height:40px}.pwa-settings h2{display:flex;align-items:center;gap:8px}.pwa-settings>.btn{margin:4px 8px 4px 0}
 @media(max-width:767px){.pwa-status{bottom:calc(82px + env(safe-area-inset-bottom,0px))}.workspace-topbar .theme-icon-picker,.public-header .theme-icon-picker{display:none}}
 @media(display-mode:standalone){.workspace-topbar{padding-top:max(12px,env(safe-area-inset-top,0px))}}
+.site-header-stack{position:sticky;top:0;z-index:40;min-width:0}
+.site-header-stack>.public-header,.site-header-stack>.workspace-topbar{position:static}
+.app-install-banner{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:6px 10px;background:var(--surface-solid);color:var(--text);border-bottom:1px solid var(--border);font-size:.8rem;min-width:0}
+.app-install-banner>img{flex:none;border-radius:8px}
+.app-install-banner>span{flex:1;min-width:0;overflow-wrap:anywhere;font-weight:700}
+.install-banner-action,.install-banner-dismiss{display:inline-flex;align-items:center;justify-content:center;gap:4px;flex:none;min-height:44px;border-radius:10px;border:1px solid var(--control-border);font:inherit;cursor:pointer}
+.install-banner-action{padding:6px 10px;background:var(--brand);color:var(--brand-ink,#07110f);font-weight:750}
+.install-banner-dismiss{width:44px;padding:8px;background:transparent;color:var(--text)}
+.app-install-banner>small{flex-basis:100%;overflow-wrap:anywhere}
+:root{scroll-padding-top:calc(var(--app-header-height,68px) + 8px)}
+@media(max-width:767px){.site-header-stack .public-nav{top:calc(var(--app-header-height,68px) + 6px)}}

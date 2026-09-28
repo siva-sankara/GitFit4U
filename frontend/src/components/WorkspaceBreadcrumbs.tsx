@@ -1,8 +1,8 @@
-import { ArrowLeft, ChevronRight } from "lucide-react";
 import { useEffect } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { workspacePrefix } from "../services/authRedirect";
 import { clearNavigationSession, navigationSessionKey } from "../services/navigationSession";
+import { BackIconButton } from "./BackIconControl";
 import "../styles/breadcrumbs.css";
 
 const pages: Record<string, [string, string?]> = {
@@ -79,11 +79,8 @@ export function WorkspaceBreadcrumbs({ role, permissions, navigationScope }: { r
     document.querySelectorAll<HTMLElement>('[data-unsaved-changes="true"]').forEach(element => { delete element.dataset.unsavedChanges; });
     navigate(destination(href));
   }
+  const parent = trail[trail.length - 2];
   return <div className="workspace-breadcrumb-header">
-    <button type="button" className="btn btn-ghost" onClick={event => leave(event, trail[trail.length - 2].href)}><ArrowLeft size={17} aria-hidden="true" />Back</button>
-    <nav aria-label="Breadcrumb"><ol>{trail.map((entry, index) => <li key={entry.href}>
-      {index > 0 && <ChevronRight size={14} aria-hidden="true" />}
-      {index === trail.length - 1 ? <span aria-current="page">{entry.label}</span> : <Link to={destination(entry.href)} onClick={event => leave(event, entry.href)}>{entry.label}</Link>}
-    </li>)}</ol></nav>
+    <BackIconButton className="btn btn-ghost" label={`Back to ${parent.label}`} onClick={event => leave(event, parent.href)} />
   </div>;
 }

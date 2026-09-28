@@ -21,6 +21,7 @@ import { ensurePaymentInvoice } from "../services/invoiceService.js";
 import { issueMemberInvitation } from "../services/accountInvitationService.js";
 import { transitionMemberAccess } from "../services/membershipLifecycleService.js";
 import { AppError } from "../utils/AppError.js";
+import { normalizeEmail } from "../utils/accountIdentity.js";
 import {
   calendarDate,
   shiftCalendarDate,
@@ -124,7 +125,7 @@ export async function createMemberWithMembership(req: Request, res: Response) {
         "MEMBERSHIP_ALREADY_EXPIRED",
         "The selected start date would create an expired membership.",
       );
-    const email = body.email?.toLowerCase(),
+    const email = body.email ? normalizeEmail(body.email) : undefined,
       phone = body.phone ? normalizePhone(body.phone) : undefined;
     const matchingUsers = await User.find({
       $or: [...(email ? [{ email }] : []), ...(phone ? [{ phone }] : [])],
@@ -133,7 +134,7 @@ export async function createMemberWithMembership(req: Request, res: Response) {
       throw new AppError(
         409,
         "CONTACT_ACCOUNT_CONFLICT",
-        "The email and phone belong to different accounts. Verify the member's details.",
+        "These contact details cannot be linked. Ask the member to sign in and verify their details.",
       );
     let user = matchingUsers[0];
     if (user && ["BLOCKED", "DISABLED"].includes(user.status))
@@ -148,7 +149,7 @@ export async function createMemberWithMembership(req: Request, res: Response) {
         "MEMBER_EMAIL_REQUIRED",
         "A new member needs an email address to activate their account securely.",
       );
-    if (user && (!user.email || (email && user.email !== email)))
+    if (user && (!user.email || (email && user.email !== email) || (phone && user.phone && user.phone !== phone)))
       throw new AppError(409, "CONTACT_ACCOUNT_CONFLICT", "Verify the member's existing account email before inviting them.");
     if (!user)
       [user] = await User.create(
@@ -378,7 +379,7 @@ export async function updateMember(req: Request, res: Response) {
       if (body[key] !== undefined)
         member.set(
           "contact." + key,
-          key === "phone" ? normalizePhone(body[key]!) : body[key],
+          key === "phone" ? normalizePhone(body[key]!) : key === "email" ? normalizeEmail(body[key]!) : body[key],
         );
     for (const key of [
       "fitnessGoal",
@@ -543,7 +544,7 @@ export async function saveTrainer(req: Request, res: Response) {
     const user = trainer
       ? await User.findById(trainer.userId).session(session)
       : await User.findOne({
-          email: body.email!.toLowerCase(),
+          email: normalizeEmail(body.email!),
           status: "ACTIVE",
         }).session(session);
     if (!user)
@@ -564,7 +565,7 @@ export async function saveTrainer(req: Request, res: Response) {
         "TRAINER_EXISTS",
         "This trainer is already registered at this gym.",
       );
-    if (body.email && body.email.toLowerCase() !== user.email)
+    if (body.email && normalizeEmail(body.email) !== user.email)
       throw new AppError(
         422,
         "TRAINER_IDENTITY_IMMUTABLE",

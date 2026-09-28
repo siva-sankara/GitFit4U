@@ -51,7 +51,7 @@ export async function checkIn(input: {
   try {
     return await mongoose.connection.transaction(async (session) => {
       const gym = await Gym.findById(input.gymId).session(session);
-      if (!gym || gym.status !== "ACTIVE")
+      if (!gym || gym.deletedAt || gym.status !== "ACTIVE")
         throw new AppError(
           409,
           "GYM_NOT_ACTIVE",
@@ -60,6 +60,7 @@ export async function checkIn(input: {
       const member = await MemberProfile.findOne({
         gymId: input.gymId,
         status: "ACTIVE",
+        "invitation.status": { $ne: "PENDING" },
         ...(input.memberUserId ? { userId: input.memberUserId } : {}),
         $or: [
           { publicId: input.memberIdentifier },
@@ -125,6 +126,8 @@ export async function checkIn(input: {
         type: "GYM_MEMBERSHIP",
         gymId: input.gymId,
         memberProfileId: member._id,
+        userId: member.userId,
+        ...(member.currentSubscriptionId ? { _id: member.currentSubscriptionId } : {}),
         status: "ACTIVE",
         startsAt: { $lte: now },
         endsAt: { $gt: now },

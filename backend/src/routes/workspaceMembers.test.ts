@@ -11,6 +11,7 @@ vi.mock("../middleware/auth.js", () => {
   return {
     requireAuth: pass,
     requireGymContext: pass,
+    requireGymRegistration: pass,
     requireRole: () => pass,
     requirePermission: () => pass,
   };

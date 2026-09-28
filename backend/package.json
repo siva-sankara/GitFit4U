@@ -21,6 +21,7 @@
     "db:inspect": "node src/scripts/inspect-database.mjs",
     "db:migrate": "tsx src/scripts/migrate-indexes.ts",
     "db:migrate-account-promotions": "tsx src/scripts/migrate-account-promotions.ts",
+    "db:migrate-promotions": "tsx src/scripts/migrate-promotions.ts",
     "test:push": "tsx src/scripts/firebase-push-check.ts"
   },
   "dependencies": {

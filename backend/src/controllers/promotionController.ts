@@ -113,7 +113,14 @@ export async function publicOffers(req: Request, res: Response) {
 export async function publicAds(req: Request, res: Response) {
   const placement = String(req.query.placement || "");
   if (!["EXPLORE", "DASHBOARD", "GYM_PROFILE"].includes(placement)) throw new AppError(422, "INVALID_AD_PLACEMENT", "Choose a supported promotion placement.");
-  const filter: any = { ...activePromotionFilter(), placements: placement };
+  // Historical ads predate placement targeting. Keep them discoverable only on
+  // their own gym profile until the explicit migration records that default.
+  const filter: any = {
+    ...activePromotionFilter(),
+    ...(placement === "GYM_PROFILE"
+      ? { $or: [{ placements: placement }, { placements: { $exists: false } }, { placements: { $size: 0 } }] }
+      : { placements: placement }),
+  };
   if (req.query.gymId) {
     const gym = await Gym.findOne(promotionGymFilter(String(req.query.gymId))).select("_id").lean();
     if (!gym) return res.json({ success: true, data: [] });

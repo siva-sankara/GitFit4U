@@ -11,9 +11,10 @@ export default defineConfig(({ mode }) => ({
       this.emitFile({ type: "asset", fileName: "_headers", source: securityHeaders(loadEnv(mode, process.cwd(), "VITE_")) });
       const worker = readFileSync(new URL("./public/sw.js", import.meta.url), "utf8");
       const offline = readFileSync(new URL("./public/offline.html", import.meta.url), "utf8");
+      const theme = readFileSync(new URL("./public/theme-init.js", import.meta.url), "utf8");
       // Every changed application bundle offers an update, even when the worker's
       // behavior did not change. No private data or runtime responses are cached.
-      const release = createHash("sha256").update(JSON.stringify(Object.keys(bundle).sort()) + worker + offline).digest("hex").slice(0, 16);
+      const release = createHash("sha256").update(JSON.stringify(Object.keys(bundle).sort()) + worker + offline + theme).digest("hex").slice(0, 16);
       this.emitFile({ type: "asset", fileName: "sw.js", source: worker.replace("getfit4u-offline-v3", `getfit4u-offline-${release}`) });
     },
   }],

@@ -9,6 +9,7 @@ import {
   requireGymContext,
   requireRole,
   requirePermission,
+  requireGymRegistration,
 } from "../middleware/auth.js";
 import { User } from "../models/User.js";
 import { Gym } from "../models/Gym.js";
@@ -81,7 +82,7 @@ workspaceRoutes.use(requireAuth);
 workspaceRoutes.get("/payments/:id/invoice", rateLimit({ windowMs: 60000, limit: 15, keyGenerator: req => req.auth!.userId, standardHeaders: "draft-8", legacyHeaders: false }), downloadPaymentInvoice);
 workspaceRoutes.get("/payments/:id/invoice/email", rateLimit({ windowMs: 60000, limit: 30, keyGenerator: req => req.auth!.userId, standardHeaders: "draft-8", legacyHeaders: false }), invoiceEmailStatus);
 workspaceRoutes.post("/payments/:id/invoice/email", rateLimit({ windowMs: 15 * 60000, limit: 10, keyGenerator: req => req.auth!.userId, standardHeaders: "draft-8", legacyHeaders: false }), requireIdempotencyKey, resendInvoiceEmail);
-workspaceRoutes.get("/registration-options", (_req, res) =>
+workspaceRoutes.get("/registration-options", requireGymRegistration, (_req, res) =>
   res.json({
     success: true,
     data: {
@@ -306,7 +307,7 @@ const resources: Record<string, Resource> = {
       "publicId ownerId gymId currentStep status selectedPlatformPlanId latestPaymentId activatedAt createdAt",
     populate: [
       { path: "ownerId", select: person },
-      { path: "gymId", select: "name address status" },
+      { path: "gymId", select: "name address status deletedAt" },
     ],
   },
   "platform-plans": {
@@ -847,7 +848,7 @@ workspaceRoutes.patch(
     res.json({ success: true, data });
   },
 );
-workspaceRoutes.get("/registrations", async (req, res) => {
+workspaceRoutes.get("/registrations", requireGymRegistration, async (req, res) => {
   const rows = await GymRegistration.find({ ownerId: req.auth!.userId })
     .populate("gymId")
     .populate("latestPaymentId", "publicId status metadata")

@@ -25,6 +25,7 @@ import {
 import { InfoPage } from "./pages/public/InfoPage";
 import { RegisterGymPage } from "./pages/public/RegisterGymPage";
 import { ActivateAccountPage } from "./pages/public/ActivateAccountPage";
+import { BackIconLink } from "./components/BackIconControl";
 const Auth = lazy(() =>
   import("./pages/public/AuthDesktopPage").then((m) => ({
     default: m.AuthDesktopPage,
@@ -159,7 +160,7 @@ const router = createBrowserRouter([
       { path: "help", element: <InfoPage type="help" /> },
       { path: "contact", element: <InfoPage type="contact" /> },
       { path: "legal/:document", element: <InfoPage type="legal" /> },
-      { path: "onboarding/*", element: <RegisterGymPage /> },
+      ...(["GYM_OWNER", "ADMIN"].includes(role) ? [{ path: "onboarding/*", element: <RegisterGymPage /> }] : []),
       { path: "*", element: <LiveWorkspace /> },
     ],
   })),
@@ -168,7 +169,7 @@ const router = createBrowserRouter([
     element: (
       <main className="state-card">
         <h1>Page not found</h1>
-        <a href="/">Back home</a>
+        <BackIconLink to="/" label="Back to home" />
       </main>
     ),
   },

@@ -1,5 +1,5 @@
 import { useSession } from "../services/session";
-import { authPath, loginDestination } from "../services/authRedirect";
+import { authPath, canRegisterGym, isOwnerAccountDestination, loginDestination, needsOwnerOnboarding } from "../services/authRedirect";
 import type { ReactNode } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 import { ApiError } from "../services/apiClient";
@@ -18,12 +18,17 @@ export function ProtectedRoute({ children }: { children: ReactNode }) {
             location.pathname + location.search + location.hash,
           )}
           replace
-          state={{ from: location.pathname + location.search + location.hash }}
+          state={{ from: location.pathname + location.search + location.hash, sessionExpired: true }}
         />
       );
     return <SessionFailure error={me.error} retry={() => me.refetch()} />;
   }
-  const role = me.data.data.context.role,
+  const identity = me.data.data;
+  const registrationRoute = /^\/(?:register-gym|(?:app|owner|trainer|admin)\/onboarding)(?:\/|$)/.test(location.pathname);
+  if (registrationRoute && !canRegisterGym(identity)) return <Navigate to={loginDestination(identity)} replace />;
+  if (needsOwnerOnboarding(identity) && !registrationRoute && !isOwnerAccountDestination(location.pathname) && /^\/(?:owner|app|trainer|admin)(?:\/|$)/.test(location.pathname))
+    return <Navigate to={loginDestination(identity)} replace />;
+  const role = identity.context.role,
     prefix = location.pathname.split("/")[1];
   const allowed =
     prefix === "app"
@@ -35,6 +40,6 @@ export function ProtectedRoute({ children }: { children: ReactNode }) {
           : prefix === "admin"
             ? role === "ADMIN"
             : true;
-  if (!allowed) return <Navigate to={loginDestination(role)} replace />;
+  if (!allowed) return <Navigate to={loginDestination(identity)} replace />;
   return <>{children}</>;
 }

@@ -2,6 +2,7 @@ import type { Request, Response } from "express";
 import mongoose from "mongoose";
 import { OAuth2Client } from "google-auth-library";
 import { z } from "zod";
+import { contactPhone } from "../routes/authSchemas.js";
 import { User } from "../models/User.js";
 import { AuthIdentity, Session } from "../models/Auth.js";
 import { DeviceToken } from "../models/Collaboration.js";
@@ -14,10 +15,11 @@ import {
 import { AppError } from "../utils/AppError.js";
 import { env } from "../config/env.js";
 import { writeAudit } from "../services/auditService.js";
+import { normalizeEmail } from "../utils/accountIdentity.js";
 
 export async function requestPhoneChange(req: Request, res: Response) {
   const body = z
-    .object({ phone: z.string().min(8).max(25) })
+    .object({ phone: contactPhone })
     .strict()
     .parse(req.body);
   const phone = normalizePhone(body.phone);
@@ -64,6 +66,9 @@ export async function confirmPhoneChange(req: Request, res: Response) {
       "The verification challenge does not match this phone change.",
     );
   await mongoose.connection.transaction(async (session) => {
+    // A competing signup may have claimed the number after the OTP request.
+    if (await User.exists({ phone: change.phone, _id: { $ne: req.auth!.userId } }).session(session))
+      throw new AppError(409, "CONTACT_UNAVAILABLE", "This contact detail is unavailable.");
     const claimed = await ProfileContactChange.findOneAndUpdate(
       { _id: change._id, userId: req.auth!.userId, consumedAt: null },
       { $set: { consumedAt: new Date() } },
@@ -143,7 +148,7 @@ export async function changeEmail(req: Request, res: Response) {
       "EMAIL_NOT_VERIFIED",
       "Use a verified Google email address.",
     );
-  const email = payload.email.toLowerCase(),
+  const email = normalizeEmail(payload.email),
     subject = payload.sub;
   await mongoose.connection.transaction(async (session) => {
     const conflict = await User.exists({
@@ -158,7 +163,7 @@ export async function changeEmail(req: Request, res: Response) {
       throw new AppError(
         409,
         "CONTACT_UNAVAILABLE",
-        "This verified email belongs to another account.",
+        "This contact detail is unavailable.",
       );
     await User.updateOne(
       { _id: req.auth!.userId },

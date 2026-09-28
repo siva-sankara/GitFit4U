@@ -33,6 +33,7 @@ import { checkNotificationEnhancements } from "./check-notification-enhancements
 import { checkMembershipStreakEnhancements } from "./check-membership-streak-enhancements.js";
 import { checkPromotionRegressions } from "./check-promotion-regressions.js";
 import { checkClassBookingEnhancements } from "./check-class-booking-enhancements.js";
+import { checkAttendanceClassAccess } from "./check-attendance-class-access.js";
 import { prepareImage } from "../services/imageProcessingService.js";
 import { attachmentUrl } from "../integrations/storage/mediaStore.js";
 
@@ -49,8 +50,28 @@ const databasePattern = /^gfv_[a-f0-9]{32}$/;
 const verifyMedia = process.argv.includes("--verify-media");
 const sectionIndex = process.argv.indexOf("--section");
 const section = sectionIndex === -1 ? "all" : process.argv[sectionIndex + 1];
-if (!["all", "account"].includes(section || "")) throw new Error("Use --section account or omit --section for the full isolated suite.");
-if (section === "account" && verifyMedia) throw new Error("The account-only section does not run media verification; omit --verify-media.");
+if (!["all", "account", "attendance-classes"].includes(section || "")) throw new Error("Use --section account, --section attendance-classes, or omit --section for the full isolated suite.");
+if (section !== "all" && verifyMedia) throw new Error("The account-only section does not run media verification; omit --verify-media.");
+if (section !== "all") {
+  // Scoped regressions inspect queued deliveries in the isolated database.
+  // Explicitly disable real transports even if the developer .env configures them.
+  for (const key of [
+    "RESEND_API_KEY", "EMAIL_FROM", "MSG91_AUTH_KEY", "MSG91_TEMPLATE_ID",
+    "WHATSAPP_ACCESS_TOKEN", "WHATSAPP_PHONE_NUMBER_ID", "FIREBASE_PROJECT_ID",
+    "FIREBASE_CLIENT_EMAIL", "FIREBASE_PRIVATE_KEY", "OBJECT_STORAGE_ENDPOINT",
+    "OBJECT_STORAGE_ACCESS_KEY", "OBJECT_STORAGE_SECRET_KEY", "OBJECT_STORAGE_SESSION_TOKEN",
+    "CLOUDINARY_CLOUD_NAME", "CLOUDINARY_API_KEY", "CLOUDINARY_API_SECRET",
+  ] as const) env[key] = undefined;
+}
+if (section === "attendance-classes") {
+  // Existing class-image assertions only generate URLs; no object is uploaded
+  // or downloaded. Use dummy signing values and reject all external fetches.
+  env.OBJECT_STORAGE_ENDPOINT = "https://storage.invalid";
+  env.OBJECT_STORAGE_ACCESS_KEY = "isolated-test-access";
+  env.OBJECT_STORAGE_SECRET_KEY = "isolated-test-secret";
+  globalThis.fetch = async () => { throw new Error("External fetch is disabled in isolated attendance/class verification."); };
+  logger.level = "silent";
+}
 type VerificationMedia = {
   publicId: string;
   attachmentId: string;
@@ -355,6 +376,9 @@ try {
 
   if (section === "account") {
     results.push(...await checkAccountDelivery());
+  } else if (section === "attendance-classes") {
+    results.push(...await checkAttendanceClassAccess({ assertDatabase }));
+    results.push(...await checkClassBookingEnhancements({ assertDatabase }));
   } else {
   const owner = await createUser("Verification Owner", "GYM_OWNER");
   const otherOwner = await createUser("Other Verification Owner", "GYM_OWNER");
@@ -532,12 +556,12 @@ try {
     ownerToken,
     {},
   );
-  status(rotated, 200);
+  status(rotated, 410);
   status(
     await call("post", "/api/v1/users/me/attendance/check-in", memberToken, {
       qrToken: qr.body.data.token,
     }),
-    410,
+    200,
   );
   status(
     await call("post", "/api/v1/users/me/attendance/qr", memberToken, {
@@ -546,7 +570,7 @@ try {
     410,
   );
   results.push(
-    "Persistent gym QR, authenticated ownership, concurrent duplicate prevention and QR revocation verified",
+    "Persistent gym QR, authenticated ownership, concurrent duplicate prevention and permanent QR rotation rejection verified",
   );
 
   const joined = await call(

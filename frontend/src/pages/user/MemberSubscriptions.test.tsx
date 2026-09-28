@@ -281,4 +281,7 @@ it("lets a frozen member reactivate and refreshes access only after server confi
     expect.objectContaining({ method: "POST" }),
   );
   expect(host.textContent).toContain("Scan gym QR");
+  const options = vi.mocked(client.invalidateQueries).mock.calls.find(([value]) => Boolean(value?.predicate))?.[0];
+  expect(options?.predicate?.({ queryKey:["api", "/api/v1/users/classes?day=&page=1", "user"] } as never)).toBe(true);
+  expect(options?.predicate?.({ queryKey:["api", "/api/v1/workspace/records/bookings?limit=20&page=1", "user"] } as never)).toBe(true);
 });

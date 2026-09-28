@@ -1,3 +1,4 @@
+import { PageHeader } from "../../components/PageHeader";
 import { Link } from "react-router-dom";
 import {
   Bar,
@@ -34,13 +35,13 @@ export function OwnerDashboardPage() {
   ];
   return (
     <div className="page-stack owner-dashboard">
-      <header className="page-heading">
+      <PageHeader>
         <div>
           <span className="eyebrow">Gym overview</span>
           <h1>Welcome, {me.data?.data.user.name || "gym team"}</h1>
           <p>Memberships, attendance and your gym's performance.</p>
         </div>
-      </header>
+      </PageHeader>
       <QueryState query={stats}>
         {data && (
           <>

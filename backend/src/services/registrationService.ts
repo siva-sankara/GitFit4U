@@ -1,5 +1,6 @@
 import type { ClientSession } from "mongoose";
 import { z } from "zod";
+import { accountEmail, contactPhone, optionalContactPhone } from "../routes/authSchemas.js";
 import { Payment, Subscription } from "../models/Commerce.js";
 import { AppError } from "../utils/AppError.js";
 import { Gym } from "../models/Gym.js";
@@ -23,6 +24,8 @@ export const editableRegistrationStates = [
   ...legacyRegistrationStates,
 ];
 export function registrationStatus(registration: any) {
+  // Populated missing/deleted gym references require support, not a new draft.
+  if (!registration.gymId || registration.gymId.deletedAt) return "SUSPENDED";
   if (registration.gymId?.status === "ACTIVE") return "ACTIVE";
   if (["SUSPENDED", "ARCHIVED"].includes(registration.gymId?.status))
     return "SUSPENDED";
@@ -35,13 +38,20 @@ export function registrationStatus(registration: any) {
     ? "DRAFT"
     : registration.status;
 }
+export async function availableRegistrationGym(registration: any, ownerId: string, session?: ClientSession) {
+  const unavailable = () => new AppError(409, "REGISTRATION_UNAVAILABLE", "This gym registration is unavailable. Contact support before continuing.");
+  if (!registration.gymId || String(registration.ownerId) !== ownerId) throw unavailable();
+  const gym = await Gym.findOne({ _id: registration.gymId, ownerId, deletedAt: null }).session(session || null);
+  if (!gym) throw unavailable();
+  return gym;
+}
 export async function payableGym(registration: any, session?: ClientSession) {
   const gym = await Gym.findOne({
     _id: registration.gymId,
     ownerId: registration.ownerId,
   }).session(session || null);
   if (
-    !gym ||
+    !gym || gym.deletedAt ||
     !editableRegistrationStates.includes(registration.status) ||
     gym.status !== "INACTIVE"
   )
@@ -117,9 +127,9 @@ export const coordinatesInput = z.tuple([
   z.number().min(-90).max(90),
 ]);
 export const registrationContact = z.object({
-  phone: z.string().trim().min(8).max(20),
-  email: z.string().trim().email(),
-  whatsapp: z.string().max(20).optional(),
+  phone: contactPhone,
+  email: accountEmail,
+  whatsapp: optionalContactPhone,
   website: z.string().url().optional(),
 });
 export const registrationAddress = z.object({

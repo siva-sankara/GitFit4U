@@ -30,6 +30,9 @@ import {
 import { AppError } from "../utils/AppError.js";
 import { ROLES, type Role } from "../constants/domain.js";
 import { sha256 } from "../utils/crypto.js";
+import { publicSignupInput } from "../routes/authSchemas.js";
+import { duplicateAccountError, isDuplicateKey, normalizeEmail } from "../utils/accountIdentity.js";
+import { getOwnerOnboarding } from "../services/ownerOnboardingService.js";
 
 const googleClient = new OAuth2Client(env.GOOGLE_CLIENT_ID);
 
@@ -41,15 +44,23 @@ async function loginResponse(
   let role = (user.activeRole || "USER") as Role;
   let hasAccess = ROLES.includes(role) && user.roles?.includes(role);
   let activeGymId: string | undefined;
+  // Prefer an established active gym over an old incomplete draft when the
+  // account has multiple owner assignments and no explicit tenant selection.
+  const onboarding = await getOwnerOnboarding(user);
   if (hasAccess && ["GYM_OWNER", "GYM_STAFF", "TRAINER"].includes(role)) {
     const assignment = await RoleAssignment.findOne({
       userId: user._id,
       role,
       status: "ACTIVE",
-      gymId: { $ne: null },
+      gymId: role === "GYM_OWNER" && onboarding?.state === "ACTIVE" && onboarding.gymId
+        ? onboarding.gymId : { $ne: null },
     });
     activeGymId = assignment?.gymId ? String(assignment.gymId) : undefined;
-    hasAccess = Boolean(activeGymId);
+    if (role === "GYM_OWNER" && onboarding?.state === "ACTIVE" && !activeGymId)
+      throw new AppError(403, "ROLE_ACCESS_UNAVAILABLE", "Your gym access is unavailable. Contact support to restore access.");
+    // A self-registered owner may hold an onboarding session without a gym.
+    // Tenant permissions still require a current assignment in requireAuth.
+    hasAccess = role === "GYM_OWNER" || Boolean(activeGymId);
   }
   if (!hasAccess) {
     // A removed role must never select another privileged role implicitly.
@@ -87,34 +98,30 @@ async function loginResponse(
         roles: user.roles,
         activeRole: role,
         activeGymId,
+        onboarding: role === "GYM_OWNER" ? await getOwnerOnboarding(user, activeGymId) : onboarding,
       },
     },
   });
 }
 
 export async function register(req: Request, res: Response) {
-  const email = req.body.email.trim().toLowerCase();
-  const phone = req.body.phone ? normalizePhone(req.body.phone) : undefined;
+  const body = publicSignupInput.parse(req.body);
+  const { email, phone, role } = body;
   const exists = await User.exists({
     $or: [{ email }, ...(phone ? [{ phone }] : [])],
   });
-  if (exists)
-    throw new AppError(
-      409,
-      "ACCOUNT_EXISTS",
-      "An account already exists for these details.",
-    );
-  const passwordHash = await bcrypt.hash(req.body.password, 12);
+  if (exists) throw duplicateAccountError();
+  const passwordHash = await bcrypt.hash(body.password, 12);
   const user = await mongoose.connection.transaction(async (session) => {
     const [created] = await User.create(
       [
         {
           publicId: nanoid(18),
-          name: req.body.name.trim(),
+          name: body.name,
           email,
           phone,
-          roles: ["USER"],
-          activeRole: "USER",
+          roles: [role],
+          activeRole: role,
           status: "ACTIVE",
         },
       ],
@@ -139,6 +146,11 @@ export async function register(req: Request, res: Response) {
       session,
     });
     return created;
+  }).catch((error: unknown) => {
+    // Unique email/phone indexes are the final concurrency arbiter. A failed
+    // insert rolls back credentials/events and never issues a login session.
+    if (isDuplicateKey(error)) throw duplicateAccountError();
+    throw error;
   });
   // Creation has committed. Subsequent sign-in writes must not reuse its closed session.
   user.$session(null);
@@ -146,7 +158,7 @@ export async function register(req: Request, res: Response) {
 }
 
 export async function passwordLogin(req: Request, res: Response) {
-  const identifier = req.body.identifier.trim().toLowerCase();
+  const identifier = normalizeEmail(req.body.identifier);
   // Password identities use email as their subject. Resolve phone aliases through the user.
   let identity;
   if (identifier.includes("@")) {
@@ -320,19 +332,7 @@ export async function otpVerify(req: Request, res: Response) {
     );
   }
   if (!user) {
-    user = await User.create({
-      publicId: nanoid(18),
-      phone: verified.phone,
-      roles: ["USER"],
-      activeRole: "USER",
-      status: "ACTIVE",
-    });
-    await AuthIdentity.create({
-      userId: user._id,
-      provider: "PHONE",
-      providerSubject: verified.phone,
-      verifiedAt: new Date(),
-    });
+    throw new AppError(409, "SIGNUP_REQUIRED", "Complete sign up with your account type, email and mobile number before signing in.");
   }
   if (user.status !== "ACTIVE")
     throw new AppError(403, "ACCOUNT_DISABLED", "This account is not active.");
@@ -370,7 +370,7 @@ export async function googleLogin(req: Request, res: Response) {
   let user = identity ? await User.findById(identity.userId) : null;
   if (!user) {
     const emailOwner = await User.findOne({
-      email: payload.email.toLowerCase(),
+      email: normalizeEmail(payload.email),
     });
     if (emailOwner) {
       throw new AppError(
@@ -379,21 +379,7 @@ export async function googleLogin(req: Request, res: Response) {
         "Verify your existing account before linking Google.",
       );
     }
-    user = await User.create({
-      publicId: nanoid(18),
-      name: payload.name,
-      email: payload.email,
-      avatarUrl: payload.picture,
-      roles: ["USER"],
-      activeRole: "USER",
-      status: "ACTIVE",
-    });
-    identity = await AuthIdentity.create({
-      userId: user._id,
-      provider: "GOOGLE",
-      providerSubject: payload.sub,
-      verifiedAt: new Date(),
-    });
+    throw new AppError(409, "SIGNUP_REQUIRED", "Complete sign up with your account type, email and mobile number before signing in.");
   }
   if (user.status !== "ACTIVE")
     throw new AppError(403, "ACCOUNT_DISABLED", "This account is not active.");
@@ -420,7 +406,10 @@ export async function logout(req: Request, res: Response) {
   // A public session identifier alone is not proof that the caller owns it.
   const session = sessionId
     ? await Session.findOneAndUpdate(
-        { publicId: sessionId, refreshTokenHash: sha256(token), revokedAt: null },
+        { publicId: sessionId, revokedAt: null, $or: [
+          { refreshTokenHash: sha256(token) },
+          { previousRefreshTokenHash: sha256(token), refreshGraceUntil: { $gt: new Date() } },
+        ] },
         { $set: { revokedAt: new Date(), revokeReason: "LOGOUT" } },
         { returnDocument: "after" },
       ).select("publicId userId").lean()
@@ -454,12 +443,12 @@ export async function me(req: Request, res: Response) {
       .populate("gymId", "publicId name status")
       .lean(),
   ]);
-  res.json({ success: true, data: { user: user ? (await withUserMedia([user]))[0] : null, assignments, context: req.auth } });
+  res.json({ success: true, data: { user: user ? { ...(await withUserMedia([user]))[0], onboarding: await getOwnerOnboarding(user, req.auth?.gymId) } : null, assignments, context: req.auth } });
 }
 
 export async function switchRole(req: Request, res: Response) {
   const role = req.body.role as Role;
-  const gymId = req.body.gymId as string | undefined;
+  let gymId = req.body.gymId as string | undefined;
   const user = await User.findById(req.auth!.userId);
   if (!user || !user.roles.includes(role))
     throw new AppError(
@@ -467,7 +456,11 @@ export async function switchRole(req: Request, res: Response) {
       "ROLE_FORBIDDEN",
       "This role is not assigned to you.",
     );
-  if (["GYM_OWNER", "GYM_STAFF", "TRAINER"].includes(role)) {
+  if (role === "GYM_OWNER" && !gymId) {
+    const onboarding = await getOwnerOnboarding(user);
+    if (onboarding?.state === "ACTIVE") gymId = onboarding.gymId;
+  }
+  if (["GYM_STAFF", "TRAINER"].includes(role) || (role === "GYM_OWNER" && gymId)) {
     const assignment = await RoleAssignment.findOne({
       userId: user._id,
       role,
@@ -499,7 +492,8 @@ export async function switchRole(req: Request, res: Response) {
     data: {
       accessToken: signAccessToken(String(user._id), session.publicId),
       activeRole: role,
-      activeGymId: gymId,
+      activeGymId: session.activeGymId ? String(session.activeGymId) : undefined,
+      onboarding: await getOwnerOnboarding(user, gymId),
     },
   });
 }

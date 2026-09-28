@@ -63,7 +63,7 @@ describe("member scans gym QR authorization", () => {
     } as any;
   }
   it("derives member identity from authenticated user, ignoring a supplied member identifier", async () => {
-    mocks.scanner.mockResolvedValue({ _id: "scanner-id" });
+    mocks.scanner.mockResolvedValue({ _id: "scanner-id", gymId: gym });
     mocks.member.mockReturnValue({
       select: vi.fn().mockResolvedValue({ publicId: "actual-member" }),
     });
@@ -92,7 +92,7 @@ describe("member scans gym QR authorization", () => {
     expect(mocks.member).not.toHaveBeenCalled();
   });
   it("rejects accounts without an approved gym relationship", async () => {
-    mocks.scanner.mockResolvedValue({ _id: "scanner-id" });
+    mocks.scanner.mockResolvedValue({ _id: "scanner-id", gymId: gym });
     mocks.member.mockReturnValue({ select: vi.fn().mockResolvedValue(null) });
     await expect(memberCheckIn(request(), {} as any)).rejects.toMatchObject({
       code: "MEMBERSHIP_REQUIRED",

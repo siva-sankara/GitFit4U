@@ -1,8 +1,8 @@
 export type ThemePreference = "light" | "dark";
 export const themeStorageKey = "gfu_theme_preference";
-// Legacy System and missing/invalid preferences migrate to Light on every surface.
+// Legacy System and missing/invalid preferences migrate to Dark on every surface.
 export function resolveTheme(preference: unknown): ThemePreference {
-  return preference === "dark" ? "dark" : "light";
+  return preference === "light" ? "light" : "dark";
 }
 export function savedTheme(): ThemePreference {
   try {
@@ -11,6 +11,6 @@ export function savedTheme(): ThemePreference {
     if (value !== preference) localStorage.setItem(themeStorageKey, preference);
     return preference;
   } catch {
-    return "light";
+    return "dark";
   }
 }

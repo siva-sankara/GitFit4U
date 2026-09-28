@@ -1,3 +1,4 @@
+import { PageHeader } from "../../components/PageHeader";
 import { useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest, type ApiEnvelope } from "../../services/apiClient";
@@ -39,7 +40,7 @@ export function PromotionManagement({ kind, admin = false }: { kind: "offers" | 
     save.mutate(body);
   }
   const title = kind === "offers" ? "Offers" : "Advertisements";
-  return <div className="page-stack"><header className="page-heading"><div><span className="eyebrow">Gym promotions</span><h1>{title}</h1><p>{kind === "offers" ? "Real checkout discounts, with eligibility and usage limits." : "Publish targeted gym promotions with working actions."}</p></div><button className="btn btn-primary" onClick={() => open({})}>Create {kind === "offers" ? "offer" : "advertisement"}</button></header>
+  return <div className="page-stack"><PageHeader><div><span className="eyebrow">Gym promotions</span><h1>{title}</h1><p>{kind === "offers" ? "Real checkout discounts, with eligibility and usage limits." : "Publish targeted gym promotions with working actions."}</p></div><button className="btn btn-primary" onClick={() => open({})}>Create {kind === "offers" ? "offer" : "advertisement"}</button></PageHeader>
     {query.isPending ? <p role="status">Loading promotions…</p> : query.isError ? <div role="alert"><p>{query.error.message}</p><button className="btn btn-secondary" onClick={() => void query.refetch()}>Retry</button></div> : <>
       <div className="promotion-grid">{query.data?.data.map(row => <article className="panel promotion-card" key={row.publicId}>{row.imageUrl && <img className="promotion-preview" src={row.imageUrl} alt="Advertisement preview" />}<div className="promotion-card-heading"><h2>{row.name}</h2><StatusBadge status={row.effectiveStatus || row.status} /></div><p>{row.description}</p>{admin && <small>{row.gymId?.name}</small>}<small>{new Date(row.startsAt).toLocaleDateString()} – {new Date(row.endsAt).toLocaleDateString()}</small>{kind === "offers" ? <><strong>{offerLabel(row)}</strong><small>Code: {row.code || row.publicId} · Completed uses: {row.redemptionCount || 0}</small></> : <small>{(row.placements || ["GYM_PROFILE"]).join(" · ")} · {row.audience?.kind === "GYM_MEMBERS" ? "Gym members" : "All visitors"}</small>}<button className="btn btn-secondary" onClick={() => open(row)}>Edit / change status</button></article>)}</div>
       {!query.data?.data.length && <div className="panel state-card">No {title.toLowerCase()} yet. Create your first promotion.</div>}

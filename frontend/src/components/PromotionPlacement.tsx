@@ -46,8 +46,9 @@ export function PromotionPlacement({ placement, gymId }: { placement: "EXPLORE" 
     <div className="promotion-carousel-track" id={trackId} ref={track} onScroll={event => { const element = event.currentTarget; if (element.clientWidth) setActive(Math.round(element.scrollLeft / element.clientWidth)); }}>
     {ads.map((ad, index) => <article className="panel promotion-banner" key={ad.publicId} aria-label={`Promotion ${index + 1} of ${ads.length}`}>
     {ad.imageUrl && <img src={ad.imageUrl} alt="" loading="lazy" decoding="async" />}
-    <div><span className="eyebrow">Sponsored · {ad.gymName}</span><h3>{ad.name}</h3><p>{ad.description}</p>
-      {ad.external ? <a className="btn btn-secondary" href={ad.href} target="_blank" rel="noopener noreferrer">{ad.ctaLabel}</a> : <Link className="btn btn-secondary" to={ad.href}>{ad.ctaLabel}</Link>}
+    <div className="promotion-banner-copy"><div className="promotion-identity-row"><span className="eyebrow">Sponsored · {ad.gymName}</span>
+      {ad.external ? <a className="btn btn-secondary" href={ad.href} target="_blank" rel="noopener noreferrer" aria-label={`${ad.ctaLabel}: ${ad.gymName}`}>{ad.ctaLabel}</a> : <Link className="btn btn-secondary" to={ad.href} aria-label={`${ad.ctaLabel}: ${ad.gymName}`}>{ad.ctaLabel}</Link>}
+    </div><h3>{ad.name}</h3><p>{ad.description}</p>
     </div>
   </article>)}</div></section>;
 }

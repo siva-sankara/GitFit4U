@@ -15,6 +15,7 @@ import {
   requireGymContext,
   requirePermission,
   requireRole,
+  requireGymRegistration,
 } from "../middleware/auth.js";
 import { requireIdempotencyKey } from "../middleware/idempotency.js";
 import { validate } from "../middleware/validate.js";
@@ -36,6 +37,7 @@ import {
 
 export const ownerRoutes = Router();
 ownerRoutes.use(requireAuth);
+ownerRoutes.use("/registrations", requireGymRegistration);
 ownerRoutes.use((req, _res, next) => {
   const schemas: Record<string, any> = {
     "/gym": gymInput.partial(),
@@ -69,12 +71,14 @@ ownerRoutes.use((req, _res, next) => {
         gym: gymInput.partial().optional(),
         currentStep: z.enum(["GYM", "PLAN"]).optional(),
       })
+      .strict()
       .parse(req.body);
   next();
 });
 
 ownerRoutes.post(
   "/registrations",
+  requireIdempotencyKey,
   validate(
     z.object({
       body: z.object({
@@ -84,7 +88,7 @@ ownerRoutes.post(
         timezone: gymInput.shape.timezone,
         contact: registrationContact.partial().optional(),
         address: registrationAddress.partial().optional(),
-      }),
+      }).strict(),
       params: z.object({}),
       query: z.object({}),
     }),

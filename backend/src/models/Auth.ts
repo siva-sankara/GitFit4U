@@ -32,6 +32,8 @@ const sessionSchema = new Schema(
     userId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
     tokenFamily: { type: String, required: true, index: true },
     refreshTokenHash: { type: String, required: true, select: false },
+    previousRefreshTokenHash: { type: String, select: false },
+    refreshGraceUntil: Date,
     activeRole: { type: String, enum: ROLES, required: true },
     activeGymId: { type: Schema.Types.ObjectId, ref: "Gym", default: null },
     device: {

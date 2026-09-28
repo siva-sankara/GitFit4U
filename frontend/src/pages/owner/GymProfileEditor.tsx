@@ -1,4 +1,5 @@
-﻿import { useEffect, useRef, useState } from "react";
+import { PageHeader } from "../../components/PageHeader";
+import { useEffect, useRef, useState } from "react";
 import { Modal } from "../../components/Modal";
 import { GymLogoEditor } from "./GymLogoEditor";
 import { GymTermsEditor } from "./GymTermsEditor";
@@ -67,7 +68,7 @@ export function GymProfileEditor({
   const canEdit = permissions.includes("gym:update");
   return (
     <div className="page-stack gym-profile-editor">
-      <header className="page-heading">
+      <PageHeader>
         <div>
           <span className="eyebrow">Your gym</span>
           <h1>{gym.data?.data?.name || "Gym profile"}</h1>
@@ -82,7 +83,7 @@ export function GymProfileEditor({
               View public gym page
             </Link>
           )}
-      </header>
+      </PageHeader>
       {gym.data?.data &&
         (gym.data.data.status !== "ACTIVE" ||
           gym.data.data.platformSubscriptionStatus !== "ACTIVE") && (

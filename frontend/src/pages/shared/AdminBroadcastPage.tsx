@@ -1,3 +1,4 @@
+import { PageHeader } from "../../components/PageHeader";
 import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Send } from "lucide-react";
@@ -56,13 +57,13 @@ export function AdminBroadcastPage() {
   }
   return (
     <div className="page-stack">
-      <header className="page-heading">
+      <PageHeader>
         <div>
           <span className="eyebrow">Platform communication</span>
           <h1>Announcements</h1>
           <p>Send an announcement to selected account audiences.</p>
         </div>
-      </header>
+      </PageHeader>
       <form
         className="panel broadcast-form"
         onSubmit={(event) => {

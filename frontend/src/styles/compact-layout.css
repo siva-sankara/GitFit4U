@@ -1,0 +1,55 @@
+/* Shared density rules keep controls usable without stretching mobile pages. */
+.page-stack { gap: 20px; }
+.shared-page-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin: 0; }
+.shared-page-heading > div:not(.workspace-breadcrumb-header):not(.heading-actions) { min-width: 0; flex: 1 1 200px; order: 1; }
+.shared-page-heading h1 { margin: 0; line-height: 1.18; }
+.shared-page-heading p { margin: 6px 0 0; }
+.shared-page-heading .eyebrow { margin-bottom: 4px; }
+.shared-page-heading > .workspace-breadcrumb-header { display: contents; }
+.shared-page-heading > .workspace-breadcrumb-header > .back-icon-control { order: 0; flex: 0 0 44px; }
+.shared-page-heading > .heading-actions, .shared-page-heading > button, .shared-page-heading > a { order: 3; }
+.shared-page-heading > h1 { order: 1; flex: 1 1 200px; }
+.compact-filters { min-width: 0; flex: 1 1 340px; }
+.compact-filter-content { display: flex; align-items: flex-end; gap: 10px; min-width: 0; }
+.compact-filter-content[hidden] { display: none; }
+.compact-filter-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(140px, 100%), 1fr)); gap: 10px; flex: 1; min-width: 0; }
+.compact-filter-fields > *, .compact-filter-fields label, .compact-filter-fields input, .compact-filter-fields select { min-width: 0; max-width: 100%; width: 100%; box-sizing: border-box; }
+.compact-filter-fields label { display: grid; gap: 5px; align-content: start; }
+.compact-filter-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.filter-count { display: inline-grid; place-items: center; min-width: 20px; height: 20px; border-radius: 50%; background: var(--selected-bg); color: var(--selected-text); font-size: .75rem; }
+.explore-filter-toolbar.table-toolbar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; min-width: 0; }
+.explore-filter-toolbar .explore-search { display: flex; flex: 1 1 270px; gap: 8px; min-width: 0; }
+.explore-search input { min-width: 0; flex: 1; width: 100%; }
+.explore-filter-toolbar .compact-filters { flex-basis: 480px; }
+.filter-error { margin: 0; color: var(--error); font-size: .8rem; }
+.member-filter-toolbar.panel { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.member-filter-toolbar > .search-field { flex: 1 1 260px; min-width: 0; }
+.member-filter-toolbar > .compact-filters { flex: 2 1 420px; }
+.footer-grid { grid-template-columns: 2fr repeat(2, 1fr); }
+.dashboard-chart-grid.member-activity-chart { grid-template-columns: minmax(0, 1fr); }
+@media (max-width: 680px) {
+  .workspace-content { padding: 0 12px 24px; }
+  .page-stack { gap: 16px; }
+  .shared-page-heading { gap: 8px; align-items: flex-start; }
+  .shared-page-heading h1 { font-size: clamp(1.35rem, 6vw, 1.75rem); }
+  .shared-page-heading > div:not(.workspace-breadcrumb-header):not(.heading-actions) { flex-basis: calc(100% - 84px); }
+  .shared-page-heading > .heading-actions { gap: 8px; flex-wrap: wrap; }
+  .panel.form-section, .dashboard-chart-panel { padding: 16px; }
+  .compact-filters { flex-basis: auto; width: 100%; }
+  .compact-filter-content { flex-direction: column; align-items: stretch; padding: 12px; margin-top: 8px; border: 1px solid var(--border); border-radius: var(--radius-md, 12px); background: var(--surface); }
+  .compact-filter-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .compact-filter-fields input, .compact-filter-fields select { font-size: 16px; }
+  .compact-filter-actions { justify-content: flex-end; }
+  .explore-filter-toolbar.table-toolbar { gap: 8px; }
+  .explore-filter-toolbar .explore-search { flex-basis: 100%; }
+  .explore-filter-toolbar .compact-filters { flex-basis: 100%; }
+  .form-section h2 { margin-top: 0; }
+  .notifications-page .heading-actions { flex: 0 0 auto; gap: 8px; }
+  .notifications-page .heading-actions .btn { min-height: 44px; width: 44px; padding: 10px; }
+  .notifications-page .notification-action-label { display: none; }
+  .notifications-page .notification-title, .notifications-page .notification-preview { overflow-wrap: anywhere; }
+  .member-filter-toolbar > .compact-filters { flex-basis: 100%; }
+  .footer-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+  .footer-grid > div:first-child { grid-column: 1 / -1; }
+}
+@media (max-width: 360px) { .compact-filter-fields { grid-template-columns: minmax(0, 1fr); } }

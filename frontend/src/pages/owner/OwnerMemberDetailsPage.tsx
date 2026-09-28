@@ -1,3 +1,4 @@
+import { PageHeader } from "../../components/PageHeader";
 import { useState } from "react";
 import { useCurrentUser } from "../../api/hooks";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -114,7 +115,7 @@ export function OwnerMemberDetailsPage({ id }: { id: string }) {
     );
   return (
     <div className="page-stack compact-member-details">
-      <header className="page-heading">
+      <PageHeader>
         <div>
           <span className="eyebrow">Member details</span>
           <h1>{memberName(member)}</h1>
@@ -131,7 +132,7 @@ export function OwnerMemberDetailsPage({ id }: { id: string }) {
             </button>
           )}
         </div>
-      </header>
+      </PageHeader>
       <div className="member-detail-grid">
         <section className="panel">
           <h2>Profile and contact</h2>

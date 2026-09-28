@@ -1,3 +1,4 @@
+import { PageHeader } from "../../components/PageHeader";
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { MemberEditor } from "../owner/OwnerMembersPage";
@@ -471,9 +472,9 @@ export function AdminSettings() {
   const query = useData<Row>("/api/v1/admin/settings");
   return (
     <div className="page-stack">
-      <header className="page-heading">
+      <PageHeader>
         <h1>Platform settings</h1>
-      </header>
+      </PageHeader>
       <QueryState query={query}>
         <section className="panel form-section">
           <EditForm

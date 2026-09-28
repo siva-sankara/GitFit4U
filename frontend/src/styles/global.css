@@ -70,7 +70,7 @@ input:focus-visible,
 select:focus-visible,
 textarea:focus-visible,
 [tabindex]:focus-visible {
-  outline: 3px solid rgba(185, 255, 102, 0.55);
+  outline: 3px solid var(--focus);
   outline-offset: 3px;
 }
 
@@ -120,7 +120,7 @@ textarea:focus-visible,
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  color: var(--brand);
+  color: var(--brand-text);
   font-size: var(--text-size-small);
   font-weight: 800;
   letter-spacing: 0.14em;
@@ -171,7 +171,7 @@ h3 {
 }
 
 .accent-text {
-  color: var(--brand);
+  color: var(--brand-text);
 }
 
 .btn {
@@ -212,8 +212,8 @@ h3 {
 }
 
 .btn-secondary {
-  border-color: var(--border-strong);
-  background: var(--surface-muted);
+  border-color: var(--control-border);
+  background: var(--surface-solid);
   color: var(--text);
 }
 
@@ -271,7 +271,7 @@ h3 {
 .chip-active {
   border-color: rgba(185, 255, 102, 0.35);
   background: rgba(185, 255, 102, 0.11);
-  color: var(--brand);
+  color: var(--brand-text);
 }
 
 .status {
@@ -320,9 +320,9 @@ h3 {
 .textarea {
   width: 100%;
   min-height: 48px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--control-border);
   border-radius: var(--radius-sm);
-  background: var(--surface-muted);
+  background: var(--input-bg);
   padding: 0 14px;
   outline: none;
   transition:
@@ -339,8 +339,8 @@ h3 {
 .input:focus,
 .select:focus,
 .textarea:focus {
-  border-color: rgba(185, 255, 102, 0.5);
-  box-shadow: 0 0 0 4px rgba(185, 255, 102, 0.08);
+  border-color: var(--focus);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 20%, transparent);
 }
 
 .search-field {
@@ -376,7 +376,7 @@ h3 {
     rgba(185, 255, 102, 0.24),
     rgba(82, 229, 196, 0.1)
   );
-  color: var(--brand);
+  color: var(--brand-text);
   font-size: var(--text-size-small);
   font-weight: 850;
 }
@@ -456,4 +456,39 @@ textarea {
 .recharts-cartesian-axis-tick-value,
 .recharts-legend-item-text {
   font-size: var(--text-size-caption);
+}
+
+/* Shared controls and portal content use the same surfaces in every workspace. */
+input::placeholder,
+textarea::placeholder { color: var(--text-muted); opacity: 1; }
+.btn-secondary:hover,
+.btn-ghost:hover,
+.icon-btn:hover { background: var(--surface-hover); }
+.chip-active {
+  border-color: var(--focus);
+  background: var(--selected-bg);
+  color: var(--selected-text);
+  font-weight: 750;
+}
+.input:disabled,
+.select:disabled,
+.textarea:disabled {
+  color: var(--text-muted);
+  background: var(--surface-muted);
+  cursor: not-allowed;
+  border-style: dashed;
+}
+.input[aria-invalid="true"],
+.select[aria-invalid="true"],
+.textarea[aria-invalid="true"] { border-color: var(--error); }
+.search-field:focus-within,
+.topbar-search:focus-within,
+.hero-search:focus-within { outline: 3px solid var(--focus); outline-offset: 3px; }
+[role="listbox"],
+[role="menu"] { color: var(--text); background-color: var(--surface-solid); }
+[role="option"][aria-selected="true"] {
+  color: var(--selected-text);
+  background: var(--selected-bg);
+  box-shadow: inset 3px 0 var(--focus);
+  font-weight: 750;
 }

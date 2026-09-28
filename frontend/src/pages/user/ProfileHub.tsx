@@ -1,3 +1,5 @@
+import { PageHeader } from "../../components/PageHeader";
+import { PageNavigationContext } from "../../components/pageNavigation";
 import { lazy, Suspense, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { Activity, CalendarDays, CreditCard, Dumbbell, Flame, Gift, Heart, IdCard, Settings, UserRound, Users } from "lucide-react";
@@ -54,9 +56,9 @@ export function ProfileHub({ security }: { security?: ReactNode }) {
   const summary = attendance.data?.data.summary;
   const membership = memberships.data?.data.find(row => row.status === "ACTIVE") || memberships.data?.data[0];
   return <div className="page-stack profile-hub">
-    <header className="panel account-identity"><Avatar user={user} size={64} /><div><h1>{user?.name || "My profile"}</h1>{user?.social?.bio && <p className="account-bio">{user.social.bio}</p>}<p className="subtle">{membership ? `${membership.gymId?.name || "Your gym"} · ${membership.planSnapshot?.name || "Membership"} · ${membership.status.toLowerCase()}` : "Your personal fitness account"}</p>{summary && <Link className="account-header-streak" to="/app/profile?section=attendance"><Flame size={16} aria-hidden="true" />{summary.currentStreak} day streak · Longest {summary.longestStreak} days</Link>}</div><Link className="btn btn-secondary" to="/app/profile?section=personal">Edit profile</Link></header>
+    <PageHeader className="panel account-identity"><Avatar user={user} size={64} /><div><h1>{user?.name || "My profile"}</h1>{user?.social?.bio && <p className="account-bio">{user.social.bio}</p>}<p className="subtle">{membership ? `${membership.gymId?.name || "Your gym"} · ${membership.planSnapshot?.name || "Membership"} · ${membership.status.toLowerCase()}` : "Your personal fitness account"}</p>{summary && <Link className="account-header-streak" to="/app/profile?section=attendance"><Flame size={16} aria-hidden="true" />{summary.currentStreak} day streak · Longest {summary.longestStreak} days</Link>}</div><Link className="btn btn-secondary" to="/app/profile?section=personal">Edit profile</Link></PageHeader>
     <nav className="account-section-nav" aria-label="Profile sections">{sections.map(({ id, label, Icon }) => <Link key={id} to={`/app/profile?section=${id}`} aria-current={section === id ? "page" : undefined}><Icon size={19} aria-hidden="true" /><span>{label}</span></Link>)}</nav>
-    <section className="account-section" aria-label={section === "personal" ? "Personal details" : sections.find(item => item.id === section)?.label}>
+    <PageNavigationContext.Provider value={null}><section className="account-section" aria-label={section === "personal" ? "Personal details" : sections.find(item => item.id === section)?.label}>
       {section === "overview" && <div className="account-overview-grid">
         <section className="panel account-personal"><h2>Membership</h2><QueryState query={memberships}>{membership ? <><p><strong>{membership.gymId?.name || "Your gym"}</strong></p><p>{membership.planSnapshot?.name || "Membership"} · {membership.status}</p></> : <p>Find your gym and choose a membership to get started.</p>}</QueryState><Link className="btn btn-secondary" to="/app/profile?section=membership">View memberships</Link></section>
         <section className="panel account-personal"><h2>Your next session</h2><p>Browse classes, review your reservations and manage upcoming bookings.</p><Link className="btn btn-secondary" to="/app/profile?section=bookings">View bookings</Link></section>
@@ -76,6 +78,6 @@ export function ProfileHub({ security }: { security?: ReactNode }) {
       {section === "referrals" && <Referrals />}
       {section === "social" && <Suspense fallback={<p role="status">Loading your social profile…</p>}><SocialProfilePage /></Suspense>}
       {section === "settings" && <div className="page-stack"><section className="panel account-personal"><h2>Appearance</h2><p>Choose Light or Dark. Your selection is saved to your account and this device.</p><ThemePicker /></section><PwaSettings /><PushNotificationSettings />{security}</div>}
-    </section>
+    </section></PageNavigationContext.Provider>
   </div>;
 }

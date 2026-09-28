@@ -41,19 +41,22 @@ export const requireAuth: RequestHandler = async (req, _res, next) => {
     } else if (
       ["GYM_OWNER", "GYM_STAFF", "TRAINER"].includes(session.activeRole)
     ) {
-      const assignment = await RoleAssignment.findOne({
+      // A stored owner role may start onboarding before any gym exists. This
+      // session gets no tenant permissions; gym-scoped routes still require one.
+      const onboardingOwner = session.activeRole === "GYM_OWNER" && !session.activeGymId;
+      const assignment = onboardingOwner ? null : await RoleAssignment.findOne({
         userId: user._id,
         role: session.activeRole,
         gymId: session.activeGymId,
         status: "ACTIVE",
       });
-      if (!assignment)
+      if (!onboardingOwner && !assignment)
         throw new AppError(
           403,
           "ROLE_REVOKED",
           "Your gym access has been removed.",
         );
-      permissions = assignment.permissions as Permission[];
+      permissions = (assignment?.permissions || []) as Permission[];
     }
 
     req.auth = {
@@ -83,6 +86,19 @@ export function requireRole(...roles: Role[]): RequestHandler {
     next();
   };
 }
+
+export const requireGymRegistration: RequestHandler = async (req, _res, next) => {
+  try {
+    if (!req.auth || !(await User.exists({
+      _id: req.auth.userId,
+      status: "ACTIVE",
+      roles: { $in: ["GYM_OWNER", "ADMIN"] },
+    }))) throw new AppError(403, "ROLE_FORBIDDEN", "Gym registration requires a gym owner account.");
+    next();
+  } catch (error) {
+    next(error);
+  }
+};
 
 export function requirePermission(permission: Permission): RequestHandler {
   return (req, _res, next) => {

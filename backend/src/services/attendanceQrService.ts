@@ -130,3 +130,24 @@ export function verifyGymQr(token: string): GymQrPayload {
     );
   return payload;
 }
+
+export const permanentGymQr = (identityId: string) => `getfit4u:gym:${identityId}`;
+export function parseGymQrReference(token: string): { identityId: string; gymId?: string; revision?: number } {
+  const invalid = () => new AppError(400, "INVALID_QR", "Scan the gym attendance QR displayed at reception.");
+  if (typeof token !== "string" || token.length > 2048) throw invalid();
+  const permanent = /^getfit4u:gym:([A-Za-z0-9_-]{24})$/.exec(token);
+  if (permanent) return { identityId: permanent[1] };
+  // Legacy v2 codes are public gym identifiers, not authentication. Resolve
+  // their unguessable identity + gym + current revision against stored records.
+  // This preserves printed codes across signing-secret changes without trusting
+  // payload membership/user data or reviving an earlier revoked revision.
+  if (!/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{43}$/.test(token)) throw invalid();
+  let legacy: GymQrPayload;
+  try { legacy = JSON.parse(Buffer.from(token.split(".")[0], "base64url").toString("utf8")); }
+  catch { throw invalid(); }
+  if (legacy?.v !== 2 || legacy.purpose !== "GYM_ATTENDANCE" ||
+    !/^[a-f\d]{24}$/i.test(legacy.gymId) || typeof legacy.identityId !== "string" ||
+    !/^[A-Za-z0-9_-]{8,128}$/.test(legacy.identityId) || !Number.isInteger(legacy.revision) || legacy.revision < 1)
+    throw invalid();
+  return { identityId: legacy.identityId, gymId: legacy.gymId, revision: legacy.revision };
+}

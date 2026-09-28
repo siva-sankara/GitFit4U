@@ -10,6 +10,12 @@ import {
 import type { Role } from "../types";
 
 export type ActiveRole = Role | "GYM_STAFF";
+export interface OwnerOnboarding {
+  state: "NOT_STARTED" | "DRAFT" | "PENDING" | "ACTIVE" | "CHANGES_REQUESTED" | "SUSPENDED";
+  registrationId?: string;
+  gymId?: string;
+  currentStep?: string;
+}
 export interface SessionData {
   user: {
     _id: string;
@@ -23,6 +29,7 @@ export interface SessionData {
     notificationPreferences?: { sound?: boolean; push?: boolean; categories?: string[] };
     roles: ActiveRole[];
     activeRole: ActiveRole;
+    onboarding?: OwnerOnboarding;
   };
   context: {
     userId: string;
@@ -46,11 +53,12 @@ export interface SessionData {
 
 export async function readSession() {
   if (!getAccessToken()) await refreshSession();
+  const token = getAccessToken();
   try {
     return await apiRequest<ApiEnvelope<SessionData>>("/api/v1/auth/me");
   } catch (error) {
     if (!(error instanceof ApiError) || error.status !== 401) throw error;
-    await refreshSession();
+    if (getAccessToken() === token) await refreshSession();
     return apiRequest<ApiEnvelope<SessionData>>("/api/v1/auth/me");
   }
 }

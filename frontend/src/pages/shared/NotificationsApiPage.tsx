@@ -1,4 +1,5 @@
-﻿import {
+import { PageHeader } from "../../components/PageHeader";
+import {
   Bell,
   Building2,
   CheckCheck,
@@ -85,7 +86,7 @@ export function NotificationsApiPage() {
 
   return (
     <div className="page-stack notifications-page">
-      <header className="page-heading">
+      <PageHeader>
         <div>
           <span className="eyebrow">Stay up to date</span>
           <h1>Notifications</h1>
@@ -103,16 +104,19 @@ export function NotificationsApiPage() {
               size={18}
               className={query.isFetching ? "notification-spin" : undefined}
             />
-            Refresh
+            <span className="notification-action-label">Refresh</span>
           </button>
           <button
             type="button"
             className="btn btn-primary"
             onClick={() => readAll.mutate()}
             disabled={readAll.isPending || query.isLoading || query.isError}
+            aria-label="Mark all read"
+            aria-busy={readAll.isPending}
+            title="Mark all read"
           >
             <CheckCheck size={18} />
-            {readAll.isPending ? "Marking read…" : "Mark all read"}
+            <span className="notification-action-label">{readAll.isPending ? "Marking read…" : "Mark all read"}</span>
           </button>
           <button
             type="button"
@@ -124,12 +128,14 @@ export function NotificationsApiPage() {
               remove.isPending
             }
             onClick={() => setDeleteSelection({ all: true })}
+            aria-label="Delete all notifications"
+            title="Delete all notifications"
           >
             <Trash2 size={16} />
-            Delete all
+            <span className="notification-action-label">Delete all</span>
           </button>
         </div>
-      </header>
+      </PageHeader>
       <PushNotificationSettings />
       {(read.isError || readAll.isError || remove.isError) && (
         <p className="form-alert" role="alert">

@@ -3,7 +3,6 @@ import { Link } from "react-router-dom";
 import type { ReactNode } from "react";
 import { Avatar } from "../../components/Avatar";
 import {
-  ArrowLeft,
   ArrowUpRight,
   CalendarDays,
   Check,
@@ -23,6 +22,7 @@ import {
 import { GymLocation } from "../../components/GymLocation";
 import { GymIdentity } from "../../components/GymIdentity";
 import { ClassCard } from "../../components/ClassCard";
+import { BackIconLink } from "../../components/BackIconControl";
 import { validCoordinates } from "../../services/location";
 import type { Row } from "../live/LiveData";
 import "../../styles/gym-details.css";
@@ -190,11 +190,7 @@ export function GymDetailsView({
   return (
     <div className="gd-page container">
       <div className="gd-breadcrumb">
-        <Link to="/explore">
-          <ArrowLeft size={16} /> Explore gyms
-        </Link>
-        <span>/</span>
-        <span>{gym.name}</span>
+        <BackIconLink to="/explore" label="Back to Explore gyms" />
       </div>
       <header className="gd-heading">
         <div>
