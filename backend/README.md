@@ -37,16 +37,32 @@ compiling through that temporary config can report
 installed and `npm run build` passes. Keep both settings in `tsconfig.json`:
 
 ```json
-"typeRoots": ["./node_modules/@types"],
-"types": ["node"]
+"typeRoots": ["./node_modules/@types", "./src/types"],
+"types": ["node", "express-request"]
 ```
 
 The relative `typeRoots` path stays anchored to the backend config when inherited.
+The local `express-request` type package explicitly loads `src/types/express.d.ts`,
+which adds `auth`, `requestId`, and `idempotencyKey` to Express requests. Vercel's
+temporary config also replaces `include` and `files`, so these declarations must
+be loaded through `types` rather than relying on `include` alone.
+
+Check both the regular build and Vercel's temporary-config compilation locally:
+
+```bash
+npm run build
+npm run test:vercel-types
+```
+
+The second command enables full type checking and compiles from `src/server.ts`
+through a temporary config outside the project. It does not start the server or
+connect to any services.
+
 After pushing these configurations, redeploy without the existing build cache.
 Confirm that the installation log shows `npm ci --include=dev`.
 
-These settings address build dependency installation and type resolution. The current runtime
-also initializes MongoDB, Socket.IO, and recurring maintenance/push delivery in
+These settings address build dependency installation and type resolution. The
+current runtime also initializes MongoDB, Socket.IO, and recurring maintenance/push delivery in
 `src/server.ts`; a successful TypeScript build alone does not verify those
 services on Vercel.
 

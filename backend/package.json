@@ -11,6 +11,7 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server.js",
     "test": "vitest run",
+    "test:vercel-types": "node src/scripts/check-vercel-types.mjs",
     "seed": "tsx src/scripts/seed.ts",
     "test:integration": "tsx src/scripts/integration-check.ts",
     "test:registration": "tsx src/scripts/registration-flow-check.ts",
