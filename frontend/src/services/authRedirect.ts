@@ -2,6 +2,7 @@ import type { OwnerOnboarding } from "./session";
 
 type AuthAccount = { activeRole?: string; roles?: string[]; onboarding?: OwnerOnboarding };
 export type AuthIdentity = string | AuthAccount | { user?: AuthAccount; context?: { role: string } };
+const publicPolicyDestination = /^\/(?:terms-and-policies|terms-and-conditions|privacy-policy|refund-cancellation-policy|data-deletion)(?:[?#]|$)/;
 function account(identity: AuthIdentity): AuthAccount {
   if (typeof identity === "string") return { activeRole: identity };
   if ("context" in identity || "user" in identity) {
@@ -28,7 +29,7 @@ export function safeReturnTo(value: unknown): string | undefined {
   )
     return;
   if (
-    !/^\/(?:gyms\/[^/?#]+|activate-account|register-gym|platform-renewal|help|contact|legal\/(?:terms|privacy)|notifications|messages(?:\/[A-Za-z0-9_-]+)?|profile(?:\/[A-Za-z0-9_-]+)?|(?:app|owner|trainer|admin)\/[^?#]+)(?:[?#].*)?$/.test(
+    !/^\/(?:gyms\/[^/?#]+|activate-account|register-gym|platform-renewal|help|contact|terms-and-policies|terms-and-conditions|privacy-policy|refund-cancellation-policy|data-deletion|legal\/(?:terms|privacy)|notifications|messages(?:\/[A-Za-z0-9_-]+)?|profile(?:\/[A-Za-z0-9_-]+)?|(?:app|owner|trainer|admin)\/[^?#]+)(?:[?#].*)?$/.test(
       value,
     )
   )
@@ -42,7 +43,13 @@ export function safeReturnTo(value: unknown): string | undefined {
 // Keep these exact routes aligned with App and LiveWorkspace; no namespace wildcard.
 export function isOwnerAccountDestination(value: unknown): boolean {
   const safe = safeReturnTo(value);
-  return Boolean(safe && /^\/(?:owner\/(?:support|security|help|contact|notifications|messages|profile(?:\/[A-Za-z0-9_-]+)?|legal\/(?:terms|privacy))|activate-account|help|contact|legal\/(?:terms|privacy)|notifications|messages(?:\/[A-Za-z0-9_-]+)?|profile(?:\/[A-Za-z0-9_-]+)?)(?:[?#].*)?$/.test(safe));
+  return Boolean(
+    safe &&
+      (publicPolicyDestination.test(safe) ||
+        /^\/(?:owner\/(?:support|security|help|contact|notifications|messages|profile(?:\/[A-Za-z0-9_-]+)?|legal\/(?:terms|privacy))|activate-account|help|contact|legal\/(?:terms|privacy)|notifications|messages(?:\/[A-Za-z0-9_-]+)?|profile(?:\/[A-Za-z0-9_-]+)?)(?:[?#].*)?$/.test(
+          safe,
+        )),
+  );
 }
 
 export function authPath(path: string, returnTo?: string): string {
@@ -64,9 +71,10 @@ export function loginDestination(identity: AuthIdentity, returnTo?: string): str
           : "/app/home";
   if (safe && /^\/(?:register-gym|(?:app|owner|trainer|admin)\/onboarding)(?:[/?#]|$)/.test(safe) && !canRegisterGym(identity)) return home;
   return safe &&
-    (/^\/(gyms\/|legal\/(?:terms|privacy)(?:[?#]|$)|messages(?:\/|[?#]|$)|profile(?:\/|[?#]|$)|(?:activate-account|register-gym|platform-renewal|notifications|help|contact)(?:[?#]|$))/.test(
-      safe,
-    ) ||
+    (publicPolicyDestination.test(safe) ||
+      /^\/(gyms\/|legal\/(?:terms|privacy)(?:[?#]|$)|messages(?:\/|[?#]|$)|profile(?:\/|[?#]|$)|(?:activate-account|register-gym|platform-renewal|notifications|help|contact)(?:[?#]|$))/.test(
+        safe,
+      ) ||
       safe.startsWith(`/${home.split("/")[1]}/`))
     ? safe
     : home;
@@ -84,6 +92,7 @@ export function workspacePrefix(role: string) {
 export function workspacePath(identity: AuthIdentity, path: string) {
   const role = account(identity).activeRole || "USER";
   const prefix = workspacePrefix(role);
+  if (publicPolicyDestination.test(path)) return path;
   if (
     /^\/(explore(?:[?#]|$)|gyms\/|help(?:[?#]|$)|contact(?:[?#]|$)|legal\/)/.test(
       path,

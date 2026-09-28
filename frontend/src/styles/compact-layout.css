@@ -25,7 +25,7 @@
 .member-filter-toolbar.panel { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .member-filter-toolbar > .search-field { flex: 1 1 260px; min-width: 0; }
 .member-filter-toolbar > .compact-filters { flex: 2 1 420px; }
-.footer-grid { grid-template-columns: 2fr repeat(2, 1fr); }
+.footer-grid { grid-template-columns: 2fr repeat(3, minmax(0, 1fr)); }
 .dashboard-chart-grid.member-activity-chart { grid-template-columns: minmax(0, 1fr); }
 @media (max-width: 680px) {
   .workspace-content { padding: 0 12px 24px; }

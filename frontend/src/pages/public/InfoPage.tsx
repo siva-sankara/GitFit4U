@@ -5,11 +5,10 @@ import {
   MessageCircle,
   ShieldCheck,
 } from "lucide-react";
-import { Link, useLocation, useParams } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { useData, type Row } from "../live/LiveData";
 
-export function InfoPage({ type }: { type: "help" | "contact" | "legal" }) {
-  const { document } = useParams();
+export function InfoPage({ type }: { type: "help" | "contact" }) {
   const location = useLocation();
   const settings = useData<Row>("/api/v1/public/settings");
   const workspace = /^\/(app|owner|trainer|admin)\//.exec(
@@ -18,44 +17,6 @@ export function InfoPage({ type }: { type: "help" | "contact" | "legal" }) {
   const supportPath = workspace
     ? `/${workspace}/support`
     : "/auth/login?returnTo=%2Fapp%2Fsupport";
-  if (type === "legal" && document !== "terms" && document !== "privacy") return <section className="container info-page"><h1>Page not found</h1><p>This legal document does not exist.</p><Link className="btn btn-secondary" to="/help">Open help center</Link></section>;
-  if (type === "legal")
-    return (
-      <div className="container info-page">
-        <span className="eyebrow">GETFIT4U legal</span>
-        <h1>
-          {document === "privacy" ? "Privacy notice" : "Terms of service"}
-        </h1>
-        <p className="info-lead">
-          This preview shows the required legal-information structure. The
-          production wording will be approved by GETFIT4U legal counsel before
-          launch.
-        </p>
-        <div className="legal-copy panel">
-          <h2>Clear information, respectful handling</h2>
-          <p>
-            GETFIT4U is designed to collect only information needed to operate
-            accounts, memberships, attendance and support. Sensitive payment
-            credentials remain with the authorized payment provider.
-          </p>
-          <h3>Account and membership information</h3>
-          <p>
-            We use account, gym and membership information to provide the
-            service, protect access and maintain transaction histories.
-          </p>
-          <h3>Location and attendance</h3>
-          <p>
-            Location is used only when you request nearby discovery. Attendance
-            records are gym-scoped and visible according to role permissions.
-          </p>
-          <h3>Your choices</h3>
-          <p>
-            Notification preferences, communication consent and eligible data
-            requests are available from account settings.
-          </p>
-        </div>
-      </div>
-    );
   return (
     <div className="container info-page">
       <span className="eyebrow">
