@@ -1,5 +1,6 @@
 import "dotenv/config";
 import { z } from "zod";
+import { normalizeClientOrigins } from "./clientOrigins.js";
 
 const schema = z
   .object({
@@ -8,7 +9,14 @@ const schema = z
       .default("development"),
     PORT: z.coerce.number().int().positive().default(5000),
     MONGO_URI: z.string().min(1).default("mongodb://127.0.0.1:27017/getfit4u"),
-    CLIENT_ORIGIN: z.string().default("http://localhost:5173"),
+    CLIENT_ORIGIN: z.string().default("http://localhost:5173").transform((value, context) => {
+      try {
+        return normalizeClientOrigins(value);
+      } catch (error) {
+        context.addIssue({ code: "custom", message: error instanceof Error ? error.message : "Invalid CLIENT_ORIGIN" });
+        return z.NEVER;
+      }
+    }),
     JWT_ACCESS_SECRET: z
       .string()
       .min(32)

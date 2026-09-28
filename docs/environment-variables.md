@@ -9,7 +9,7 @@
 | `CLIENT_ORIGIN` | Yes | Comma-separated CORS allowlist |
 | `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET` | Yes | Independent strong signing secrets |
 | `JWT_ACCESS_TTL`, `JWT_REFRESH_TTL` | Yes | Token lifetimes |
-| `COOKIE_DOMAIN` | Production | Refresh-cookie domain |
+| `COOKIE_DOMAIN` | Optional | Leave unset for a host-only refresh cookie; never set a frontend domain on an unrelated API domain |
 | `REDIS_URL` | Jobs/scale | BullMQ and Socket.IO adapter |
 | `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET` | Payments | Razorpay test/live credentials |
 | `GOOGLE_CLIENT_ID` | OAuth | Google sign-in audience |
@@ -25,4 +25,4 @@
 `VITE_API_URL`, `VITE_FIREBASE_*`, `VITE_RAZORPAY_KEY_ID`. Only public browser identifiers use the `VITE_` prefix; secrets never do. LocationIQ requests, including map tiles, go through the backend. The legacy Google Maps key entries are commented out; Google sign-in configuration is independent. See [LocationIQ setup](locationiq-integration.md).
 
 
-MSG91 OTP delivery also requires `MSG91_AUTH_KEY` and `MSG91_TEMPLATE_ID`. Payment checkout receives its public key from the backend order response. The frontend must use the API origin configured in `CLIENT_ORIGIN`; credentialed cookies require appropriate HTTPS/domain settings. Redis configuration alone does not enable a distributed worker or Socket.IO adapter.
+MSG91 OTP delivery also requires `MSG91_AUTH_KEY` and `MSG91_TEMPLATE_ID`. Payment checkout receives its public key from the backend order response. `VITE_API_URL` contains the backend origin; `CLIENT_ORIGIN` contains the allowed frontend origins. Credentialed cookies require appropriate HTTPS/domain settings. Redis configuration alone does not enable a distributed worker or Socket.IO adapter. See [Vercel production setup](vercel-production.md) for the current domain values.

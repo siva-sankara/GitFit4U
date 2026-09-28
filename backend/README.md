@@ -63,6 +63,9 @@ Confirm that the installation log shows `npm ci --include=dev`.
 
 ## Vercel runtime
 
+For the production frontend/API domains, CORS settings, and Vercel environment
+variables, follow [production domain setup](../docs/vercel-production.md).
+
 Vercel loads `src/app.ts` directly. Keep its default Express export as well as the
 named `app` export used by `src/server.ts`. A named export alone causes
 `Invalid export found in module` and `500 FUNCTION_INVOCATION_FAILED` on every

@@ -6,4 +6,6 @@ vite.config.d.ts
 .env
 .env.*
 !.env.example
+# Public API origin only; all other environment files stay ignored.
+!.env.production
 *.log

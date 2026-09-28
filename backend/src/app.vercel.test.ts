@@ -10,7 +10,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("./config/env.js", () => ({
-  env: { NODE_ENV: "test", CLIENT_ORIGIN: "http://localhost:5173" },
+  env: { NODE_ENV: "test", CLIENT_ORIGIN: "https://www.getfit4u.in,https://git-fit4-u.vercel.app" },
 }));
 vi.mock("./config/db.js", () => ({ connectDatabase: mocks.connect }));
 vi.mock("./config/logger.js", () => ({ logger: { error: mocks.logError } }));
@@ -42,6 +42,26 @@ beforeEach(() => {
 });
 
 describe("Vercel Express entry point", () => {
+  it.each(["https://www.getfit4u.in", "https://git-fit4-u.vercel.app"])("allows credentialed preflight from %s before connecting to MongoDB", async (origin) => {
+    const response = await request(app).options("/api/v1/auth/login")
+      .set("Origin", origin)
+      .set("Access-Control-Request-Method", "POST")
+      .set("Access-Control-Request-Headers", "content-type,authorization,x-csrf-protection,idempotency-key");
+    expect(response.status).toBe(204);
+    expect(response.headers["access-control-allow-origin"]).toBe(origin);
+    expect(response.headers["access-control-allow-credentials"]).toBe("true");
+    expect(response.headers["access-control-allow-headers"]).toContain("x-csrf-protection");
+    expect(response.headers.vary).toContain("Origin");
+    expect(mocks.connect).not.toHaveBeenCalled();
+  });
+
+  it.each(["https://untrusted.example", "https://www.getfit4u.in.untrusted.example", "null"])("does not grant CORS access to %s", async (origin) => {
+    const response = await request(app).options("/api/v1/auth/login")
+      .set("Origin", origin).set("Access-Control-Request-Method", "POST");
+    expect(response.headers["access-control-allow-origin"]).toBeUndefined();
+    expect(mocks.connect).not.toHaveBeenCalled();
+  });
+
   it("exports a callable default handler and serves health without MongoDB", async () => {
     expect(typeof app).toBe("function");
     expect(app).toBe(namedApp);
