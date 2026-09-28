@@ -12,8 +12,8 @@
     "resolveJsonModule": true,
     "sourceMap": true,
     "declaration": true,
-    "typeRoots": ["./node_modules/@types"],
-    "types": ["node"]
+    "typeRoots": ["./node_modules/@types", "./src/types"],
+    "types": ["node", "express-request"]
   },
   "include": ["src/**/*.ts"],
   "exclude": ["dist", "node_modules", "src/**/*.test.ts"]
