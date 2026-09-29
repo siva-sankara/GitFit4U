@@ -187,6 +187,143 @@ async function processInbound(connection: any, value: any, message: any) {
   );
 }
 
+export function coexistenceMessageIdentity(
+  kind: "ECHO" | "HISTORY",
+  message: any,
+  businessDisplayPhone?: string,
+) {
+  const from = normalizeWhatsAppRecipient(String(message?.from || ""));
+  const to = normalizeWhatsAppRecipient(String(message?.to || ""));
+  const business = businessDisplayPhone
+    ? normalizeWhatsAppRecipient(businessDisplayPhone)
+    : "";
+  const outbound = kind === "ECHO" || (Boolean(business) && from === business);
+  return {
+    direction: outbound ? "OUTBOUND" as const : "INBOUND" as const,
+    source: kind === "ECHO" ? "BUSINESS_APP" as const : "HISTORY_IMPORT" as const,
+    contactId: outbound ? to : from,
+    importedHistory: kind === "HISTORY",
+  };
+}
+
+async function conversationForContact(connection: any, recipient: string) {
+  const providerContactHash = sha256(recipient);
+  const linkedUser = await User.findOne({
+    phone: { $in: [recipient, `+${recipient}`] },
+  }).select("_id name").lean();
+  return WhatsAppConversation.findOneAndUpdate(
+    { connectionId: connection._id, providerContactHash },
+    {
+      $set: {
+        providerContactId: recipient,
+        displayPhone: maskedWhatsAppPhone(recipient),
+        contactName: String(linkedUser?.name || "WhatsApp contact").slice(0, 160),
+        linkedUserId: linkedUser?._id,
+        archivedAt: null,
+        status: "OPEN",
+      },
+      $setOnInsert: {
+        publicId: nanoid(20),
+        connectionId: connection._id,
+        scope: connection.scope,
+        gymId: connection.gymId,
+        providerContactHash,
+      },
+    },
+    { upsert: true, returnDocument: "after" },
+  );
+}
+
+async function processBusinessAppEcho(connection: any, message: any) {
+  if (!message?.id || !message?.from || !message?.to) return;
+  const identity = coexistenceMessageIdentity("ECHO", message);
+  const conversation = await conversationForContact(connection, identity.contactId);
+  const occurredAt = message.timestamp
+    ? new Date(Number(message.timestamp) * 1000)
+    : new Date();
+  try {
+    await WhatsAppMessage.create({
+      publicId: nanoid(20),
+      conversationId: conversation._id,
+      connectionId: connection._id,
+      gymId: connection.gymId,
+      direction: identity.direction,
+      source: identity.source,
+      providerMessageId: String(message.id),
+      ...inboundContent(message),
+      status: "SENT",
+      providerTimestamp: occurredAt,
+      correlationId: nanoid(16),
+    });
+  } catch (error: any) {
+    if (error?.code === 11000) return;
+    throw error;
+  }
+  await WhatsAppConversation.updateOne(
+    { _id: conversation._id },
+    {
+      $max: { lastMessageAt: occurredAt, lastOutboundAt: occurredAt },
+      $set: { archivedAt: null, status: "OPEN" },
+    },
+  );
+}
+
+async function processImportedHistory(connection: any, value: any) {
+  let imported = 0;
+  for (const batch of value.history || []) {
+    for (const thread of batch?.threads || []) {
+      for (const message of thread?.messages || []) {
+        if (!message?.id || !message?.from || !message?.to) continue;
+        const identity = coexistenceMessageIdentity(
+          "HISTORY",
+          message,
+          String(value.metadata?.display_phone_number || connection.displayPhoneNumber || ""),
+        );
+        const conversation = await conversationForContact(connection, identity.contactId);
+        const occurredAt = message.timestamp
+          ? new Date(Number(message.timestamp) * 1000)
+          : new Date(0);
+        try {
+          await WhatsAppMessage.create({
+            publicId: nanoid(20),
+            conversationId: conversation._id,
+            connectionId: connection._id,
+            gymId: connection.gymId,
+            direction: identity.direction,
+            source: identity.source,
+            providerMessageId: String(message.id),
+            ...inboundContent(message),
+            status: identity.direction === "OUTBOUND" ? "SENT" : "RECEIVED",
+            providerTimestamp: occurredAt,
+            correlationId: nanoid(16),
+            importedHistory: true,
+          });
+          imported++;
+        } catch (error: any) {
+          if (error?.code !== 11000) throw error;
+        }
+        await WhatsAppConversation.updateOne(
+          { _id: conversation._id },
+          { $max: { lastMessageAt: occurredAt } },
+        );
+      }
+    }
+  }
+  if (Array.isArray(value.history))
+    await WhatsAppConnection.updateOne(
+      { _id: connection._id },
+      {
+        $set: {
+          synchronizationStatus: "COMPLETE",
+          readinessStatus: connection.lastTemplateSyncAt
+            ? (connection.capabilities?.limitations?.length ? "CONNECTED_LIMITED" : "CONNECTED")
+            : "SYNCHRONIZING",
+        },
+      },
+    );
+  return imported;
+}
+
 const statusRank: Record<string, number> = {
   QUEUED: 0,
   ACCEPTED: 1,
@@ -257,16 +394,29 @@ async function processStatus(connection: any, statusEvent: any) {
 async function processReceiptPayload(payload: any) {
   for (const entry of payload.entry || []) {
     for (const change of entry.changes || []) {
-      if (change.field !== "messages") continue;
+      if (!["messages", "smb_message_echoes"].includes(change.field)) continue;
       const value = change.value || {};
       const phoneNumberId = String(value.metadata?.phone_number_id || "");
-      const connection = await WhatsAppConnection.findOne({ phoneNumberId });
+      const wabaId = String(entry.id || "");
+      const connection = await WhatsAppConnection.findOne({
+        phoneNumberId,
+        wabaId,
+        status: "CONNECTED",
+      });
       if (!connection) {
-        logger.error({ phoneNumberId }, "WhatsApp webhook did not match an isolated sender binding");
+        logger.error({ phoneNumberId, wabaId }, "WhatsApp webhook did not match an isolated sender binding");
+        continue;
+      }
+      if (change.field === "smb_message_echoes") {
+        for (const message of value.message_echoes || [])
+          await processBusinessAppEcho(connection, message);
         continue;
       }
       for (const message of value.messages || []) await processInbound(connection, value, message);
       for (const status of value.statuses || []) await processStatus(connection, status);
+      for (const message of value.message_echoes || [])
+        await processBusinessAppEcho(connection, message);
+      await processImportedHistory(connection, value);
     }
   }
 }

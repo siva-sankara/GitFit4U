@@ -1,7 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, Link2, PauseCircle, RefreshCw, Unlink } from "lucide-react";
+import { CheckCircle2, CircleHelp, Link2, PauseCircle, PlusCircle, RefreshCw, Smartphone, Unlink } from "lucide-react";
 import { apiRequest, type ApiEnvelope } from "../services/apiClient";
+import {
+  embeddedSignupOptions,
+  parseEmbeddedSignupMessage,
+  type WhatsAppConnectionMode,
+  type WhatsAppSignup,
+} from "../services/whatsappOnboarding";
 import { WhatsAppCampaignPanel } from "./WhatsAppCampaignPanel";
 import "../styles/whatsapp.css";
 
@@ -10,6 +16,13 @@ type Connection = {
   verifiedName?: string;
   displayPhoneNumber?: string;
   status: string;
+  connectionMode?: WhatsAppConnectionMode;
+  readinessStatus?: string;
+  businessVerificationStatus?: string;
+  synchronizationStatus?: string;
+  coexistenceStatus?: string;
+  capabilities?: { businessAppMessaging?: boolean; appMessageEchoes?: boolean; historySharing?: string; limitations?: string[] };
+  diagnosticReference?: string;
   outboundPaused: boolean;
   pauseReason?: string;
   qualityRating?: string;
@@ -28,16 +41,19 @@ type ConnectionState = {
     mode: "disabled" | "dry_run" | "live";
     graphApiVersion: string;
     embeddedSignupReady: boolean;
+    coexistenceEnabled: boolean;
+    coexistenceReady: boolean;
+    embeddedSignupVersion: "v4";
     webhookReady: boolean;
   };
   connection: Connection | null;
 };
-type Signup = {
-  onboardingSessionId: string;
-  state: string;
-  appId: string;
-  configId: string;
-  graphApiVersion: string;
+type OnboardingProgress = {
+  status: string;
+  connectionMode: WhatsAppConnectionMode;
+  diagnosticReference: string;
+  candidates?: Array<{ phoneNumberId: string; displayPhoneNumber?: string; verifiedName?: string; phoneStatus?: string }>;
+  connection?: Connection | null;
 };
 const automatedEvents = [
   "invoice.ready", "membership.renewed", "membership.renewal_reminder", "class.booked", "class.cancelled",
@@ -78,8 +94,10 @@ export function WhatsAppConnectionSettings() {
   const client = useQueryClient();
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const signup = useRef<Signup | null>(null);
-  const result = useRef<{ code?: string; wabaId?: string; phoneNumberId?: string }>({});
+  const [progress, setProgress] = useState<OnboardingProgress | null>(null);
+  const [selectedPhoneNumberId, setSelectedPhoneNumberId] = useState("");
+  const signup = useRef<WhatsAppSignup | null>(null);
+  const completionQueue = useRef<Promise<unknown>>(Promise.resolve());
   const query = useQuery({
     queryKey: ["whatsapp-connection"],
     queryFn: () => apiRequest<ApiEnvelope<ConnectionState>>("/api/v1/whatsapp/connection"),
@@ -87,47 +105,62 @@ export function WhatsAppConnectionSettings() {
   const refresh = () => client.invalidateQueries({ queryKey: ["whatsapp-connection"] });
 
   const complete = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (partial: Record<string, unknown>) => {
       const active = signup.current;
-      const value = result.current;
-      if (!active || !value.code || !value.wabaId || !value.phoneNumberId) return;
-      return apiRequest("/api/v1/whatsapp/onboarding/complete", {
+      if (!active) throw new Error("The onboarding session is unavailable. Start again.");
+      return apiRequest<ApiEnvelope<OnboardingProgress>>("/api/v1/whatsapp/onboarding/complete", {
         method: "POST",
         idempotencyKey: crypto.randomUUID(),
         body: JSON.stringify({
           onboardingSessionId: active.onboardingSessionId,
           state: active.state,
-          code: value.code,
-          wabaId: value.wabaId,
-          phoneNumberId: value.phoneNumberId,
+          ...partial,
         }),
       });
     },
-    onSuccess: (data) => {
-      if (!data) return;
-      setNotice("WhatsApp is connected. Sync approved templates before enabling delivery.");
-      signup.current = null;
-      result.current = {};
-      void refresh();
-    },
-    onError: (failure) => setError(failure.message),
   });
-  const tryComplete = () => {
-    if (result.current.code && result.current.wabaId && result.current.phoneNumberId && !complete.isPending)
-      complete.mutate();
+  const submitPartial = (partial: Record<string, unknown>) => {
+    completionQueue.current = completionQueue.current
+      .then(() => complete.mutateAsync(partial))
+      .then((response) => {
+        const next = response.data;
+        setProgress(next);
+        if (next.status === "COMPLETED") {
+          setNotice(next.connection?.readinessStatus === "ACTION_REQUIRED"
+            ? "Meta authorization is saved, but the number requires action in Meta before messaging can be enabled."
+            : "WhatsApp is connected. Sync approved templates before enabling delivery.");
+          signup.current = null;
+          setSelectedPhoneNumberId("");
+          void refresh();
+        } else if (next.status === "AWAITING_PHONE_SELECTION") {
+          setNotice("Meta returned multiple authorised numbers. Confirm the number you connected.");
+        } else if (next.status === "AWAITING_OWNER_CONFIRMATION") {
+          setNotice("Complete the confirmation shown by Meta or on your WhatsApp Business phone.");
+        } else if (next.status === "AWAITING_AUTHORIZATION") {
+          setNotice("Waiting for Meta authorization to finish.");
+        }
+      })
+      .catch((failure) => {
+        const reference = signup.current?.diagnosticReference;
+        const message = failure instanceof Error ? failure.message : "Meta onboarding could not be completed.";
+        setError(reference && !message.includes(reference) ? `${message} Reference ${reference}.` : message);
+      });
   };
   useEffect(() => {
     const receive = (event: MessageEvent) => {
-      if (!["https://www.facebook.com", "https://web.facebook.com"].includes(event.origin)) return;
-      let payload: any = event.data;
-      try { if (typeof payload === "string") payload = JSON.parse(payload); } catch { return; }
-      if (payload?.type !== "WA_EMBEDDED_SIGNUP") return;
-      if (payload.event === "FINISH") {
-        result.current.wabaId = String(payload.data?.waba_id || "");
-        result.current.phoneNumberId = String(payload.data?.phone_number_id || "");
-        tryComplete();
-      } else if (["CANCEL", "ERROR"].includes(payload.event)) {
-        setError(payload.event === "CANCEL" ? "Meta sign-up was cancelled." : "Meta could not complete sign-up.");
+      const parsed = parseEmbeddedSignupMessage(event);
+      if (!parsed) return;
+      if (parsed.kind === "FINISH") {
+        submitPartial({ sessionEvent: parsed.sessionEvent });
+      } else {
+        const active = signup.current;
+        if (active)
+          void apiRequest(`/api/v1/whatsapp/onboarding/${active.onboardingSessionId}/cancel`, {
+            method: "POST",
+            idempotencyKey: crypto.randomUUID(),
+            body: "{}",
+          }).catch(() => undefined);
+        setError(parsed.kind === "CANCEL" ? "Meta sign-up was cancelled." : "Meta could not complete sign-up. Try again and use the diagnostic reference if support is needed.");
       }
     };
     window.addEventListener("message", receive);
@@ -135,26 +168,27 @@ export function WhatsAppConnectionSettings() {
   });
 
   const begin = useMutation({
-    mutationFn: async () => {
-      const response = await apiRequest<ApiEnvelope<Signup>>("/api/v1/whatsapp/onboarding/start", { method: "POST", body: "{}" });
+    mutationFn: async (connectionMode: WhatsAppConnectionMode) => {
+      const response = await apiRequest<ApiEnvelope<WhatsAppSignup>>("/api/v1/whatsapp/onboarding/start", {
+        method: "POST",
+        idempotencyKey: crypto.randomUUID(),
+        body: JSON.stringify({ connectionMode }),
+      });
       signup.current = response.data;
-      result.current = {};
+      setProgress(null);
+      setSelectedPhoneNumberId("");
       const fb = await loadFacebookSdk(response.data.appId, response.data.graphApiVersion);
+      setNotice(connectionMode === "COEXISTENCE"
+        ? "Meta onboarding opened. Follow the phone confirmation shown for your existing WhatsApp Business number."
+        : "Meta onboarding opened for a separate API business number.");
       fb.login((login: any) => {
         const code = login?.authResponse?.code;
         if (!code) {
           setError("Meta did not return an authorization code. Start the connection again.");
           return;
         }
-        result.current.code = String(code);
-        tryComplete();
-      }, {
-        config_id: response.data.configId,
-        response_type: "code",
-        override_default_response_type: true,
-        state: response.data.state,
-        extras: { setup: {}, featureType: "whatsapp_business_app_onboarding", sessionInfoVersion: "3" },
-      });
+        submitPartial({ code: String(code) });
+      }, embeddedSignupOptions(response.data));
     },
     onError: (failure) => setError(failure.message),
   });
@@ -168,21 +202,40 @@ export function WhatsAppConnectionSettings() {
   const connection = data?.connection;
   const busy = begin.isPending || complete.isPending || action.isPending;
   return <section id="gym-whatsapp" className="panel form-section page-stack whatsapp-settings">
-    <div className="page-heading"><div><h2>WhatsApp Business</h2><p>Connect the sender owned by this business. Credentials stay on the server and are never shown here.</p></div>{connection?.status === "CONNECTED" && <span className="chip"><CheckCircle2 size={16} /> Connected</span>}</div>
+    <div className="page-heading"><div><h2>WhatsApp Business</h2><p>Connect a gym-owned sender through Meta. Credentials stay on the server and are never shown here.</p></div>{connection?.status === "CONNECTED" && <span className="chip"><CheckCircle2 size={16} /> {connection.readinessStatus === "CONNECTED_LIMITED" ? "Connected with limitations" : "Connected"}</span>}</div>
     {query.isPending && <p role="status">Loading WhatsApp status…</p>}
     {query.isError && <p role="alert">{query.error.message}</p>}
     {data?.configuration.mode === "disabled" && <p className="form-alert">WhatsApp is disabled for this deployment. Configure the server before connecting Meta.</p>}
     {data && !data.configuration.embeddedSignupReady && data.configuration.mode !== "disabled" && <p className="form-alert">Meta Embedded Signup configuration is incomplete on the server.</p>}
     {connection ? <div className="whatsapp-connection-card">
-      <div><strong>{connection.verifiedName || "WhatsApp Business"}</strong><p>{connection.displayPhoneNumber || "Phone number pending"} · {connection.status}</p></div>
-      <dl><div><dt>Outbound</dt><dd>{connection.outboundPaused ? "Paused" : "Enabled"}</dd></div><div><dt>Quality</dt><dd>{connection.qualityRating || "Not reported"}</dd></div><div><dt>Templates</dt><dd>{connection.lastTemplateSyncAt ? "Synced" : "Not synced"}</dd></div></dl>
+      <div><strong>{connection.verifiedName || "WhatsApp Business"}</strong><p>{connection.displayPhoneNumber || "Phone number pending"} · {(connection.readinessStatus || connection.status).toLowerCase().replaceAll("_", " ")}</p></div>
+      <dl><div><dt>Connection</dt><dd>{connection.connectionMode === "COEXISTENCE" ? "Existing Business app" : "Separate API number"}</dd></div><div><dt>Outbound</dt><dd>{connection.outboundPaused ? "Paused" : "Enabled"}</dd></div><div><dt>Quality</dt><dd>{connection.qualityRating || "Not reported"}</dd></div><div><dt>Templates</dt><dd>{connection.lastTemplateSyncAt ? "Synced" : "Not synced"}</dd></div><div><dt>History</dt><dd>{(connection.synchronizationStatus || "not started").toLowerCase().replaceAll("_", " ")}</dd></div></dl>
       {connection.pauseReason && <p className="subtle">{connection.pauseReason}</p>}
+      {connection.capabilities?.limitations?.map((limitation) => <p className="form-alert" key={limitation}>{limitation}</p>)}
+      {connection.diagnosticReference && <small>Diagnostic reference: {connection.diagnosticReference}</small>}
     </div> : <p>No WhatsApp sender is connected to this business.</p>}
+    <div className="whatsapp-onboarding-options">
+      <article className="whatsapp-onboarding-option primary">
+        <Smartphone size={24} />
+        <div><h3>Connect existing WhatsApp Business</h3><p>Use the WhatsApp Business number your gym already uses. Continue chatting from your phone while GETFIT4U sends automated updates. Meta eligibility requirements apply.</p></div>
+        <button className="btn btn-primary" disabled={busy || !data?.configuration.coexistenceReady} onClick={() => { setError(""); setNotice(""); begin.mutate("COEXISTENCE"); }}><Link2 size={17} />Connect existing number</button>
+      </article>
+      {!data?.configuration.coexistenceEnabled && <p className="subtle">Existing-number onboarding is currently disabled for this deployment. Existing connections are not affected.</p>}
+      <article className="whatsapp-onboarding-option">
+        <PlusCircle size={24} />
+        <div><h3>Set up a separate business number</h3><p>Use Meta’s standard Cloud API onboarding when your gym intentionally wants a dedicated API number.</p></div>
+        <button className="btn btn-secondary" disabled={busy || !data?.configuration.embeddedSignupReady} onClick={() => { setError(""); setNotice(""); begin.mutate("STANDARD"); }}>Set up separate number</button>
+      </article>
+    </div>
+    <details className="whatsapp-personal-help"><summary><CircleHelp size={17} /> I currently use personal WhatsApp</summary><div><p>This connection option requires the WhatsApp Business app. If you choose to move, use WhatsApp’s owner-controlled in-app transition and make a current encrypted backup first.</p><p>GETFIT4U never asks for your WhatsApp password, Web session cookies or backup. It does not automatically migrate, delete or recreate your account, and switching apps does not guarantee immediate Meta eligibility.</p><a href="https://faq.whatsapp.com/3059780464322392/" target="_blank" rel="noreferrer">Open official WhatsApp Business guidance</a></div></details>
+    {progress?.status === "AWAITING_PHONE_SELECTION" && <form className="whatsapp-phone-selection" onSubmit={(event) => { event.preventDefault(); if (selectedPhoneNumberId) submitPartial({ selectedPhoneNumberId }); }}>
+      <label className="field"><span>Confirm the number connected in Meta</span><select className="input" value={selectedPhoneNumberId} onChange={(event) => setSelectedPhoneNumberId(event.target.value)} required><option value="">Select an authorised number</option>{progress.candidates?.map((candidate) => <option value={candidate.phoneNumberId} key={candidate.phoneNumberId}>{candidate.verifiedName || "WhatsApp Business"} · {candidate.displayPhoneNumber || `ending ${candidate.phoneNumberId.slice(-4)}`}</option>)}</select></label>
+      <button className="btn btn-primary" disabled={busy || !selectedPhoneNumberId}>Confirm number</button>
+    </form>}
     <div className="heading-actions">
-      <button className="btn btn-primary" disabled={busy || !data?.configuration.embeddedSignupReady} onClick={() => { setError(""); setNotice(""); begin.mutate(); }}><Link2 size={17} />{connection ? "Reconnect" : "Connect with Meta"}</button>
       {connection && <><button className="btn btn-secondary" disabled={busy} onClick={() => action.mutate({ path: "/api/v1/whatsapp/connection/check" })}><RefreshCw size={17} />Check connection</button><button className="btn btn-secondary" disabled={busy} onClick={() => action.mutate({ path: "/api/v1/whatsapp/templates/sync" })}>Sync templates</button><button className="btn btn-secondary" disabled={busy || !connection.lastTemplateSyncAt} onClick={() => action.mutate({ path: "/api/v1/whatsapp/connection/outbound", method: "PATCH", body: { paused: !connection.outboundPaused } })}><PauseCircle size={17} />{connection.outboundPaused ? "Enable outbound" : "Pause outbound"}</button><button className="btn btn-ghost" disabled={busy} onClick={() => { if (window.confirm("Disconnect this WhatsApp sender? Queued messages will be cancelled.")) action.mutate({ path: "/api/v1/whatsapp/connection", method: "DELETE", body: { reason: "Disconnected from application settings." } }); }}><Unlink size={17} />Disconnect</button></>}
     </div>
-    <small>Mode: {data?.configuration.mode || "unknown"} · Graph API: {data?.configuration.graphApiVersion || "unknown"} · Webhook: {data?.configuration.webhookReady ? "configured" : "not configured"}</small>
+    <small>Mode: {data?.configuration.mode || "unknown"} · Embedded Signup: {data?.configuration.embeddedSignupVersion || "unknown"} · Graph API: {data?.configuration.graphApiVersion || "unknown"} · Webhook: {data?.configuration.webhookReady ? "configured" : "not configured"}</small>
     {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
     {connection?.status === "CONNECTED" && <details className="whatsapp-controls"><summary>Delivery controls and automated events</summary><form className="page-stack" onSubmit={(event) => {
       event.preventDefault();

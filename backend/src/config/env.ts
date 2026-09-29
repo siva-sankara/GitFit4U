@@ -61,6 +61,11 @@ const schema = z
       .default("v26.0"),
     WHATSAPP_DEFAULT_LANGUAGE: z.string().min(2).max(20).default("en_US"),
     WHATSAPP_EMBEDDED_SIGNUP_CONFIG_ID: z.string().optional(),
+    WHATSAPP_COEXISTENCE_ENABLED: z
+      .enum(["true", "false"])
+      .default("false")
+      .transform((value) => value === "true"),
+    WHATSAPP_COEXISTENCE_CONFIG_ID: z.string().optional(),
     WHATSAPP_CREDENTIAL_ENCRYPTION_KEY: z
       .preprocess((value) => value || undefined, z.string().min(32).optional()),
     WHATSAPP_WEBHOOK_RETENTION_DAYS: z.coerce.number().int().min(1).max(90).default(30),
