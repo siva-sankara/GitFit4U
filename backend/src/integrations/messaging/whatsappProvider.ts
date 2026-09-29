@@ -119,7 +119,7 @@ export class WhatsAppProvider {
         // Meta's JavaScript SDK Embedded Signup flow expects this parameter to
         // be present during code exchange even though its value is empty. This
         // matches Meta's Tech Provider sample and is not browser-controlled.
-        redirect_uri: "",
+        redirect_uri: "http://localhost:5001/api/v1/whatsapp/onboarding/complete",
       },
     });
     if (!result.access_token)
