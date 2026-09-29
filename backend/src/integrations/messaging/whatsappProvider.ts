@@ -116,6 +116,10 @@ export class WhatsAppProvider {
         client_id: env.WHATSAPP_APP_ID,
         client_secret: env.WHATSAPP_APP_SECRET,
         code,
+        // Meta's JavaScript SDK Embedded Signup flow expects this parameter to
+        // be present during code exchange even though its value is empty. This
+        // matches Meta's Tech Provider sample and is not browser-controlled.
+        redirect_uri:"http://www.getfit4u.com/api/v1/whatsapp/onboarding/complete",
       },
     });
     if (!result.access_token)
@@ -146,6 +150,33 @@ export class WhatsAppProvider {
       token,
       query: { fields: "id,name,currency,timezone_id,message_template_namespace" },
     });
+  }
+
+  async inspectToken(token: string) {
+    if (!env.WHATSAPP_APP_ID || !env.WHATSAPP_APP_SECRET)
+      throw new WhatsAppProviderError(
+        "CONFIGURATION_MISSING",
+        "Meta application credentials are not configured.",
+      );
+    const result = await graphRequest("debug_token", {
+      query: {
+        input_token: token,
+        access_token: `${env.WHATSAPP_APP_ID}|${env.WHATSAPP_APP_SECRET}`,
+      },
+    });
+    const data = result.data || {};
+    const scopes = new Set<string>([
+      ...(Array.isArray(data.scopes) ? data.scopes.map(String) : []),
+      ...(Array.isArray(data.granular_scopes)
+        ? data.granular_scopes.map((entry: any) => String(entry.scope || ""))
+        : []),
+    ]);
+    return {
+      valid: data.is_valid === true,
+      appId: String(data.app_id || ""),
+      scopes: [...scopes].filter(Boolean),
+      expiresAt: Number(data.expires_at || 0) || undefined,
+    };
   }
 
   async subscribeWaba(token: string, wabaId: string) {

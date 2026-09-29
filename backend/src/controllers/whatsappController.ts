@@ -54,8 +54,8 @@ export async function connection(req: Request, res: Response) {
 }
 
 export async function startOnboarding(req: Request, res: Response) {
-  const data = await startWhatsAppOnboarding(actor(req));
-  await writeAudit(req, { action: "WHATSAPP_ONBOARDING_STARTED", entityType: "WhatsAppConnection", entityId: data.onboardingSessionId });
+  const data = await startWhatsAppOnboarding(actor(req), req.body.connectionMode);
+  await writeAudit(req, { action: "WHATSAPP_ONBOARDING_STARTED", entityType: "WhatsAppConnection", entityId: data.onboardingSessionId, after: { connectionMode: data.connectionMode } });
   res.status(201).json({ success: true, data });
 }
 
@@ -66,9 +66,10 @@ export async function cancelOnboarding(req: Request, res: Response) {
 }
 
 export async function completeOnboarding(req: Request, res: Response) {
-  const data = (await completeWhatsAppOnboarding(actor(req), req.body))!;
-  await writeAudit(req, { action: "WHATSAPP_CONNECTED", entityType: "WhatsAppConnection", entityId: data.publicId, after: { scope: data.scope, gymId: data.gymId, phoneNumberId: data.phoneNumberId } });
-  res.status(201).json({ success: true, data });
+  const data = await completeWhatsAppOnboarding(actor(req), req.body);
+  if (data.status === "COMPLETED" && data.connection)
+    await writeAudit(req, { action: "WHATSAPP_CONNECTED", entityType: "WhatsAppConnection", entityId: data.connection.publicId, after: { scope: data.connection.scope, gymId: data.connection.gymId, phoneNumberId: data.connection.phoneNumberId, connectionMode: data.connection.connectionMode } });
+  res.status(data.status === "COMPLETED" ? 201 : 202).json({ success: true, data });
 }
 
 export async function checkConnection(req: Request, res: Response) {

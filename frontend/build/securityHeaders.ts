@@ -37,6 +37,7 @@ export function securityHeaders(config: PublicConfiguration = {}) {
       "'self'",
       "https://checkout.razorpay.com",
       "https://accounts.google.com/gsi/client",
+      "https://connect.facebook.net",
     ],
     "style-src": [
       "'self'",
@@ -52,6 +53,9 @@ export function securityHeaders(config: PublicConfiguration = {}) {
       "https://firebaseinstallations.googleapis.com",
       "https://fcmregistrations.googleapis.com",
       "https://fcm.googleapis.com",
+      "https://www.facebook.com",
+      "https://web.facebook.com",
+      "https://business.facebook.com",
     ],
     "img-src": [
       "'self'",
@@ -71,7 +75,13 @@ export function securityHeaders(config: PublicConfiguration = {}) {
       "https://res.cloudinary.com",
       "https://api.cloudinary.com",
     ],
-    "frame-src": ["https://*.razorpay.com", "https://accounts.google.com/gsi/"],
+    "frame-src": [
+      "https://*.razorpay.com",
+      "https://accounts.google.com/gsi/",
+      "https://www.facebook.com",
+      "https://web.facebook.com",
+      "https://business.facebook.com",
+    ],
     "font-src": ["'self'", "data:"],
     "worker-src": ["'self'"],
     "manifest-src": ["'self'"],

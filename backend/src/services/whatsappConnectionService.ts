@@ -22,6 +22,7 @@ import {
 
 const provider = new WhatsAppProvider();
 export type WhatsAppScope = "PLATFORM" | "GYM";
+export type WhatsAppConnectionMode = "STANDARD" | "COEXISTENCE";
 export type WhatsAppActor = {
   userId: string;
   role: string;
@@ -73,6 +74,12 @@ export function publicConnection(connection: any) {
     displayPhoneNumber: connection.displayPhoneNumber,
     verifiedName: connection.verifiedName,
     status: connection.status,
+    connectionMode: connection.connectionMode || "STANDARD",
+    readinessStatus: connection.readinessStatus ||
+      (connection.status === "CONNECTED" ? "CONNECTED" : "NOT_CONNECTED"),
+    businessVerificationStatus: connection.businessVerificationStatus || "UNKNOWN",
+    synchronizationStatus: connection.synchronizationStatus || "NOT_STARTED",
+    capabilities: connection.capabilities,
     qualityRating: connection.qualityRating,
     phoneStatus: connection.phoneStatus,
     coexistenceStatus: connection.coexistenceStatus,
@@ -86,6 +93,8 @@ export function publicConnection(connection: any) {
     lastTemplateSyncAt: connection.lastTemplateSyncAt,
     disconnectedAt: connection.disconnectedAt,
     lastErrorCategory: connection.lastErrorCategory,
+    lastErrorCode: connection.lastErrorCode,
+    diagnosticReference: connection.diagnosticReference,
     mode: env.WHATSAPP_MODE,
     graphApiVersion: env.WHATSAPP_API_VERSION,
   };
@@ -112,6 +121,8 @@ async function bootstrapPlatformConnection() {
         credentialCiphertext: encryptWhatsAppCredential(env.WHATSAPP_ACCESS_TOKEN),
         credentialFingerprint: sha256(env.WHATSAPP_ACCESS_TOKEN),
         status: "PENDING",
+        connectionMode: "STANDARD",
+        readinessStatus: "CONNECTING",
         outboundPaused: true,
         pauseReason: "Run Check connection before enabling outbound delivery.",
       },
@@ -137,19 +148,31 @@ export async function getCurrentConnection(actor: WhatsAppActor) {
           env.WHATSAPP_EMBEDDED_SIGNUP_CONFIG_ID &&
           env.WHATSAPP_CREDENTIAL_ENCRYPTION_KEY,
       ),
+      coexistenceEnabled: env.WHATSAPP_COEXISTENCE_ENABLED,
+      coexistenceReady: Boolean(
+        env.WHATSAPP_COEXISTENCE_ENABLED &&
+          env.WHATSAPP_APP_ID &&
+          env.WHATSAPP_APP_SECRET &&
+          (env.WHATSAPP_COEXISTENCE_CONFIG_ID || env.WHATSAPP_EMBEDDED_SIGNUP_CONFIG_ID) &&
+          env.WHATSAPP_CREDENTIAL_ENCRYPTION_KEY,
+      ),
+      embeddedSignupVersion: "v4",
       webhookReady: Boolean(env.WHATSAPP_VERIFY_TOKEN && env.WHATSAPP_APP_SECRET),
     },
     connection: publicConnection(connection),
   };
 }
 
-function requireEmbeddedSignupConfiguration() {
+function requireEmbeddedSignupConfiguration(mode: WhatsAppConnectionMode) {
   if (env.WHATSAPP_MODE === "disabled")
     throw new AppError(503, "WHATSAPP_DISABLED", "WhatsApp integration is disabled.");
+  const configId = mode === "COEXISTENCE"
+    ? env.WHATSAPP_COEXISTENCE_CONFIG_ID || env.WHATSAPP_EMBEDDED_SIGNUP_CONFIG_ID
+    : env.WHATSAPP_EMBEDDED_SIGNUP_CONFIG_ID;
   if (
     !env.WHATSAPP_APP_ID ||
     !env.WHATSAPP_APP_SECRET ||
-    !env.WHATSAPP_EMBEDDED_SIGNUP_CONFIG_ID ||
+    !configId ||
     !env.WHATSAPP_CREDENTIAL_ENCRYPTION_KEY
   )
     throw new AppError(
@@ -157,11 +180,63 @@ function requireEmbeddedSignupConfiguration() {
       "WHATSAPP_CONFIGURATION_MISSING",
       "Meta Embedded Signup configuration is incomplete.",
     );
+  if (mode === "COEXISTENCE" && !env.WHATSAPP_COEXISTENCE_ENABLED)
+    throw new AppError(
+      404,
+      "WHATSAPP_COEXISTENCE_DISABLED",
+      "Connecting an existing WhatsApp Business app number is not enabled for this deployment.",
+    );
 }
 
-export async function startWhatsAppOnboarding(actor: WhatsAppActor) {
-  requireEmbeddedSignupConfiguration();
+export function normalizeEmbeddedSignupEvent(
+  mode: WhatsAppConnectionMode,
+  payload: { event?: unknown; version?: unknown; data?: Record<string, unknown> },
+) {
+  const event = String(payload.event || "");
+  const allowed = mode === "COEXISTENCE"
+    ? ["FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING"]
+    : ["FINISH"];
+  if (!allowed.includes(event))
+    throw new AppError(
+      422,
+      "WHATSAPP_ONBOARDING_EVENT_INVALID",
+      "Meta returned an onboarding event for a different connection mode. Start again.",
+    );
+  const data = payload.data || {};
+  const wabaId = String(data.waba_id || "");
+  const phoneNumberId = String(data.phone_number_id || "");
+  if (!/^\d{5,40}$/.test(wabaId))
+    throw new AppError(
+      422,
+      "WHATSAPP_ONBOARDING_EVENT_INCOMPLETE",
+      "Meta did not return the WhatsApp Business Account. Continue or restart onboarding.",
+    );
+  const historyValue = data.history_sharing ?? data.is_history_sharing_enabled;
+  return {
+    event,
+    version: String(payload.version || ""),
+    wabaId,
+    phoneNumberId: /^\d{5,40}$/.test(phoneNumberId) ? phoneNumberId : undefined,
+    historySharing: historyValue === true
+      ? "ACCEPTED" as const
+      : historyValue === false
+        ? "DECLINED" as const
+        : "UNKNOWN" as const,
+  };
+}
+
+export async function startWhatsAppOnboarding(
+  actor: WhatsAppActor,
+  connectionMode: WhatsAppConnectionMode = "STANDARD",
+) {
+  requireEmbeddedSignupConfiguration(connectionMode);
   const context = communicationScope(actor);
+  if (connectionMode === "COEXISTENCE" && context.scope !== "GYM")
+    throw new AppError(
+      422,
+      "WHATSAPP_COEXISTENCE_GYM_REQUIRED",
+      "Select a gym before connecting its existing WhatsApp Business app number.",
+    );
   const state = nanoid(40);
   const row = await WhatsAppOnboardingSession.create({
     publicId: nanoid(24),
@@ -169,14 +244,26 @@ export async function startWhatsAppOnboarding(actor: WhatsAppActor) {
     userId: actor.userId,
     scope: context.scope,
     gymId: context.gymId,
+    connectionMode,
+    status: "STARTED",
+    authorizationStatus: "PENDING",
+    diagnosticReference: nanoid(12),
     expiresAt: new Date(Date.now() + 10 * 60_000),
   });
   return {
     onboardingSessionId: row.publicId,
     state,
+    connectionMode,
     appId: env.WHATSAPP_APP_ID,
-    configId: env.WHATSAPP_EMBEDDED_SIGNUP_CONFIG_ID,
+    configId: connectionMode === "COEXISTENCE"
+      ? env.WHATSAPP_COEXISTENCE_CONFIG_ID || env.WHATSAPP_EMBEDDED_SIGNUP_CONFIG_ID
+      : env.WHATSAPP_EMBEDDED_SIGNUP_CONFIG_ID,
     graphApiVersion: env.WHATSAPP_API_VERSION,
+    embeddedSignupVersion: "v4" as const,
+    featureType: connectionMode === "COEXISTENCE"
+      ? "whatsapp_business_app_onboarding"
+      : undefined,
+    diagnosticReference: row.diagnosticReference,
   };
 }
 
@@ -188,7 +275,16 @@ export async function cancelWhatsAppOnboarding(
     {
       publicId: onboardingSessionId,
       userId: actor.userId,
-      status: "STARTED",
+      status: {
+        $in: [
+          "STARTED",
+          "AWAITING_AUTHORIZATION",
+          "AWAITING_OWNER_CONFIRMATION",
+          "AWAITING_PHONE_SELECTION",
+          "ACTION_REQUIRED",
+          "FAILED",
+        ],
+      },
     },
     { $set: { status: "CANCELLED" } },
     { returnDocument: "after" },
@@ -198,48 +294,213 @@ export async function cancelWhatsAppOnboarding(
   return { status: row.status };
 }
 
+type OnboardingCompletionInput = {
+  onboardingSessionId: string;
+  state: string;
+  code?: string;
+  selectedPhoneNumberId?: string;
+  sessionEvent?: {
+    event?: unknown;
+    version?: unknown;
+    data?: Record<string, unknown>;
+  };
+};
+
+function onboardingProgress(session: any, connection?: any) {
+  return {
+    status: session.status,
+    connectionMode: session.connectionMode,
+    diagnosticReference: session.diagnosticReference,
+    candidates: (session.candidatePhones || []).map((candidate: any) => ({
+      phoneNumberId: candidate.phoneNumberId,
+      displayPhoneNumber: candidate.displayPhoneNumber,
+      verifiedName: candidate.verifiedName,
+      phoneStatus: candidate.phoneStatus,
+      platformType: candidate.platformType,
+    })),
+    connection: publicConnection(connection),
+  };
+}
+
 export async function completeWhatsAppOnboarding(
   actor: WhatsAppActor,
-  input: {
-    onboardingSessionId: string;
-    state: string;
-    code: string;
-    wabaId: string;
-    phoneNumberId: string;
-  },
+  input: OnboardingCompletionInput,
 ) {
-  requireEmbeddedSignupConfiguration();
   const context = communicationScope(actor);
-  const session = await WhatsAppOnboardingSession.findOne({
+  let session: any = await WhatsAppOnboardingSession.findOne({
     publicId: input.onboardingSessionId,
     userId: actor.userId,
     scope: context.scope,
     ...(context.gymId ? { gymId: context.gymId } : { gymId: null }),
-    status: "STARTED",
     expiresAt: { $gt: new Date() },
-  }).select("+stateHash");
+    status: { $nin: ["CANCELLED", "EXPIRED"] },
+  }).select("+stateHash +credentialCiphertext +credentialFingerprint");
   if (!session || session.stateHash !== sha256(input.state))
     throw new AppError(
       403,
       "WHATSAPP_ONBOARDING_STATE_INVALID",
       "This Meta onboarding result cannot be verified. Start again.",
     );
+  requireEmbeddedSignupConfiguration(session.connectionMode);
 
-  const exchanged = await provider.exchangeEmbeddedSignupCode(input.code);
-  const [waba, phones] = await Promise.all([
-    provider.inspectWaba(exchanged.accessToken, input.wabaId),
-    provider.listPhoneNumbers(exchanged.accessToken, input.wabaId),
-  ]);
-  const phone = phones.find((entry) => String(entry.id) === input.phoneNumberId);
-  if (!phone || String(waba.id) !== input.wabaId)
+  if (session.status === "COMPLETED") {
+    const existing = session.connectionId
+      ? await WhatsAppConnection.findById(session.connectionId).lean()
+      : null;
+    return onboardingProgress(session, existing);
+  }
+
+  if (input.sessionEvent) {
+    const normalized = normalizeEmbeddedSignupEvent(
+      session.connectionMode,
+      input.sessionEvent,
+    );
+    if (session.wabaId && session.wabaId !== normalized.wabaId)
+      throw new AppError(
+        409,
+        "WHATSAPP_ONBOARDING_ASSET_CHANGED",
+        "Meta returned different business assets for this attempt. Start again.",
+      );
+    session.sessionEvent = normalized.event;
+    session.sessionEventVersion = normalized.version;
+    session.wabaId = normalized.wabaId;
+    session.phoneNumberId = normalized.phoneNumberId;
+    session.historySharing = normalized.historySharing;
+  }
+
+  if (input.selectedPhoneNumberId) {
+    const candidate = (session.candidatePhones || []).find(
+      (entry: any) => String(entry.phoneNumberId) === input.selectedPhoneNumberId,
+    );
+    if (!candidate)
+      throw new AppError(
+        403,
+        "WHATSAPP_ASSET_FORBIDDEN",
+        "Select a phone number returned by this protected onboarding attempt.",
+      );
+    session.selectedPhoneNumberId = input.selectedPhoneNumberId;
+  }
+
+  if (input.code && session.authorizationStatus !== "READY") {
+    if (session.authorizationStatus === "EXCHANGING")
+      return onboardingProgress(session);
+    session.authorizationStatus = "EXCHANGING";
+    await session.save();
+    try {
+      const exchanged = await provider.exchangeEmbeddedSignupCode(input.code);
+      const tokenState = await provider.inspectToken(exchanged.accessToken);
+      const requiredPermissions = [
+        "whatsapp_business_messaging",
+        "whatsapp_business_management",
+      ];
+      if (
+        !tokenState.valid ||
+        tokenState.appId !== env.WHATSAPP_APP_ID ||
+        requiredPermissions.some((permission) => !tokenState.scopes.includes(permission))
+      )
+        throw new AppError(
+          403,
+          "WHATSAPP_PERMISSIONS_REQUIRED",
+          "Meta did not grant the required WhatsApp permissions. Review the app access and try again.",
+        );
+      session.credentialCiphertext = encryptWhatsAppCredential(exchanged.accessToken);
+      session.credentialFingerprint = sha256(exchanged.accessToken);
+      session.credentialExpiresAt = exchanged.expiresIn
+        ? new Date(Date.now() + exchanged.expiresIn * 1000)
+        : undefined;
+      session.authorizationStatus = "READY";
+      session.lastErrorCode = undefined;
+      session.lastErrorMessage = undefined;
+    } catch (error: any) {
+      session.authorizationStatus = "FAILED";
+      session.status = "ACTION_REQUIRED";
+      session.lastErrorCode = String(
+        error?.providerCode || error?.code || error?.category || "WHATSAPP_AUTHORIZATION_FAILED",
+      );
+      session.lastErrorMessage = String(error?.message || "Meta authorization failed.").slice(0, 500);
+      await session.save();
+      if (error instanceof AppError) throw error;
+      throw new AppError(
+        502,
+        "WHATSAPP_AUTHORIZATION_FAILED",
+        `Meta authorization could not be completed. Reference ${session.diagnosticReference}.`,
+      );
+    }
+  }
+
+  if (session.authorizationStatus !== "READY") {
+    session.status = "AWAITING_AUTHORIZATION";
+    await session.save();
+    return onboardingProgress(session);
+  }
+  if (!session.wabaId || !session.sessionEvent) {
+    session.status = "AWAITING_OWNER_CONFIRMATION";
+    await session.save();
+    return onboardingProgress(session);
+  }
+
+  const token = decryptWhatsAppCredential(session.credentialCiphertext);
+  let waba: Record<string, any>;
+  let phones: Array<Record<string, any>>;
+  try {
+    [waba, phones] = await Promise.all([
+      provider.inspectWaba(token, session.wabaId),
+      provider.listPhoneNumbers(token, session.wabaId),
+    ]);
+  } catch (error: any) {
+    session.status = "ACTION_REQUIRED";
+    session.lastErrorCode = String(
+      error?.code || error?.category || "WHATSAPP_ASSET_INSPECTION_FAILED",
+    ).slice(0, 100);
+    session.lastErrorMessage = "Meta could not validate the authorized WhatsApp assets.";
+    await session.save();
+    throw new AppError(
+      502,
+      "WHATSAPP_ASSET_INSPECTION_FAILED",
+      `Meta could not validate the authorized WhatsApp assets. Reference ${session.diagnosticReference}.`,
+    );
+  }
+  if (String(waba.id) !== session.wabaId)
+    throw new AppError(
+      403,
+      "WHATSAPP_ASSET_FORBIDDEN",
+      "The returned WhatsApp Business Account is not authorised by this credential.",
+    );
+  const selectedPhoneId = session.phoneNumberId || session.selectedPhoneNumberId;
+  if (!selectedPhoneId) {
+    if (phones.length === 0) {
+      session.status = "ACTION_REQUIRED";
+      session.lastErrorCode = "WHATSAPP_NO_ELIGIBLE_PHONE";
+      session.lastErrorMessage = "Meta did not return an eligible WhatsApp phone number for this business account.";
+      await session.save();
+      throw new AppError(
+        409,
+        "WHATSAPP_NO_ELIGIBLE_PHONE",
+        `Meta did not return an eligible WhatsApp phone number. Check number eligibility and app access, then retry. Reference ${session.diagnosticReference}.`,
+      );
+    }
+    session.candidatePhones = phones.map((phone) => ({
+      phoneNumberId: String(phone.id || ""),
+      displayPhoneNumber: String(phone.display_phone_number || ""),
+      verifiedName: String(phone.verified_name || ""),
+      phoneStatus: String(phone.status || phone.code_verification_status || ""),
+      platformType: String(phone.platform_type || ""),
+    }));
+    session.status = "AWAITING_PHONE_SELECTION";
+    await session.save();
+    return onboardingProgress(session);
+  }
+  const phone = phones.find((entry) => String(entry.id) === selectedPhoneId);
+  if (!phone)
     throw new AppError(
       403,
       "WHATSAPP_ASSET_FORBIDDEN",
       "The selected phone number is not an authorised asset of this WhatsApp Business Account.",
     );
+
   const key = bindingKey(context.scope, context.gymId);
   const collision = await WhatsAppConnection.findOne({
-    phoneNumberId: input.phoneNumberId,
+    phoneNumberId: selectedPhoneId,
     bindingKey: { $ne: key },
   }).lean();
   if (collision)
@@ -249,45 +510,120 @@ export async function completeWhatsAppOnboarding(
       "This WhatsApp phone number is already connected to another GETFIT4U business scope.",
     );
 
-  await provider.subscribeWaba(exchanged.accessToken, input.wabaId);
-  const now = new Date();
-  const connection = await WhatsAppConnection.findOneAndUpdate(
-    { bindingKey: key },
+  const providerPhoneStatus = String(
+    phone.status || phone.code_verification_status || "UNKNOWN",
+  ).toUpperCase();
+  const phoneReady = providerPhoneStatus === "CONNECTED";
+  const limitations = phoneReady
+    ? []
+    : ["Meta has not reported this phone number as connected. Complete the action shown in Meta before enabling outbound delivery."];
+
+  const leaseId = nanoid(20);
+  const leaseNow = new Date();
+  const claimed = await WhatsAppOnboardingSession.findOneAndUpdate(
+    {
+      _id: session._id,
+      status: { $ne: "COMPLETED" },
+      $or: [
+        { finalizationLeaseUntil: { $exists: false } },
+        { finalizationLeaseUntil: null },
+        { finalizationLeaseUntil: { $lte: leaseNow } },
+      ],
+    },
     {
       $set: {
-        scope: context.scope,
-        gymId: context.gymId,
-        wabaId: input.wabaId,
-        phoneNumberId: input.phoneNumberId,
-        displayPhoneNumber: String(phone.display_phone_number || ""),
-        verifiedName: String(phone.verified_name || waba.name || ""),
-        credentialCiphertext: encryptWhatsAppCredential(exchanged.accessToken),
-        credentialFingerprint: sha256(exchanged.accessToken),
-        credentialExpiresAt: exchanged.expiresIn
-          ? new Date(now.getTime() + exchanged.expiresIn * 1000)
-          : undefined,
-        permissions: ["whatsapp_business_messaging", "whatsapp_business_management"],
-        status: "CONNECTED",
-        qualityRating: String(phone.quality_rating || ""),
-        phoneStatus: String(phone.status || phone.code_verification_status || ""),
-        connectedBy: actor.userId,
-        connectedAt: now,
-        lastVerifiedAt: now,
-        outboundPaused: true,
-        pauseReason: "New sender connected. Synchronise approved templates and explicitly enable outbound delivery.",
-        lastErrorCategory: null,
-        disconnectedAt: null,
-        disconnectedBy: null,
-        disconnectReason: null,
+        status: "FINALIZING",
+        finalizationLeaseId: leaseId,
+        finalizationLeaseUntil: new Date(leaseNow.getTime() + 60_000),
       },
-      $setOnInsert: { publicId: nanoid(20), bindingKey: key },
     },
-    { upsert: true, returnDocument: "after", runValidators: true },
+    { returnDocument: "after" },
   );
-  session.status = "COMPLETED";
-  session.completedAt = now;
-  await session.save();
-  return publicConnection(connection);
+  if (!claimed) {
+    const latest: any = await WhatsAppOnboardingSession.findOne({
+      _id: session._id,
+    }).select("+stateHash +credentialCiphertext +credentialFingerprint");
+    const existing = latest?.status === "COMPLETED" && latest.connectionId
+      ? await WhatsAppConnection.findById(latest.connectionId).lean()
+      : null;
+    return onboardingProgress(latest || session, existing);
+  }
+
+  session.status = "FINALIZING";
+  session.finalizationLeaseId = leaseId;
+  session.finalizationLeaseUntil = claimed.finalizationLeaseUntil;
+  try {
+    await provider.subscribeWaba(token, session.wabaId);
+    const now = new Date();
+    const connection = await WhatsAppConnection.findOneAndUpdate(
+      { bindingKey: key },
+      {
+        $set: {
+          scope: context.scope,
+          gymId: context.gymId,
+          connectionMode: session.connectionMode,
+          wabaId: session.wabaId,
+          phoneNumberId: selectedPhoneId,
+          displayPhoneNumber: String(phone.display_phone_number || ""),
+          verifiedName: String(phone.verified_name || waba.name || ""),
+          credentialCiphertext: session.credentialCiphertext,
+          credentialFingerprint: session.credentialFingerprint,
+          credentialExpiresAt: session.credentialExpiresAt,
+          permissions: ["whatsapp_business_messaging", "whatsapp_business_management"],
+          status: phoneReady ? "CONNECTED" : "RESTRICTED",
+          readinessStatus: phoneReady ? "SYNCHRONIZING" : "ACTION_REQUIRED",
+          coexistenceStatus: session.connectionMode === "COEXISTENCE" ? "ACTIVE" : "UNKNOWN",
+          synchronizationStatus: session.historySharing === "DECLINED" ? "DECLINED" : "PENDING",
+          capabilities: {
+            businessAppMessaging: session.connectionMode === "COEXISTENCE",
+            appMessageEchoes: session.connectionMode === "COEXISTENCE",
+            historySharing: session.historySharing,
+            limitations,
+          },
+          qualityRating: String(phone.quality_rating || ""),
+          phoneStatus: providerPhoneStatus,
+          connectedBy: actor.userId,
+          connectedAt: now,
+          lastVerifiedAt: now,
+          outboundPaused: true,
+          pauseReason: "New sender connected. Synchronise approved templates and explicitly enable outbound delivery.",
+          lastErrorCategory: phoneReady ? null : "SENDER_NOT_READY",
+          lastErrorCode: phoneReady ? null : "WHATSAPP_PHONE_NOT_CONNECTED",
+          diagnosticReference: session.diagnosticReference,
+          disconnectedAt: null,
+          disconnectedBy: null,
+          disconnectReason: null,
+        },
+        $setOnInsert: { publicId: nanoid(20), bindingKey: key },
+      },
+      { upsert: true, returnDocument: "after", runValidators: true },
+    );
+    session.status = "COMPLETED";
+    session.connectionId = connection._id;
+    session.phoneNumberId = selectedPhoneId;
+    session.completedAt = now;
+    session.credentialCiphertext = undefined;
+    session.credentialFingerprint = undefined;
+    session.finalizationLeaseId = undefined;
+    session.finalizationLeaseUntil = undefined;
+    await session.save({ validateBeforeSave: false });
+    return onboardingProgress(session, connection);
+  } catch (error: any) {
+    session.status = "ACTION_REQUIRED";
+    session.lastErrorCode = String(
+      error?.code || error?.category || "WHATSAPP_PROVIDER_SETUP_FAILED",
+    ).slice(0, 100);
+    session.lastErrorMessage = "Meta could not finish the WhatsApp connection. Retry this protected onboarding session.";
+    session.finalizationLeaseId = undefined;
+    session.finalizationLeaseUntil = undefined;
+    await session.save({ validateBeforeSave: false });
+    if (error instanceof AppError) throw error;
+    throw new AppError(
+      502,
+      "WHATSAPP_PROVIDER_SETUP_FAILED",
+      `Meta could not finish the WhatsApp connection. Reference ${session.diagnosticReference}.`,
+    );
+  }
 }
 
 export async function resolveWhatsAppSender(
@@ -355,14 +691,27 @@ export async function checkWhatsAppConnection(actor: WhatsAppActor) {
         "WHATSAPP_PHONE_UNAVAILABLE",
         "The connected phone number is no longer available to this credential.",
       );
+    const providerPhoneStatus = String(
+      phone.status || phone.code_verification_status || "UNKNOWN",
+    ).toUpperCase();
+    if (providerPhoneStatus !== "CONNECTED")
+      throw new AppError(
+        409,
+        "WHATSAPP_PHONE_NOT_CONNECTED",
+        "Meta reports that this WhatsApp phone number requires action before messaging can be enabled.",
+      );
     Object.assign(connection, {
       status: "CONNECTED",
+      readinessStatus: connection.lastTemplateSyncAt
+        ? (connection.capabilities?.limitations?.length ? "CONNECTED_LIMITED" : "CONNECTED")
+        : "SYNCHRONIZING",
       displayPhoneNumber: String(phone.display_phone_number || ""),
       verifiedName: String(phone.verified_name || ""),
       qualityRating: String(phone.quality_rating || ""),
-      phoneStatus: String(phone.status || phone.code_verification_status || ""),
+      phoneStatus: providerPhoneStatus,
       lastVerifiedAt: new Date(),
       lastErrorCategory: undefined,
+      lastErrorCode: undefined,
     });
     await connection.save();
     return publicConnection(connection);
@@ -372,6 +721,7 @@ export async function checkWhatsAppConnection(actor: WhatsAppActor) {
       {
         $set: {
           status: "RESTRICTED",
+          readinessStatus: "ACTION_REQUIRED",
           outboundPaused: true,
           pauseReason: "Connection check failed. Reconnect before sending.",
           lastErrorCategory: error?.category || error?.code || "CONNECTION_CHECK_FAILED",
@@ -463,6 +813,7 @@ export async function disconnectWhatsApp(
     throw new AppError(404, "WHATSAPP_CONNECTION_NOT_FOUND", "WhatsApp is not connected.");
   const now = new Date();
   connection.status = "DISCONNECTED";
+  connection.readinessStatus = "DISCONNECTED";
   connection.outboundPaused = true;
   connection.pauseReason = "Sender disconnected.";
   connection.disconnectedAt = now;
@@ -516,6 +867,11 @@ export async function syncWhatsAppTemplates(actor: WhatsAppActor) {
       })),
     );
   resolved.connection.lastTemplateSyncAt = now;
+  resolved.connection.readinessStatus = resolved.connection.capabilities?.limitations?.length
+    ? "CONNECTED_LIMITED"
+    : "CONNECTED";
+  if (resolved.connection.synchronizationStatus === "PENDING")
+    resolved.connection.synchronizationStatus = "COMPLETE";
   await resolved.connection.save();
   return WhatsAppTemplate.find({ connectionId: resolved.connection._id })
     .sort({ name: 1, language: 1 })

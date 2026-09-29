@@ -11,6 +11,7 @@ const envelope = (body: z.ZodType = z.object({}), params: z.ZodType = z.object({
   validate(z.object({ body, params, query }));
 const id = z.string().min(6).max(120);
 const manage = [requireRole("ADMIN", "GYM_OWNER", "GYM_STAFF"), requirePermission("gym:update")] as const;
+const onboardingManage = [requireRole("ADMIN", "GYM_OWNER"), requirePermission("gym:update")] as const;
 const inbox = [requireRole("ADMIN", "GYM_OWNER", "GYM_STAFF"), requirePermission("member:read")] as const;
 const campaignManage = [requireRole("ADMIN", "GYM_OWNER", "GYM_STAFF"), requirePermission("campaign:write")] as const;
 
@@ -21,20 +22,37 @@ whatsappRoutes.put(
   controller.updatePreference,
 );
 whatsappRoutes.get("/connection", ...manage, controller.connection);
-whatsappRoutes.post("/onboarding/start", ...manage, envelope(), controller.startOnboarding);
+whatsappRoutes.post(
+  "/onboarding/start",
+  ...onboardingManage,
+  envelope(z.object({ connectionMode: z.enum(["STANDARD", "COEXISTENCE"]).default("STANDARD") })),
+  controller.startOnboarding,
+);
 whatsappRoutes.post(
   "/onboarding/complete",
-  ...manage,
+  ...onboardingManage,
   envelope(z.object({
     onboardingSessionId: id,
     state: z.string().min(20).max(100),
-    code: z.string().min(8).max(4096),
-    wabaId: z.string().regex(/^\d{5,40}$/),
-    phoneNumberId: z.string().regex(/^\d{5,40}$/),
-  })),
+    code: z.string().min(8).max(4096).optional(),
+    selectedPhoneNumberId: z.string().regex(/^\d{5,40}$/).optional(),
+    sessionEvent: z.object({
+      event: z.enum(["FINISH", "FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING"]),
+      version: z.union([z.string().max(20), z.number().int().min(1).max(20)]).optional(),
+      data: z.object({
+        waba_id: z.string().regex(/^\d{5,40}$/),
+        phone_number_id: z.string().regex(/^\d{5,40}$/).optional(),
+        history_sharing: z.boolean().optional(),
+        is_history_sharing_enabled: z.boolean().optional(),
+      }),
+    }).optional(),
+  }).refine(
+    (value) => Boolean(value.code || value.sessionEvent || value.selectedPhoneNumberId),
+    "Provide an authorization code, a Meta session event or an approved phone selection.",
+  )),
   controller.completeOnboarding,
 );
-whatsappRoutes.post("/onboarding/:id/cancel", ...manage, envelope(z.object({}), z.object({ id })), controller.cancelOnboarding);
+whatsappRoutes.post("/onboarding/:id/cancel", ...onboardingManage, envelope(z.object({}), z.object({ id })), controller.cancelOnboarding);
 whatsappRoutes.post("/connection/check", ...manage, envelope(), controller.checkConnection);
 whatsappRoutes.patch(
   "/connection/outbound",

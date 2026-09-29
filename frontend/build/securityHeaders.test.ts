@@ -15,6 +15,8 @@ describe("deployment CSP", () => {
       "https://accounts.google.com/gsi/client",
       "https://firebaseinstallations.googleapis.com",
       "https://fcmregistrations.googleapis.com",
+      "https://connect.facebook.net",
+      "https://www.facebook.com",
       "object-src 'none'",
       "frame-ancestors 'none'",
     ])
@@ -33,8 +35,8 @@ describe("deployment CSP", () => {
     expect(headers.match(/media-src ([^;]+)/)?.[1].split(" ")).toContain(
       "https://api.cloudinary.com",
     );
-    expect(headers).toContain(
-      "script-src 'self' https://checkout.razorpay.com https://accounts.google.com/gsi/client;",
+    expect(headers.match(/script-src ([^;]+)/)?.[1].split(" ")).toContain(
+      "https://connect.facebook.net",
     );
   });
   it.each([

@@ -40,6 +40,8 @@ WHATSAPP_VERIFY_TOKEN=
 WHATSAPP_API_VERSION=v26.0
 WHATSAPP_DEFAULT_LANGUAGE=en_US
 WHATSAPP_EMBEDDED_SIGNUP_CONFIG_ID=
+WHATSAPP_COEXISTENCE_ENABLED=false
+WHATSAPP_COEXISTENCE_CONFIG_ID=
 WHATSAPP_CREDENTIAL_ENCRYPTION_KEY=
 WHATSAPP_ACCESS_TOKEN=
 WHATSAPP_PHONE_NUMBER_ID=
@@ -58,26 +60,54 @@ Modes:
 
 The Graph version is configuration-pinned. Confirm it against Meta’s current version lifecycle before every upgrade; do not silently change it in production.
 
+## Existing WhatsApp Business App number (Coexistence)
+
+Coexistence is an optional Embedded Signup v4 path for an eligible phone number that is already active in the WhatsApp Business mobile app. It is separate from the standard Cloud API onboarding path. GETFIT4U does not promise eligibility, approval, history transfer, or uninterrupted service because Meta and the business owner control those decisions.
+
+The owner-facing connection choices are:
+
+- **Connect existing WhatsApp Business**: launches Embedded Signup with `featureType=whatsapp_business_app_onboarding`. No legacy `sessionInfoVersion` override is sent. The owner completes Meta's screens and keeps control of any backup/history-sharing choice.
+- **Connect a separate business number**: launches the existing standard Embedded Signup flow without the Coexistence feature type.
+
+The browser sends only the short-lived authorization code and the allowlisted Embedded Signup completion event. The server binds the onboarding session to the authenticated user, role, gym, mode, state hash and expiry; exchanges the code; validates the token app and scopes; enumerates authorized assets; and requires explicit phone selection when Meta does not return one. A browser-supplied WABA or phone ID is never trusted by itself. Repeated callbacks and retries use the same session and connection binding.
+
+Coexistence connections deliberately start with outbound paused while subscription, webhook echo/history processing, template sync and a controlled test are verified. GETFIT4U never calls a phone registration or deregistration endpoint during this path. Owner-sent Business App messages are ingested from `smb_message_echoes` as outbound transcript records and are never re-enqueued. Imported history keeps the provider timestamp and is not treated as a fresh inbound message, opt-in, notification event, or new 24-hour service window. Declining history sharing is a supported limited state, not an onboarding failure.
+
+Enable the feature only after the Meta app is ready:
+
+1. Create or update a Facebook Login for Business Embedded Signup v4 configuration that supports WhatsApp Business App onboarding. Set its public ID in `WHATSAPP_COEXISTENCE_CONFIG_ID` (or intentionally use the baseline config after verifying it contains that feature).
+2. Obtain the required access for `whatsapp_business_messaging` and `whatsapp_business_management`. Do not add a local "business verified" blocker; Meta remains authoritative for account and number eligibility.
+3. Configure the deployed HTTPS frontend origin and the Meta OAuth/Embedded Signup domains. The application CSP allows only the required Meta SDK, frame and connection origins.
+4. Subscribe each authorized WABA to the app and subscribe the webhook to `messages` and `smb_message_echoes`. Keep the callback at `https://<api-host>/api/v1/webhooks/whatsapp` and retain signature validation.
+5. Deploy the additive model/index changes with `WHATSAPP_COEXISTENCE_ENABLED=false`, run the migration, validate the standard path, then set the feature flag to `true` for a controlled gym cohort.
+6. Complete the real-device checklist below with a backup of the Business App data and an owner-approved test number before production rollout.
+
+Safe rollback is to set `WHATSAPP_COEXISTENCE_ENABLED=false` and redeploy. This disables new Coexistence launches but does not disconnect existing connections, delete imported history, alter the Business App number, or affect the standard-number onboarding path. Pause an individual sender with its existing outbound control if incident containment is required.
+
 ## Meta setup runbook
 
 1. In the existing Meta developer app, confirm the GETFIT4U business portfolio owns or is authorised for the platform WABA.
 2. Complete the current Meta business verification and any App Review/Data Use Checkup required for the implemented permissions. Approval is controlled by Meta and is not automatic.
 3. Add WhatsApp, register the production phone, complete display-name review, confirm phone/account quality and attach the correct billing method. Development/test-number restrictions still apply until Meta removes them.
 4. Request only `whatsapp_business_messaging` and `whatsapp_business_management` for the baseline. Add no broader permission unless a reviewed feature needs it.
-5. Create the Tech Provider Embedded Signup configuration in the same app. Use the official supported flow, allowed domains and the deployed HTTPS origin. Put its public configuration ID only in server configuration; the API returns it to an authenticated connection screen when needed.
-6. Configure the webhook callback as `https://<api-host>/api/v1/webhooks/whatsapp`. Set the same random server-only value in Meta and `WHATSAPP_VERIFY_TOKEN`. Subscribe the app/WABAs to message events. The connection service also calls `subscribed_apps` after validating the returned assets.
+5. Create the Tech Provider Embedded Signup v4 configuration in the same app. Use the official supported flow, allowed domains and the deployed HTTPS origin. Put its public configuration ID only in server configuration; the API returns it to an authenticated connection screen when needed. Configure the optional Coexistence path separately as described above.
+6. Configure the webhook callback as `https://<api-host>/api/v1/webhooks/whatsapp`. Set the same random server-only value in Meta and `WHATSAPP_VERIFY_TOKEN`. Subscribe the app/WABAs to `messages` and, when Coexistence is enabled, `smb_message_echoes`. The connection service also calls `subscribed_apps` after validating the returned assets.
 7. Set the App Secret and a separate 32+ character credential-encryption key in the deployment secret manager. Never paste them into source, frontend variables or logs.
 8. Submit the required templates in the platform WABA and separately in each gym WABA. Sync them from GETFIT4U after provider review.
 9. Run `npm run db:migrate-whatsapp` from `backend` (dry-run), resolve any binding conflicts, then run `npm run db:migrate-whatsapp -- --apply` in a maintenance window.
 10. Set `WHATSAPP_WORKER_ENABLED=true` only on the dedicated worker deployment, then deploy the API and that continuously running worker. On Docker Compose the `whatsapp-worker` service runs `npm run start:whatsapp-worker`. A Vercel/API deployment alone does not run this worker; deploy the worker to a durable container/process platform.
 11. Start in `dry_run`, validate signed webhook receipts and policy decisions, then test a controlled platform sender. Repeat with one gym sender before expanding rollout.
 
-Before onboarding a number already used by WhatsApp Business App or another API provider, check current Meta coexistence/migration eligibility. Do not deregister or migrate it automatically. This code records coexistence status metadata but does not promise Business App history synchronisation or force a migration.
+Before onboarding a number used by another API provider, check Meta's current migration eligibility and use a separately approved migration runbook. Coexistence applies specifically to eligible WhatsApp Business App numbers; it is not a generic provider migration. Do not deregister or migrate any number automatically.
 
 Official references:
 
 - Meta Graph API versions: <https://developers.facebook.com/docs/graph-api/changelog/versions/>
 - Meta WhatsApp Cloud API collection: <https://www.postman.com/meta/whatsapp-business-platform/overview>
+- Meta Embedded Signup collection: <https://www.postman.com/meta/whatsapp-business-platform/documentation/du6gzjv/embedded-signup>
+- Meta WABA app subscription request: <https://www.postman.com/meta/whatsapp-business-platform/request/0yubu4i/subscribe-app-to-whatsapp-business-account>
+- Meta Unified Onboarding/Embedded Signup v4 overview: <https://developers.meta.com/resources/videos/unified-onboarding-whatsapp/>
+- WhatsApp Messenger to WhatsApp Business owner-controlled transition: <https://faq.whatsapp.com/3059780464322392/>
 - Meta webhook collection: <https://www.postman.com/meta/whatsapp-business-platform/folder/lboq68h/webhooks>
 - Embedded Signup implementation: <https://developers.facebook.com/docs/whatsapp/embedded-signup/implementation>
 
@@ -196,6 +226,11 @@ Use controlled, explicitly authorised recipients only. Record evidence separatel
 
 - [ ] Platform sender identity and assets verified.
 - [ ] One gym-owned sender identity and assets verified.
+- [ ] Standard separate-number Embedded Signup remains functional.
+- [ ] Eligible Business App number completes Coexistence onboarding without a registration/deregistration operation.
+- [ ] Business App remains usable after connection and an app-sent message arrives once as an outbound echo.
+- [ ] History accepted/declined outcomes are reflected accurately; imported history creates no opt-in, notification or 24-hour-window side effect.
+- [ ] Duplicate, reordered and retried code/session callbacks create only one tenant binding.
 - [ ] Per-business consent recorded.
 - [ ] Approved Utility template accepted; provider ID stored.
 - [ ] Sent/delivered webhook processed and message received on a real device.
