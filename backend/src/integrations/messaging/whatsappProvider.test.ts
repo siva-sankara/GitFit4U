@@ -29,4 +29,33 @@ describe("WhatsAppProvider Embedded Signup exchange", () => {
     expect(requestUrl.searchParams.has("redirect_uri")).toBe(true);
     expect(requestUrl.searchParams.get("redirect_uri")).toBe("");
   });
+
+  it("retries without redirect_uri when Meta rejects the JavaScript SDK empty value", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 400,
+        json: vi.fn().mockResolvedValue({
+          error: {
+            code: 100,
+            message: "Error validating verification code. Please make sure your redirect_uri is identical.",
+          },
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: vi.fn().mockResolvedValue({ access_token: "provider-token", expires_in: 3600 }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(new WhatsAppProvider().exchangeEmbeddedSignupCode("one-time-code"))
+      .resolves.toEqual({ accessToken: "provider-token", expiresIn: 3600 });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const firstRequest = new URL(String(fetchMock.mock.calls[0]?.[0]));
+    const retryRequest = new URL(String(fetchMock.mock.calls[1]?.[0]));
+    expect(firstRequest.searchParams.get("redirect_uri")).toBe("");
+    expect(retryRequest.searchParams.has("redirect_uri")).toBe(false);
+  });
 });

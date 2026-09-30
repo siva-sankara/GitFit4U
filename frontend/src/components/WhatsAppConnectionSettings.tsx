@@ -64,19 +64,40 @@ const automatedEvents = [
   "platform.expiring", "gym.activated", "gym.suspended", "gym.archived",
 ];
 
+let facebookSdkPromise: Promise<any> | null = null;
+let facebookSdkConfiguration = "";
+
 function loadFacebookSdk(appId: string, version: string) {
-  return new Promise<any>((resolve, reject) => {
+  const configuration = `${appId}:${version}`;
+  if (facebookSdkPromise) {
+    if (facebookSdkConfiguration !== configuration) {
+      return Promise.reject(new Error("Meta sign-up is already initialized with a different configuration. Refresh and try again."));
+    }
+    return facebookSdkPromise;
+  }
+
+  facebookSdkConfiguration = configuration;
+  facebookSdkPromise = new Promise<any>((resolve, reject) => {
+    const fail = () => {
+      facebookSdkPromise = null;
+      facebookSdkConfiguration = "";
+      reject(new Error("Meta sign-up could not be loaded."));
+    };
     const ready = () => {
       const fb = (window as any).FB;
-      if (!fb) return reject(new Error("Meta sign-up could not be loaded."));
-      fb.init({ appId, cookie: false, xfbml: false, version });
-      resolve(fb);
+      if (!fb) return fail();
+      try {
+        fb.init({ appId, autoLogAppEvents: false, cookie: false, xfbml: false, version });
+        resolve(fb);
+      } catch {
+        fail();
+      }
     };
     if ((window as any).FB) { ready(); return; }
     const existing = document.getElementById("facebook-jssdk") as HTMLScriptElement | null;
     if (existing) {
       existing.addEventListener("load", ready, { once: true });
-      existing.addEventListener("error", () => reject(new Error("Meta sign-up could not be loaded.")), { once: true });
+      existing.addEventListener("error", fail, { once: true });
       return;
     }
     const script = document.createElement("script");
@@ -84,10 +105,12 @@ function loadFacebookSdk(appId: string, version: string) {
     script.src = "https://connect.facebook.net/en_US/sdk.js";
     script.async = true;
     script.defer = true;
+    script.crossOrigin = "anonymous";
     script.onload = ready;
-    script.onerror = () => reject(new Error("Meta sign-up could not be loaded."));
+    script.onerror = fail;
     document.head.appendChild(script);
   });
+  return facebookSdkPromise;
 }
 
 export function WhatsAppConnectionSettings() {

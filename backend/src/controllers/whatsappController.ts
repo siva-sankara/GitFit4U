@@ -66,10 +66,11 @@ export async function cancelOnboarding(req: Request, res: Response) {
 }
 
 export async function completeOnboarding(req: Request, res: Response) {
-  const data = await completeWhatsAppOnboarding(actor(req), req.body);
-  if (data.status === "COMPLETED" && data.connection)
+  const result = await completeWhatsAppOnboarding(actor(req), req.body);
+  const { completedNow, ...data } = result;
+  if (completedNow && data.connection)
     await writeAudit(req, { action: "WHATSAPP_CONNECTED", entityType: "WhatsAppConnection", entityId: data.connection.publicId, after: { scope: data.connection.scope, gymId: data.connection.gymId, phoneNumberId: data.connection.phoneNumberId, connectionMode: data.connection.connectionMode } });
-  res.status(data.status === "COMPLETED" ? 201 : 202).json({ success: true, data });
+  res.status(completedNow ? 201 : data.status === "COMPLETED" ? 200 : 202).json({ success: true, data });
 }
 
 export async function checkConnection(req: Request, res: Response) {
