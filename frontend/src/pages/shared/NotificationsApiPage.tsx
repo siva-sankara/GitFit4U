@@ -3,6 +3,7 @@ import {
   Bell,
   Building2,
   CheckCheck,
+  Clipboard,
   CreditCard,
   Dumbbell,
   Flame,
@@ -17,6 +18,7 @@ import {
   useNotifications,
   useReadAllNotifications,
   useReadNotification,
+  useUnreadNotification,
   useDeleteNotifications,
 } from "../../api/hooks";
 import { Modal } from "../../components/Modal";
@@ -24,6 +26,7 @@ import { PushNotificationSettings } from "../../components/PushNotificationSetti
 import { safeReturnTo } from "../../services/authRedirect";
 import type { InboxNotification } from "../../services/notificationAlerts";
 import "../../styles/notifications.css";
+import { Pagination } from "../../components/DataListControls";
 
 const categories = [
   ["ALL", "All updates"],
@@ -63,6 +66,7 @@ const timestamp = (value: string) => {
 
 export function NotificationsApiPage() {
   const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(10);
   const [filter, setFilter] = useState<Filter>("ALL");
   const [selected, setSelected] = useState<InboxNotification>();
   const [checked, setChecked] = useState<string[]>([]);
@@ -70,8 +74,10 @@ export function NotificationsApiPage() {
     ids?: string[];
     all?: boolean;
   }>();
-  const query = useNotifications(page, filter);
+  const [copied, setCopied] = useState(false);
+  const query = useNotifications(page, filter, limit);
   const read = useReadNotification();
+  const unread = useUnreadNotification();
   const readAll = useReadAllNotifications();
   const remove = useDeleteNotifications();
   const navigate = useNavigate();
@@ -136,10 +142,11 @@ export function NotificationsApiPage() {
           </button>
         </div>
       </PageHeader>
-      <PushNotificationSettings />
-      {(read.isError || readAll.isError || remove.isError) && (
+      {/* <PushNotificationSettings /> */}
+      {(read.isError || unread.isError || readAll.isError || remove.isError) && (
         <p className="form-alert" role="alert">
           {read.error?.message ||
+            unread.error?.message ||
             readAll.error?.message ||
             remove.error?.message}
         </p>
@@ -319,29 +326,7 @@ export function NotificationsApiPage() {
         {!query.isLoading &&
           !query.isError &&
           (query.data?.meta?.total || 0) > 0 && (
-            <footer className="table-footer notification-pagination">
-              <span>
-                Page {page} of {pages}
-              </span>
-              <div>
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  disabled={page <= 1 || query.isFetching}
-                  onClick={() => setPage((value) => value - 1)}
-                >
-                  Previous
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  disabled={page >= pages || query.isFetching}
-                  onClick={() => setPage((value) => value + 1)}
-                >
-                  Next
-                </button>
-              </div>
-            </footer>
+            <Pagination page={page} limit={limit} total={query.data?.meta?.total || 0} loading={query.isFetching} onPageChange={setPage} onLimitChange={(value) => { setLimit(value); setPage(1); }} />
           )}
       </section>
       <Modal
@@ -377,6 +362,18 @@ export function NotificationsApiPage() {
                   })}
                 </dd>
               </div>
+              {!!selected.channels?.length && (
+                <div>
+                  <dt>Delivery channels</dt>
+                  <dd>{selected.channels.join(", ").replaceAll("_", " ")}</dd>
+                </div>
+              )}
+              {selected.pushStatus && (
+                <div>
+                  <dt>Push delivery</dt>
+                  <dd>{selected.pushStatus.replaceAll("_", " ").toLowerCase()}</dd>
+                </div>
+              )}
               {selected.metadata?.gymName && (
                 <div>
                   <dt>Gym</dt>
@@ -447,6 +444,43 @@ export function NotificationsApiPage() {
                 {selected.actionLabel || "View details"}
               </button>
             )}
+            <div className="notification-detail-actions">
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => {
+                  const pendingCopy = navigator.clipboard?.writeText(
+                    `${selected.title}\n\n${selected.message}`,
+                  );
+                  if (pendingCopy) void pendingCopy.then(() => setCopied(true));
+                }}
+              >
+                <Clipboard size={16} aria-hidden="true" />
+                {copied ? "Copied" : "Copy message"}
+              </button>
+              {selected.readAt && (
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  disabled={unread.isPending}
+                  onClick={() =>
+                    unread.mutate(selected._id, {
+                      onSuccess: () => setSelected(undefined),
+                    })
+                  }
+                >
+                  {unread.isPending ? "Updating…" : "Mark as unread"}
+                </button>
+              )}
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setDeleteSelection({ ids: [selected._id] })}
+              >
+                <Trash2 size={16} aria-hidden="true" />
+                Delete
+              </button>
+            </div>
           </div>
         )}
       </Modal>

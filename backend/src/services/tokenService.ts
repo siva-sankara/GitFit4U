@@ -11,14 +11,18 @@ import { AppError } from "../utils/AppError.js";
 
 type AccessClaims = { sub: string; sid: string };
 
-function refreshExpiry(): Date {
+function refreshTtlMs(): number {
   const value = env.JWT_REFRESH_TTL;
   const match = /^(\d+)([dhm])$/.exec(value);
-  if (!match) return new Date(Date.now() + 30 * 86_400_000);
+  if (!match) return 30 * 86_400_000;
   const amount = Number(match[1]);
   const unit = match[2];
   const multiplier = unit === "d" ? 86_400_000 : unit === "h" ? 3_600_000 : 60_000;
-  return new Date(Date.now() + amount * multiplier);
+  return amount * multiplier;
+}
+
+function refreshExpiry(): Date {
+  return new Date(Date.now() + refreshTtlMs());
 }
 
 export function signAccessToken(userId: string, sessionId: string): string {
@@ -125,7 +129,7 @@ export function setRefreshCookie(res: Response, token: string): void {
     sameSite: isProduction ? "none" : "lax",
     domain: env.COOKIE_DOMAIN || undefined,
     path: "/api/v1/auth",
-    maxAge: 30 * 86_400_000
+    maxAge: refreshTtlMs()
   });
 }
 

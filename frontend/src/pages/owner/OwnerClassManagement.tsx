@@ -1,12 +1,13 @@
 import { PageHeader } from "../../components/PageHeader";
-import { useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useCurrentUser } from "../../api/hooks";
 import { apiRequest, ApiError } from "../../services/apiClient";
 import { Modal } from "../../components/Modal";
 import { ClassCard } from "../../components/ClassCard";
 import { MediaImageEditor } from "../../components/MediaImageEditor";
-import { QueryState, useData, type Row } from "../live/LiveData";
+import { QueryState, Table, useData, type Row } from "../live/LiveData";
+import { EmptyState, Pagination } from "../../components/DataListControls";
 
 const localInput = (value?: string) => {
   const date = value ? new Date(value) : new Date(Date.now() + 3600000);
@@ -23,7 +24,7 @@ export function ClassEditor({
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const trainers = useData<Row[]>("/api/v1/owner/trainers");
+  const trainers = useData<Row[]>("/api/v1/owner/trainers?limit=100");
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [imageAttachmentId, setImageAttachmentId] = useState<string | null | undefined>(value?.imageAttachmentId);
   const [imageUrl, setImageUrl] = useState<string | undefined>(value?.imageUrl);
@@ -313,14 +314,31 @@ export function OwnerClassManagement({
   const read = canRead ?? permissions.includes("gym:read"),
     write = canWrite ?? permissions.includes("class:write");
   const [page, setPage] = useState(1),
+    [limit, setLimit] = useState(10),
     [status, setStatus] = useState(""),
+    [q, setQ] = useState(""),
+    [search, setSearch] = useState(""),
     [editing, setEditing] = useState<Row | null>(null),
+    [bookingClass, setBookingClass] = useState<Row | null>(null),
+    [bookingPage, setBookingPage] = useState(1),
+    [bookingLimit, setBookingLimit] = useState(10),
     [cancelling, setCancelling] = useState<Row | null>(null),
     [reason, setReason] = useState("");
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setSearch(q.trim());
+      setPage(1);
+    }, 350);
+    return () => window.clearTimeout(timer);
+  }, [q]);
   const client = useQueryClient();
   const classes = useData<Row[]>(
-    `/api/v1/owner/classes?${new URLSearchParams({ page: String(page), limit: "12", status })}`,
+    `/api/v1/owner/classes?${new URLSearchParams({ page: String(page), limit: String(limit), status, q: search })}`,
     read,
+  );
+  const bookings = useData<Row[]>(
+    bookingClass ? `/api/v1/owner/classes/${bookingClass.publicId}/bookings?page=${bookingPage}&limit=${bookingLimit}` : "/api/v1/owner/classes/unselected/bookings",
+    Boolean(bookingClass),
   );
   const saved = () => {
     setEditing(null);
@@ -358,22 +376,10 @@ export function OwnerClassManagement({
       </PageHeader>
       {read && (
         <>
-          <label className="field class-status-filter">
-            <span>Class status</span>
-            <select
-              className="select"
-              value={status}
-              onChange={(event) => {
-                setStatus(event.target.value);
-                setPage(1);
-              }}
-            >
-              <option value="">All classes</option>
-              <option>SCHEDULED</option>
-              <option>CANCELLED</option>
-              <option>COMPLETED</option>
-            </select>
-          </label>
+          <div className="table-toolbar">
+            <label className="search-field"><span className="sr-only">Search classes</span><input value={q} onChange={(event) => setQ(event.target.value)} placeholder="Search classes" /></label>
+            <label className="field class-status-filter"><span>Class status</span><select className="select" value={status} onChange={(event) => { setStatus(event.target.value); setPage(1); }}><option value="">All classes</option><option>SCHEDULED</option><option>CANCELLED</option><option>COMPLETED</option></select></label>
+          </div>
           <QueryState query={classes}>
             <div className="class-card-grid">
               {classes.data?.data.map((session) => (
@@ -381,15 +387,11 @@ export function OwnerClassManagement({
                   key={session.publicId}
                   session={session}
                   actions={
-                    write && session.status !== "CANCELLED" ? (
+                    (
                       <>
-                        <button
-                          className="btn btn-secondary"
-                          onClick={() => setEditing(session)}
-                        >
-                          Edit
-                        </button>
-                        {session.status === "SCHEDULED" && (
+                        <button className="btn btn-secondary" onClick={() => { setBookingPage(1); setBookingClass(session); }}>View bookings</button>
+                        {write && session.status !== "CANCELLED" && <button className="btn btn-secondary" onClick={() => setEditing(session)}>Edit / assign trainer</button>}
+                        {write && session.status === "SCHEDULED" && (
                           <button
                             className="btn btn-secondary"
                             onClick={() => {
@@ -402,28 +404,14 @@ export function OwnerClassManagement({
                           </button>
                         )}
                       </>
-                    ) : undefined
+                    )
                   }
                 />
               ))}
             </div>
-            {!classes.data?.data.length && <p>No classes match this view.</p>}
+            {!classes.data?.data.length && <EmptyState title="No classes found" detail="Try changing your search or class status." />}
           </QueryState>
-          <footer className="table-footer">
-            <span>{classes.data?.meta?.total || 0} classes</span>
-            <div>
-              <button disabled={page <= 1} onClick={() => setPage(page - 1)}>
-                Previous
-              </button>
-              <span>Page {page}</span>
-              <button
-                disabled={page >= (classes.data?.meta?.pages || 1)}
-                onClick={() => setPage(page + 1)}
-              >
-                Next
-              </button>
-            </div>
-          </footer>
+          <Pagination page={page} limit={limit} total={classes.data?.meta?.total || 0} loading={classes.isFetching} onPageChange={setPage} onLimitChange={(value) => { setLimit(value); setPage(1); }} />
         </>
       )}
       {editing && (
@@ -433,6 +421,18 @@ export function OwnerClassManagement({
           onSaved={saved}
         />
       )}
+      <Modal open={!!bookingClass} title={`${bookingClass?.name || "Class"} bookings`} onClose={() => setBookingClass(null)} wide>
+        <QueryState query={bookings}>
+          <Table rows={bookings.data?.data || []} columns={[
+            { key: "memberProfileId.contact.name", title: "Member", render: (row) => row.memberProfileId?.contact?.name || row.memberProfileId?.memberCode || "Member" },
+            { key: "memberProfileId.memberCode", title: "Member ID" },
+            { key: "status", title: "Booking status", format: "status" },
+            { key: "bookedAt", title: "Booked", format: "date" },
+          ]} actions={(row) => row.memberProfileId?.publicId ? <a className="btn btn-secondary" href={`/owner/members/${row.memberProfileId.publicId}`}>View member</a> : null} />
+          {!bookings.data?.data.length && <EmptyState title="No bookings yet" detail="Bookings for this class will appear here." />}
+          <Pagination page={bookingPage} limit={bookingLimit} total={bookings.data?.meta?.total || 0} loading={bookings.isFetching} onPageChange={setBookingPage} onLimitChange={(value) => { setBookingLimit(value); setBookingPage(1); }} />
+        </QueryState>
+      </Modal>
       <Modal
         open={!!cancelling}
         title="Cancel class?"

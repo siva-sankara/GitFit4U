@@ -34,6 +34,7 @@ import {
   recordWhatsAppWebhook,
   verifyWhatsAppChallenge,
 } from "../services/whatsappWebhookService.js";
+import { pageMeta } from "../utils/pagination.js";
 
 const actor = (req: Request) => req.auth! as WhatsAppActor;
 
@@ -124,7 +125,8 @@ export async function openMemberConversation(req: Request, res: Response) {
 
 export async function conversations(req: Request, res: Response) {
   const data = await listWhatsAppConversations(actor(req), req.query as any);
-  res.json({ success: true, data: data.rows, meta: { page: req.query.page, limit: req.query.limit, total: data.total } });
+  const page = Number(req.query.page), limit = Number(req.query.limit);
+  res.json({ success: true, data: data.rows, meta: pageMeta(page, limit, data.total) });
 }
 
 export async function conversationDetails(req: Request, res: Response) {
@@ -132,7 +134,8 @@ export async function conversationDetails(req: Request, res: Response) {
 }
 
 export async function messages(req: Request, res: Response) {
-  res.json({ success: true, data: await listWhatsAppMessages(actor(req), String(req.params.id), req.query as any) });
+  const data = await listWhatsAppMessages(actor(req), String(req.params.id), req.query as any);
+  res.json({ success: true, data: data.rows, meta: { hasMore: data.hasMore, nextCursor: data.nextCursor } });
 }
 
 export async function sendMessage(req: Request, res: Response) {

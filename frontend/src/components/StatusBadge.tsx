@@ -20,6 +20,8 @@ const warning = new Set([
   "PROCESSING",
   "CREATED",
   "AUTHORIZED",
+  "PENDING_ACTIVATION",
+  "JOIN_REQUESTED",
 ]);
 const danger = new Set([
   "INACTIVE",

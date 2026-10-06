@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { Activity, ChevronLeft, ChevronRight, Flame } from "lucide-react";
 import { QueryState, Table, useData, type Row } from "../live/LiveData";
 import "../../styles/account-hub.css";
+import { Pagination } from "../../components/DataListControls";
 
 export interface AttendanceSummary {
   month: string; timezone: string; today: string;
@@ -56,8 +57,8 @@ export function AttendanceCalendar({ summary, onMonth, busy = false }: { summary
   </section>;
 }
 export function AttendancePage() {
-  const [month, setMonth] = useState(""), [page, setPage] = useState(1), [details, setDetails] = useState(false);
-  const query = useData<AttendanceData>(`/api/v1/users/me/attendance?page=${page}&limit=20${month ? `&month=${month}` : ""}`);
+  const [month, setMonth] = useState(""), [page, setPage] = useState(1), [limit, setLimit] = useState(10), [details, setDetails] = useState(false);
+  const query = useData<AttendanceData>(`/api/v1/users/me/attendance?page=${page}&limit=${limit}${month ? `&month=${month}` : ""}`);
   const data = query.data?.data, summary = data?.summary, meta = query.data?.meta;
   return <div className="page-stack account-attendance">
     <PageHeader><div><h1>Attendance & streaks</h1><p>Progress from your verified gym check-ins, counted once per day.</p></div><Link className="btn btn-secondary" to="/app/attendance/qr">Scan gym QR</Link></PageHeader>
@@ -77,10 +78,7 @@ export function AttendancePage() {
           { key: "gymId.name", title: "Gym" }, { key: "status", title: "Status", format: "status" },
           { key: "classSessionId.name", title: "Class / session", render: row => row.classSessionId?.name || row.classId?.name || "Gym check-in" },
         ]} />
-        <footer className="table-footer"><span>{meta?.total || 0} records · Page {page} of {meta?.pages || 1}</span><div>
-          <button disabled={page <= 1 || query.isFetching} onClick={() => setPage(value => value - 1)}>Previous</button>
-          <button disabled={page >= (meta?.pages || 1) || query.isFetching} onClick={() => setPage(value => value + 1)}>Next</button>
-        </div></footer>
+        <Pagination page={page} limit={limit} total={meta?.total || 0} loading={query.isFetching} onPageChange={setPage} onLimitChange={(value) => { setLimit(value); setPage(1); }} />
       </section>}
     </>}</QueryState>
   </div>;

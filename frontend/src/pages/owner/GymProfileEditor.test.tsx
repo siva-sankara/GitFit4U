@@ -195,7 +195,7 @@ it("rejects PDF files before requesting any upload", async () => {
   await until(() => host.textContent!.includes("Choose a JPG"));
   expect(mocks.request).not.toHaveBeenCalled();
 });
-it("removes the selected cover from the profile without deleting its storage object", async () => {
+it("unlinks the selected cover through the audited media endpoint without deleting storage", async () => {
   await render(
     <GymMediaEditor
       gym={{
@@ -212,10 +212,9 @@ it("removes the selected cover from the profile without deleting its storage obj
       }}
     />,
   );
-  await act(async () => button("Remove from profile").click());
-  expect(mocks.request).toHaveBeenCalledWith("/api/v1/owner/gym", {
-    method: "PATCH",
-    body: JSON.stringify({ mediaAttachmentIds: [], coverAttachmentId: null }),
+  await act(async () => button("Delete").click());
+  expect(mocks.request).toHaveBeenCalledWith("/api/v1/owner/gym/media/photo", {
+    method: "DELETE",
   });
 });
 it("saves a full week with closed days and overnight hours", async () => {

@@ -86,6 +86,12 @@
 .notification-detail li {
   margin-block: 6px;
 }
+.notification-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 16px;
+}
 .notifications-page .heading-actions {
   flex-wrap: wrap;
 }
@@ -322,7 +328,7 @@
 }
 @media (max-width: 650px) {
   .notifications-page .page-heading {
-    flex-direction: column;
+    /* flex-direction: column; */
   }
   .notifications-page .heading-actions {
     width: 100%;

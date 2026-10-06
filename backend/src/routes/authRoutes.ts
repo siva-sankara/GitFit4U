@@ -19,6 +19,9 @@ const invitationToken = z.string().regex(/^[A-Za-z0-9_-]{24}\.[A-Za-z0-9_-]{43}$
 authRoutes.post("/activate-account", loginLimiter, validate(z.object({ body: z.object({ token: invitationToken, password }).strict(), params: z.object({}), query: z.object({}) })), activateAccount);
 authRoutes.post("/accept-invitation", loginLimiter, requireAuth, validate(z.object({ body: z.object({ token: invitationToken }).strict(), params: z.object({}), query: z.object({}) })), acceptInvitation);
 authRoutes.post("/register", loginLimiter, validate(z.object({ body: publicSignupInput, params:z.object({}), query:z.object({}) })), controller.register);
+authRoutes.post("/signup/verify", otpLimiter, validate(z.object({ body: z.object({ operationId: z.string().min(20).max(40), challengeId: z.string().min(20).max(40), code: z.string().regex(/^\d{6}$/) }).strict(), params:z.object({}), query:z.object({}) })), controller.verifySignupOtp);
+authRoutes.post("/signup/resend", otpLimiter, validate(z.object({ body: z.object({ operationId: z.string().min(20).max(40) }).strict(), params:z.object({}), query:z.object({}) })), controller.resendSignupOtp);
+authRoutes.post("/signup/cancel", otpLimiter, validate(z.object({ body: z.object({ operationId: z.string().min(20).max(40) }).strict(), params:z.object({}), query:z.object({}) })), controller.cancelSignup);
 authRoutes.post("/login", loginLimiter, validate(z.object({ body: z.object({ identifier: z.string().min(3).max(160), password: z.string().min(1).max(128) }), params:z.object({}), query:z.object({}) })), controller.passwordLogin);
 authRoutes.post("/forgot-password", otpLimiter, validate(z.object({ body: z.object({ phone: z.string().min(8).max(20) }), params:z.object({}), query:z.object({}) })), controller.forgotPassword);
 authRoutes.post("/recovery/verify", otpLimiter, validate(z.object({ body: z.object({ challengeId: z.string().min(8), code: z.string().regex(/^\d{6}$/) }), params:z.object({}), query:z.object({}) })), controller.verifyRecoveryOtp);
@@ -27,8 +30,14 @@ authRoutes.post("/reset-password", loginLimiter, validate(z.object({ body: z.obj
 authRoutes.post(
   "/otp/request",
   otpLimiter,
-  validate(z.object({ body: z.object({ phone: z.string().min(8).max(20), purpose: z.enum(["LOGIN", "STEP_UP", "ACCOUNT_RECOVERY"]).default("LOGIN") }), params: z.object({}), query: z.object({}) })),
+  validate(z.object({ body: z.object({ phone: z.string().min(8).max(20) }).strict(), params: z.object({}), query: z.object({}) })),
   controller.otpRequest
+);
+authRoutes.get(
+  "/otp/:challengeId/status",
+  otpLimiter,
+  validate(z.object({ body: z.object({}).optional(), params: z.object({ challengeId: z.string().min(20).max(40) }), query: z.object({}) })),
+  controller.otpStatus,
 );
 authRoutes.post(
   "/otp/verify",

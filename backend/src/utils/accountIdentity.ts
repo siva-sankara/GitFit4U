@@ -24,9 +24,8 @@ export function normalizeIndiaSignupPhone(input: string): string {
   return `+91${local}`;
 }
 
-// Existing explicit international numbers and national trunk-prefix aliases
-// remain supported by login, recovery and invited accounts. Public signup uses
-// the stricter India-specific parser above.
+// Explicit international numbers and Indian national/trunk-prefix aliases are
+// normalized to E.164. Public signup and WhatsApp authentication use this path.
 export function normalizeAccountPhone(input: string): string {
   const digits = phoneDigits(input);
   if (digits.startsWith("+") && !digits.startsWith("+91")) {

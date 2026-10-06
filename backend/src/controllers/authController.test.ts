@@ -5,9 +5,19 @@ const mocks = vi.hoisted(() => ({
   exists: vi.fn(),
   createUser: vi.fn(),
   findUser: vi.fn(),
+  countUsers: vi.fn(),
   findById: vi.fn(),
   findIdentity: vi.fn(),
+  updateIdentity: vi.fn(),
   createIdentity: vi.fn(),
+  pendingUpdateMany: vi.fn(),
+  pendingCreate: vi.fn(),
+  pendingFindOne: vi.fn(),
+  pendingFindOneAndUpdate: vi.fn(),
+  pendingUpdateOne: vi.fn(),
+  requestOtp: vi.fn(),
+  invalidateOtp: vi.fn(),
+  otpFindOne: vi.fn(),
   findAssignment: vi.fn(),
   compare: vi.fn(),
   hash: vi.fn(),
@@ -27,11 +37,20 @@ vi.mock("../models/User.js", () => ({
     exists: mocks.exists,
     create: mocks.createUser,
     findOne: mocks.findUser,
+    countDocuments: mocks.countUsers,
     findById: mocks.findById,
   },
 }));
 vi.mock("../models/Auth.js", () => ({
-  AuthIdentity: { findOne: mocks.findIdentity, create: mocks.createIdentity },
+  AuthIdentity: { findOne: mocks.findIdentity, findOneAndUpdate: mocks.updateIdentity, create: mocks.createIdentity },
+  PendingAuthOperation: {
+    updateMany: mocks.pendingUpdateMany,
+    create: mocks.pendingCreate,
+    findOne: mocks.pendingFindOne,
+    findOneAndUpdate: mocks.pendingFindOneAndUpdate,
+    updateOne: mocks.pendingUpdateOne,
+  },
+  OtpChallenge: { findOne: mocks.otpFindOne },
   RoleAssignment: { findOne: mocks.findAssignment },
   Session: { findOne: mocks.findSession, findOneAndUpdate: mocks.revokeSession },
   PasswordResetGrant: {},
@@ -42,6 +61,8 @@ vi.mock("bcrypt", () => ({
 vi.mock("../services/otpService.js", async (importOriginal) => ({
   ...(await importOriginal<object>()),
   verifyOtp: mocks.verifyOtp,
+  requestOtp: mocks.requestOtp,
+  invalidateOtpOperation: mocks.invalidateOtp,
 }));
 vi.mock("../services/tokenService.js", () => ({
   createSession: mocks.createSession,
@@ -56,19 +77,32 @@ vi.mock("../services/domainEventService.js", () => ({
 vi.mock("google-auth-library", () => ({ OAuth2Client: class { verifyIdToken = mocks.googleToken; } }));
 vi.mock("../services/ownerOnboardingService.js", () => ({ getOwnerOnboarding: mocks.onboarding }));
 vi.mock("../models/Collaboration.js", () => ({ DeviceToken: { updateMany: mocks.revokeDevices } }));
-import { register, passwordLogin, otpVerify, googleLogin, switchRole, logout } from "./authController.js";
+import { register, verifySignupOtp, passwordLogin, otpVerify, googleLogin, switchRole, logout } from "./authController.js";
 import { sha256 } from "../utils/crypto.js";
 import { env } from "../config/env.js";
 import type { Request, Response } from "express";
 const request = (body: object) =>
   ({ body, header: vi.fn(), ip: "127.0.0.1" }) as unknown as Request;
-const response = () => ({ json: vi.fn() }) as unknown as Response;
+const response = () => ({ json: vi.fn(), status: vi.fn().mockReturnThis(), send: vi.fn() }) as unknown as Response;
 const databaseSession = {} as any;
 beforeEach(() => {
   vi.resetAllMocks();
   vi.spyOn(mongoose.connection, "transaction").mockImplementation(
     async (callback: any) => callback(databaseSession),
   );
+  mocks.countUsers.mockResolvedValue(0);
+  mocks.pendingUpdateMany.mockResolvedValue({});
+  mocks.pendingCreate.mockResolvedValue({
+    _id: "pending-operation-id",
+    publicId: "pending-operation-public-id",
+  });
+  mocks.requestOtp.mockResolvedValue({
+    challengeId: "signup-challenge-public-id",
+    maskedPhone: "+91••••••3210",
+    expiresInSeconds: 300,
+    resendInSeconds: 60,
+    deliveryStatus: "SUBMITTED",
+  });
 });
 afterEach(() => vi.restoreAllMocks());
 
@@ -93,24 +127,40 @@ it("does not revoke device sessions when logout cookie proof does not match", as
 });
 describe("authentication controller", () => {
   const signup = { name: "Member", email: "member@example.com", phone: "9876543210", password: "StrongPass123", role: "USER" };
-  it("persists a new owner role and returns onboarding without assigning a gym", async () => {
-    mocks.createUser.mockImplementation(async values => [{ ...values[0], _id: "owner", save: vi.fn(), $session: vi.fn() }]);
-    mocks.createSession.mockResolvedValue({ accessToken: "token", refreshToken: "refresh" });
-    mocks.onboarding.mockResolvedValue({ state: "NOT_STARTED" });
+  it("persists a pending owner signup and issues no session before WhatsApp verification", async () => {
+    mocks.hash.mockResolvedValue("password-hash");
     const res = response();
     await register(request({ ...signup, role: "GYM_OWNER" }), res);
-    expect(mocks.createUser).toHaveBeenCalledWith([expect.objectContaining({ roles: ["GYM_OWNER"], activeRole: "GYM_OWNER" })], { session: databaseSession });
-    expect(mocks.createSession).toHaveBeenCalledWith(expect.objectContaining({ activeRole: "GYM_OWNER", activeGymId: undefined }));
-    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ user: expect.objectContaining({ onboarding: { state: "NOT_STARTED" } }) }) }));
+    expect(mocks.pendingCreate).toHaveBeenCalledWith(expect.objectContaining({
+      type: "SIGNUP",
+      email: "member@example.com",
+      phone: "+919876543210",
+      role: "GYM_OWNER",
+      passwordHash: "password-hash",
+    }));
+    expect(mocks.requestOtp).toHaveBeenCalledWith(
+      "+919876543210",
+      "SIGNUP",
+      expect.objectContaining({ pendingOperationId: "pending-operation-id" }),
+    );
+    expect(mocks.createUser).not.toHaveBeenCalled();
+    expect(mocks.createSession).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(202);
   });
   it.each(["isAdmin", "permissions", "approved", "ownerId", "roles"])("rejects forged %s even when controller is invoked directly", async field => {
     await expect(register(request({ ...signup, [field]: true }), response())).rejects.toHaveProperty("name", "ZodError");
     expect(mocks.createUser).not.toHaveBeenCalled();
   });
-  it.each(["email", "phone"])("returns safe recovery guidance for concurrent %s duplicate-key conflicts", async field => {
-    mocks.exists.mockResolvedValue(false);
-    mocks.createUser.mockRejectedValue({ code: 11000, keyPattern: { [field]: 1 }, keyValue: { [field]: "private" } });
-    await expect(register(request(signup), response())).rejects.toMatchObject({ code: "ACCOUNT_EXISTS", statusCode: 409 });
+  it("cancels the pending signup when Meta cannot submit the OTP", async () => {
+    const failure = Object.assign(new Error("Template is not approved"), {
+      code: "WHATSAPP_AUTH_TEMPLATE_NOT_APPROVED",
+    });
+    mocks.requestOtp.mockRejectedValue(failure);
+    await expect(register(request(signup), response())).rejects.toBe(failure);
+    expect(mocks.pendingUpdateOne).toHaveBeenCalledWith(
+      { _id: "pending-operation-id", status: "PENDING" },
+      { $set: { status: "CANCELLED" } },
+    );
     expect(mocks.createSession).not.toHaveBeenCalled();
   });
   it("does not auto-create an account through OTP login without required signup details", async () => {
@@ -119,6 +169,81 @@ describe("authentication controller", () => {
     await expect(otpVerify(request({ challengeId: "challenge", code: "123456" }), response())).rejects.toMatchObject({ code: "SIGNUP_REQUIRED" });
     expect(mocks.createUser).not.toHaveBeenCalled();
     expect(mocks.createSession).not.toHaveBeenCalled();
+  });
+  it("atomically creates both password and verified-phone identities after signup OTP verification", async () => {
+    const detachSession = vi.fn();
+    const operation = {
+      _id: "pending-operation-id",
+      publicId: "pending-operation-public-id",
+      name: "Member",
+      email: "member@example.com",
+      phone: "+919876543210",
+      role: "USER",
+      passwordHash: "password-hash",
+    };
+    mocks.pendingFindOne
+      .mockResolvedValueOnce(operation)
+      .mockReturnValueOnce({
+        select: () => ({ session: async () => operation }),
+      });
+    mocks.verifyOtp.mockResolvedValue({
+      purpose: "SIGNUP",
+      phone: operation.phone,
+      pendingOperationId: operation._id,
+    });
+    mocks.exists.mockReturnValue({ session: async () => null });
+    mocks.pendingFindOneAndUpdate.mockResolvedValue({ ...operation, status: "COMPLETED" });
+    mocks.createUser.mockResolvedValue([{
+      _id: "new-user-id",
+      publicId: "new-user-public-id",
+      roles: ["USER"],
+      activeRole: "USER",
+      status: "ACTIVE",
+      save: vi.fn(),
+      $session: detachSession,
+    }]);
+    mocks.createSession.mockResolvedValue({ accessToken: "access", refreshToken: "refresh" });
+    const res = response();
+    await verifySignupOtp(
+      request({
+        operationId: operation.publicId,
+        challengeId: "signup-challenge-public-id",
+        code: "123456",
+      }),
+      res,
+    );
+    expect(mocks.verifyOtp).toHaveBeenCalledWith(
+      "signup-challenge-public-id",
+      "123456",
+      expect.objectContaining({
+        expectedPurpose: "SIGNUP",
+        pendingOperationId: operation._id,
+      }),
+    );
+    expect(mocks.createIdentity).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({ provider: "PASSWORD", passwordHash: "password-hash" }),
+        expect.objectContaining({ provider: "PHONE", providerSubject: operation.phone }),
+      ]),
+      { session: databaseSession },
+    );
+    expect(mocks.createSession).toHaveBeenCalledOnce();
+    expect(detachSession).toHaveBeenCalledWith(null);
+  });
+  it("never allows WhatsApp OTP to bypass privileged administrator sign-in", async () => {
+    mocks.verifyOtp.mockResolvedValue({ purpose: "LOGIN", phone: "+919876543210" });
+    mocks.countUsers.mockResolvedValue(1);
+    mocks.findUser.mockResolvedValue({
+      _id: "admin-user",
+      publicId: "admin-public",
+      status: "ACTIVE",
+      roles: ["ADMIN"],
+    });
+    await expect(
+      otpVerify(request({ challengeId: "challenge", code: "123456" }), response()),
+    ).rejects.toMatchObject({ code: "ADMIN_OTP_LOGIN_FORBIDDEN" });
+    expect(mocks.createSession).not.toHaveBeenCalled();
+    expect(mocks.updateIdentity).not.toHaveBeenCalled();
   });
   it("does not auto-create an account through verified Google login without required signup details", async () => {
     const clientId = env.GOOGLE_CLIENT_ID;
@@ -133,21 +258,8 @@ describe("authentication controller", () => {
       expect(mocks.createSession).not.toHaveBeenCalled();
     } finally { env.GOOGLE_CLIENT_ID = clientId; }
   });
-  it("registers a normalized member account and returns a session", async () => {
+  it("normalizes signup identity data into the pending operation without issuing tokens", async () => {
     mocks.hash.mockResolvedValue("hash");
-    const detachSession = vi.fn();
-    mocks.createUser.mockImplementation(async (values) => [
-      {
-        ...values[0],
-        _id: "user1",
-        save: vi.fn(),
-        $session: detachSession,
-      },
-    ]);
-    mocks.createSession.mockResolvedValue({
-      accessToken: "token",
-      refreshToken: "refresh",
-    });
     const res = response();
     await register(
       request({
@@ -159,41 +271,19 @@ describe("authentication controller", () => {
       }),
       res,
     );
-    expect(mocks.createUser).toHaveBeenCalledWith(
-      [
-        expect.objectContaining({
-          name: "Member",
-          email: "member@example.com",
-          phone: "+919876543210",
-          roles: ["USER"],
-        }),
-      ],
-      { session: databaseSession },
-    );
-    expect(mocks.createIdentity).toHaveBeenCalledWith(
-      [
-        expect.objectContaining({
-          userId: "user1",
-          provider: "PASSWORD",
-          providerSubject: "member@example.com",
-          passwordHash: "hash",
-        }),
-      ],
-      { session: databaseSession },
-    );
-    expect(mocks.emitEvent).toHaveBeenCalledWith(
-      expect.objectContaining({
-        event: "account.registered",
-        userId: "user1",
-        session: databaseSession,
-      }),
-    );
-    expect(detachSession).toHaveBeenCalledWith(null);
-    expect(res.json).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({ accessToken: "token" }),
-      }),
-    );
+    expect(mocks.pendingCreate).toHaveBeenCalledWith(expect.objectContaining({
+      name: "Member",
+      email: "member@example.com",
+      phone: "+919876543210",
+      role: "USER",
+      passwordHash: "hash",
+    }));
+    expect(mocks.createUser).not.toHaveBeenCalled();
+    expect(mocks.createIdentity).not.toHaveBeenCalled();
+    expect(mocks.setRefreshCookie).not.toHaveBeenCalled();
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ purpose: "SIGNUP" }),
+    }));
   });
   it("rejects an existing account before creating credentials", async () => {
     mocks.exists.mockResolvedValue(true);
@@ -203,42 +293,6 @@ describe("authentication controller", () => {
     expect(mocks.createUser).not.toHaveBeenCalled();
     expect(mongoose.connection.transaction).not.toHaveBeenCalled();
   });
-  it.each(["credentials", "notification"])(
-    "does not issue a session if the registration transaction fails at %s",
-    async (failure) => {
-      mocks.hash.mockResolvedValue("hash");
-      mocks.createUser.mockResolvedValue([
-        {
-          _id: "user1",
-          publicId: "new-account",
-          roles: ["USER"],
-          $session: vi.fn(),
-          save: vi.fn(),
-        },
-      ]);
-      const error = new Error("Database write failed");
-      if (failure === "credentials")
-        mocks.createIdentity.mockRejectedValue(error);
-      else mocks.emitEvent.mockRejectedValue(error);
-      await expect(
-        register(
-          request({
-            name: "Member",
-            email: "member@example.com",
-            password: "StrongPass123",
-            phone: "9876543210",
-            role: "USER",
-          }),
-          response(),
-        ),
-      ).rejects.toBe(error);
-      expect(mocks.createIdentity.mock.calls[0][1]).toEqual({
-        session: databaseSession,
-      });
-      expect(mocks.createSession).not.toHaveBeenCalled();
-      expect(mocks.setRefreshCookie).not.toHaveBeenCalled();
-    },
-  );
   it("resolves phone login to the existing password identity", async () => {
     mocks.findUser.mockResolvedValue({ _id: "user1" });
     mocks.findIdentity.mockReturnValue({
@@ -265,17 +319,19 @@ describe("authentication controller", () => {
     });
     expect(mocks.compare).toHaveBeenCalledWith("StrongPass123", "hash");
   });
-  it("does not accept a recovery code as a login code", async () => {
-    mocks.verifyOtp.mockResolvedValue({
-      purpose: "ACCOUNT_RECOVERY",
-      phone: "+919876543210",
-    });
+  it("requires the OTP service to enforce a login-purpose challenge", async () => {
+    mocks.verifyOtp.mockRejectedValue(
+      Object.assign(new Error("Wrong purpose"), { code: "OTP_PURPOSE_INVALID" }),
+    );
     await expect(
       otpVerify(
         request({ challengeId: "challenge", code: "123456" }),
         response(),
       ),
-    ).rejects.toMatchObject({ code: "LOGIN_CHALLENGE_REQUIRED" });
+    ).rejects.toMatchObject({ code: "OTP_PURPOSE_INVALID" });
+    expect(mocks.verifyOtp).toHaveBeenCalledWith("challenge", "123456", {
+      expectedPurpose: "LOGIN",
+    });
     expect(mocks.createSession).not.toHaveBeenCalled();
   });
 });

@@ -1,7 +1,7 @@
 import { PageHeader } from "../../components/PageHeader";
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useSearchParams } from "react-router-dom";
 import {
   Archive,
   ArchiveRestore,
@@ -14,7 +14,8 @@ import { apiRequest, type ApiEnvelope } from "../../services/apiClient";
 import { useCurrentUser } from "../../api/hooks";
 import { uploadMedia } from "../../services/mediaUpload";
 import { Avatar } from "../../components/Avatar";
-import { BackIconButton } from "../../components/BackIconControl";
+import { BackIconButton, BackIconLink } from "../../components/BackIconControl";
+import { safeReturnTo } from "../../services/authRedirect";
 import { WhatsAppInbox } from "../../components/WhatsAppInbox";
 import { WhatsAppConnectionSettings } from "../../components/WhatsAppConnectionSettings";
 import { QueryState, date, type Row } from "../live/LiveData";
@@ -41,17 +42,26 @@ function InternalMessagesPage({
 }) {
   const client = useQueryClient(),
     me = useCurrentUser(),
+    location = useLocation(),
     [params, setParams] = useSearchParams();
+  const sourceState = location.state as
+    | { returnTo?: string; returnLabel?: string }
+    | null;
+  const returnTo = safeReturnTo(sourceState?.returnTo);
   const userId = me.data?.data?.user?._id,
     admin = me.data?.data?.context?.role === "ADMIN";
   const [page, setPage] = useState(1),
-    [search, setSearch] = useState("");
+    [search, setSearch] = useState(""), [searchDraft, setSearchDraft] = useState("");
   const [archived, setArchived] = useState(false);
   const [contactSearch, setContactSearch] = useState(""), [contactQuery, setContactQuery] = useState(""), [contactPage, setContactPage] = useState(1), [contactOpen, setContactOpen] = useState(false);
   useEffect(() => {
     const timer = setTimeout(() => { setContactQuery(contactSearch.trim()); setContactPage(1); setRecipient(""); }, 300);
     return () => clearTimeout(timer);
   }, [contactSearch]);
+  useEffect(() => {
+    const timer = setTimeout(() => { setSearch(searchDraft.trim()); setPage(1); }, 300);
+    return () => clearTimeout(timer);
+  }, [searchDraft]);
   const [active, setActive] = useState(params.get("conversation") || "");
   const [text, setText] = useState(""),
     [recipient, setRecipient] = useState("");
@@ -80,21 +90,22 @@ function InternalMessagesPage({
     draftId.current = crypto.randomUUID();
   }
   const conversations = useQuery({
-    queryKey: ["conversations", supportOnly, page, archived],
+    queryKey: ["conversations", supportOnly, page, archived, search],
     queryFn: () =>
       apiRequest<ApiEnvelope<Row[]>>(
         "/api/v1/conversations?page=" +
           page +
-          "&limit=20" +
+          "&limit=10" +
           (archived ? "&archived=true" : "") +
-          (supportOnly ? "&type=SUPPORT" : ""),
+          (supportOnly ? "&type=SUPPORT" : "") +
+          (search ? "&q=" + encodeURIComponent(search) : ""),
       ),
     refetchInterval: 10000,
   });
   const contacts = useQuery({
     queryKey: ["conversation-contacts", me.data?.data.context?.role, me.data?.data.context?.gymId, contactQuery, contactPage],
     enabled: !supportOnly && contactOpen && (contactQuery.length === 0 || contactQuery.length >= 2),
-    queryFn: () => apiRequest<ApiEnvelope<Row[]>>("/api/v1/conversations/contacts?q=" + encodeURIComponent(contactQuery) + "&page=" + contactPage + "&limit=20"),
+    queryFn: () => apiRequest<ApiEnvelope<Row[]>>("/api/v1/conversations/contacts?q=" + encodeURIComponent(contactQuery) + "&page=" + contactPage + "&limit=10"),
   });
   const details = useQuery({
     queryKey: ["conversation", active],
@@ -110,7 +121,10 @@ function InternalMessagesPage({
   });
   function open(id: string) {
     selectConversation(id);
-    setParams(id ? { conversation: id } : {}, { replace: true });
+    setParams(id ? { conversation: id } : {}, {
+      replace: true,
+      state: location.state,
+    });
   }
   function refresh(conversationId = scope.current.conversationId) {
     for (const key of [
@@ -326,6 +340,12 @@ function InternalMessagesPage({
     <div className="page-stack messaging-page">
       <PageHeader>
         <div>
+          {returnTo && (
+            <BackIconLink
+              to={returnTo}
+              label={sourceState?.returnLabel || "Back"}
+            />
+          )}
           <span className="eyebrow">Communication</span>
           <h1>{supportOnly ? "Support conversations" : "Messages"}</h1>
           <p>
@@ -478,10 +498,10 @@ function InternalMessagesPage({
           </div>
           <input
             className="input"
-            aria-label="Search conversations on this page"
+            aria-label="Search conversations"
             placeholder="Search conversations"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
+            value={searchDraft}
+            onChange={(event) => setSearchDraft(event.target.value)}
           />
           <div className="conversation-scroll">
             <QueryState query={conversations}>
@@ -499,6 +519,8 @@ function InternalMessagesPage({
                       <img
                         src={row.gymId.logo?.url || row.gymId.logoUrl}
                         alt=""
+                        loading="lazy"
+                        decoding="async"
                       />
                     ) : (
                       <Avatar

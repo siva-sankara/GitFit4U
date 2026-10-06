@@ -22,7 +22,7 @@ beforeEach(() => {
   mocks.permissions = ["member:read"];
   mocks.request.mockImplementation(async (path: string) => ({
     data:
-      path === "/api/v1/owner/trainers"
+      path === "/api/v1/owner/trainers?limit=100"
         ? []
         : {
             timezone: "Asia/Kolkata",
@@ -78,7 +78,7 @@ it("shows actual assigned-trainer details without fetching unauthorized options 
   expect(host.textContent).not.toContain("Payment history");
   expect(
     mocks.request.mock.calls.some(
-      ([path]) => path === "/api/v1/owner/trainers",
+      ([path]) => path === "/api/v1/owner/trainers?limit=100",
     ),
   ).toBe(false);
 });
@@ -93,7 +93,7 @@ it("loads editable trainer choices and payment history only with their respectiv
   expect(host.textContent).toContain("Payment history");
   expect(
     mocks.request.mock.calls.some(
-      ([path]) => path === "/api/v1/owner/trainers",
+      ([path]) => path === "/api/v1/owner/trainers?limit=100",
     ),
   ).toBe(true);
 });

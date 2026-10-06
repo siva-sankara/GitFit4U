@@ -104,7 +104,7 @@ whatsappRoutes.get(
   ...inbox,
   envelope(z.any(), z.object({}), z.object({
     page: z.coerce.number().int().min(1).max(10000).default(1),
-    limit: z.coerce.number().int().min(1).max(100).default(30),
+    limit: z.coerce.number().int().min(1).max(100).default(10),
     q: z.string().trim().max(80).optional(),
     archived: z.enum(["true", "false"]).default("false").transform((value) => value === "true"),
   })),
@@ -114,7 +114,7 @@ whatsappRoutes.get("/conversations/:id", ...inbox, envelope(z.any(), z.object({ 
 whatsappRoutes.get(
   "/conversations/:id/messages",
   ...inbox,
-  envelope(z.any(), z.object({ id }), z.object({ before: id.optional(), limit: z.coerce.number().int().min(1).max(100).default(50) })),
+  envelope(z.any(), z.object({ id }), z.object({ before: id.optional(), limit: z.coerce.number().int().min(1).max(100).default(20) })),
   controller.messages,
 );
 whatsappRoutes.post(

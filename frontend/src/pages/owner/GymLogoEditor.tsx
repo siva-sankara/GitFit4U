@@ -8,9 +8,11 @@ import type { Row } from "../live/LiveData";
 export function GymLogoEditor({
   gym,
   disabled = false,
+  embedded = false,
 }: {
   gym: Row;
   disabled?: boolean;
+  embedded?: boolean;
 }) {
   const [file, setFile] = useState<File | null>(null),
     [preview, setPreview] = useState(""),
@@ -78,20 +80,16 @@ export function GymLogoEditor({
     },
   });
   return (
-    <section className="panel form-section page-stack" id="gym-logo">
-      <div>
-        <h2>Gym logo</h2>
-        <p>
-          Your logo identifies this gym on its profile, member pages and
-          workspace.
-        </p>
-      </div>
-      <GymIdentity
-        name={gym.name}
-        logoUrl={preview || gym.logoUrl}
-        subtitle={file ? "Unsaved preview" : "Current gym identity"}
-        className="gym-logo-preview"
-      />
+    <section className={`${embedded ? "" : "panel form-section "}page-stack gym-logo-editor`} id={embedded ? undefined : "gym-logo"}>
+      <div className="gym-logo-layout">
+        <div className="gym-logo-current">
+          <GymIdentity
+            name={gym.name}
+            logoUrl={preview || gym.logoUrl}
+            subtitle={file ? "Unsaved preview" : "Current gym identity"}
+            className="gym-logo-preview"
+          />
+        </div>
       <fieldset
         disabled={disabled || save.isPending}
         className="profile-fieldset page-stack"
@@ -111,7 +109,7 @@ export function GymLogoEditor({
           />
         </label>
         <small>
-          JPG, PNG or WebP, maximum 5 MB. A square image works best.
+          JPG, PNG or WebP, maximum 5 MB. Recommended: 800 × 800 px square.
         </small>
         <div className="heading-actions">
           <button
@@ -130,6 +128,7 @@ export function GymLogoEditor({
           </button>
         </div>
       </fieldset>
+      </div>
       {save.isPending && (
         <progress
           aria-label="Logo upload progress"

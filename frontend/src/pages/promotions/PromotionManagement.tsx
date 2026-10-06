@@ -21,7 +21,7 @@ export function PromotionManagement({ kind, admin = false }: { kind: "offers" | 
   const client = useQueryClient();
   const query = useQuery({ queryKey: ["api", path, page], queryFn: () => apiRequest<ApiEnvelope<Row[]>>(`${path}?page=${page}&limit=12`) });
   const gyms = useQuery({ queryKey: ["promotion-gyms", search], queryFn: () => apiRequest<ApiEnvelope<Row[]>>(`/api/v1/workspace/records/gyms?limit=30&q=${encodeURIComponent(search)}`), enabled: admin && !!editing });
-  const plansPath = admin ? `/api/v1/admin/gyms/${gym?.publicId || ""}/plans` : "/api/v1/owner/plans";
+  const plansPath = admin ? `/api/v1/admin/gyms/${gym?.publicId || ""}/plans` : "/api/v1/owner/plans?limit=100";
   const plans = useQuery({ queryKey: ["api", plansPath], queryFn: () => apiRequest<ApiEnvelope<Row[]>>(plansPath), enabled: !!editing && (!admin || !!gym?.publicId) });
   const offersPath = admin ? `/api/v1/admin/promotions/offers?gymId=${gym?._id || ""}&limit=100` : "/api/v1/owner/offers?limit=100";
   const offers = useQuery({ queryKey: ["api", offersPath], queryFn: () => apiRequest<ApiEnvelope<Row[]>>(offersPath), enabled: !!editing && kind === "ads" && (!admin || !!gym?._id) });

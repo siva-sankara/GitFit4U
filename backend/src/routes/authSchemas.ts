@@ -18,7 +18,7 @@ export const accountPassword = z.string().min(10).max(128).regex(/[A-Z]/, "One u
 export const publicSignupInput = z.object({
   name: z.string().trim().min(2).max(120),
   email: accountEmail,
-  phone: indiaSignupPhone,
+  phone: accountPhone,
   password: accountPassword,
   role: z.enum(["USER", "GYM_OWNER"], { error: "Select your account type." }),
 }).strict();

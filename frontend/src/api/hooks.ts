@@ -4,12 +4,12 @@ import type { InboxNotification } from "../services/notificationAlerts";
 import { useSession } from "../services/session";
 
 export const useCurrentUser = useSession;
-export const useNotifications = (page = 1, category = "ALL") =>
+export const useNotifications = (page = 1, category = "ALL", limit = 10) =>
   useQuery({
-    queryKey: ["notifications", page, category],
+    queryKey: ["notifications", page, category, limit],
     queryFn: ({ signal }) =>
       apiRequest<ApiEnvelope<InboxNotification[]>>(
-        `/api/v1/users/me/notifications?page=${page}&category=${encodeURIComponent(category)}`,
+        `/api/v1/users/me/notifications?page=${page}&limit=${limit}&category=${encodeURIComponent(category)}`,
         { signal },
       ),
     refetchOnWindowFocus: true,
@@ -20,6 +20,16 @@ export function useReadNotification() {
   return useMutation({
     mutationFn: (id: string) =>
       apiRequest(`/api/v1/users/me/notifications/${id}/read`, {
+        method: "POST",
+      }),
+    onSuccess: () => client.invalidateQueries({ queryKey: ["notifications"] }),
+  });
+}
+export function useUnreadNotification() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiRequest(`/api/v1/users/me/notifications/${id}/unread`, {
         method: "POST",
       }),
     onSuccess: () => client.invalidateQueries({ queryKey: ["notifications"] }),

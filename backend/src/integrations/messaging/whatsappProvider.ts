@@ -252,6 +252,35 @@ export class WhatsAppProvider {
     return { providerMessageId: String(providerMessageId), raw };
   }
 
+  async sendAuthenticationCode(input: {
+    token: string;
+    phoneNumberId: string;
+    to: string;
+    template: string;
+    language: string;
+    code: string;
+  }): Promise<SendResult> {
+    return this.sendTemplate({
+      token: input.token,
+      phoneNumberId: input.phoneNumberId,
+      to: input.to,
+      template: input.template,
+      language: input.language,
+      components: [
+        {
+          type: "body",
+          parameters: [{ type: "text", text: input.code }],
+        },
+        {
+          type: "button",
+          sub_type: "url",
+          index: "0",
+          parameters: [{ type: "text", text: input.code }],
+        },
+      ],
+    });
+  }
+
   async sendText(input: {
     token: string;
     phoneNumberId: string;

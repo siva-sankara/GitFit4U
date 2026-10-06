@@ -22,4 +22,7 @@ publicRoutes.get("/settings", async (_req, res) => {
 publicRoutes.get("/gyms", controller.listGyms);
 publicRoutes.get("/gyms/nearby", controller.nearbyGyms);
 publicRoutes.get("/gyms/:slug/reviews", controller.gymReviews);
+publicRoutes.get("/gyms/:slug/media", controller.gymMedia);
+publicRoutes.get("/gyms/:slug/classes", controller.gymClasses);
+publicRoutes.get("/gyms/:slug/plans", controller.gymPlans);
 publicRoutes.get("/gyms/:slug", controller.gymDetails);

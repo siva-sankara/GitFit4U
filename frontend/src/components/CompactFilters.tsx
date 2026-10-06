@@ -1,5 +1,5 @@
 import { useEffect, useId, useState, type ReactNode } from "react";
-import { SlidersHorizontal } from "lucide-react";
+import { RotateCcw, SlidersHorizontal } from "lucide-react";
 import "../styles/compact-layout.css";
 
 /** Desktop controls stay visible; small screens use a keyboard-accessible disclosure. */
@@ -27,7 +27,18 @@ export function CompactFilters({ children, activeCount = 0, onReset, onApply }: 
     <div id={id} className="compact-filter-content" hidden={narrow && !open}>
       <div className="compact-filter-fields">{children}</div>
       <div className="compact-filter-actions">
-        <button type="button" className="btn btn-ghost" onClick={onReset}>Reset filters</button>
+        {activeCount > 0 && (
+          <button
+            type="button"
+            className="btn btn-ghost compact-filter-reset"
+            onClick={onReset}
+            aria-label="Reset filters"
+            title="Reset filters"
+          >
+            <RotateCcw size={16} aria-hidden="true" />
+            <span>Reset</span>
+          </button>
+        )}
         {narrow && <button type="button" className="btn btn-primary" onClick={event => {
           if (event.currentTarget.form && !event.currentTarget.form.reportValidity()) return;
           if (onApply?.() !== false) setOpen(false);

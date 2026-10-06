@@ -15,6 +15,7 @@ import { writeAudit } from "../services/auditService.js";
 import { withGymMedia } from "../services/gymMediaService.js";
 import { withUserMedia } from "../services/userMediaService.js";
 import { lockAttachments } from "../services/mediaBindingService.js";
+import { Gym } from "../models/Gym.js";
 
 export async function authorizedConversation(
   publicId: string,
@@ -51,11 +52,15 @@ export async function listConversations(req: Request, res: Response) {
   const { page, limit, skip } = paginationFromQuery(req.query);
   const supportOnly = req.query.type === "SUPPORT";
   const archived = req.query.archived === "true";
+  const q = typeof req.query.q === "string" ? req.query.q.trim().slice(0, 80) : "";
+  const regex = q ? new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i") : null;
   let migratedIds: any[] = [];
   let supportTotal = 0;
   if (supportOnly) {
-    const ticketFilter =
-      req.auth!.role === "ADMIN" ? {} : { requesterId: req.auth!.userId };
+    const ticketFilter: any = {
+      ...(req.auth!.role === "ADMIN" ? {} : { requesterId: req.auth!.userId }),
+      ...(regex ? { subject: regex } : {}),
+    };
     const tickets = await SupportTicket.find(ticketFilter)
       .sort({ updatedAt: -1, _id: -1 })
       .skip(skip)
@@ -88,12 +93,24 @@ export async function listConversations(req: Request, res: Response) {
             },
           ],
         };
-  const filter = {
-    ...visibility,
-    ...(supportOnly ? { type: "SUPPORT", _id: { $in: migratedIds } } : {
-      archivedBy: archived ? req.auth!.userId : { $ne: req.auth!.userId },
-    }),
-  };
+  const searchClause = regex && !supportOnly
+    ? { $or: [
+        { title: regex },
+        {
+          participants: {
+            $in: await User.distinct("_id", {
+              $or: [{ name: regex }, { email: regex }, { phone: regex }],
+            }),
+          },
+        },
+        { gymId: { $in: await Gym.distinct("_id", { name: regex }) } },
+      ] }
+    : null;
+  const filter = { $and: [
+    visibility,
+    supportOnly ? { type: "SUPPORT", _id: { $in: migratedIds } } : { archivedBy: archived ? req.auth!.userId : { $ne: req.auth!.userId } },
+    ...(searchClause ? [searchClause] : []),
+  ] };
   const [data, total] = await Promise.all([
     Conversation.find(filter)
       .populate("participants", "publicId name avatarUrl avatarAttachmentId")

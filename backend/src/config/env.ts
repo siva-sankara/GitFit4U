@@ -27,6 +27,10 @@ const schema = z
       .default("development-refresh-secret-change-me-12345"),
     JWT_ACCESS_TTL: z.string().default("15m"),
     JWT_REFRESH_TTL: z.string().default("30d"),
+    AUTH_OTP_HMAC_SECRET: z
+      .string()
+      .min(32)
+      .default("development-auth-otp-secret-change-me-1234"),
     ATTENDANCE_QR_SECRET: z
       .string()
       .min(32)
@@ -60,6 +64,11 @@ const schema = z
       .regex(/^v\d+\.\d+$/)
       .default("v26.0"),
     WHATSAPP_DEFAULT_LANGUAGE: z.string().min(2).max(20).default("en_US"),
+    WHATSAPP_AUTH_TEMPLATE_NAME: z.preprocess(
+      (value) => value || undefined,
+      z.string().regex(/^[a-z0-9_]+$/).optional(),
+    ),
+    WHATSAPP_AUTH_TEMPLATE_LANGUAGE: z.string().min(2).max(20).default("en_US"),
     WHATSAPP_EMBEDDED_SIGNUP_CONFIG_ID: z.string().optional(),
     WHATSAPP_COEXISTENCE_ENABLED: z
       .enum(["true", "false"])
@@ -123,6 +132,7 @@ const schema = z
     for (const key of [
       "JWT_ACCESS_SECRET",
       "JWT_REFRESH_SECRET",
+      "AUTH_OTP_HMAC_SECRET",
       "ATTENDANCE_QR_SECRET",
     ] as const) {
       if (

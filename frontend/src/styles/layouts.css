@@ -326,7 +326,7 @@ td small { display: block; color: var(--text-muted); }
   .role-switcher,
   .topbar-avatar { display: none; }
   .topbar-actions .icon-btn:first-child { display: none; }
-  .workspace-content { padding: 0px 14px 26px; }
+  .workspace-content { padding: 0px 10px 10px; }
   .page-stack { gap: 20px; }
   .page-heading { align-items: flex-start; flex-direction: column; gap: 16px; }
   .page-heading h1 { font-size: 2.25rem; }

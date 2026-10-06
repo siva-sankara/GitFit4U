@@ -2,6 +2,7 @@ import { PageHeader } from "../../components/PageHeader";
 import { BackIconLink } from "../../components/BackIconControl";
 import { lazy, Suspense, useState } from "react";
 import { Link, Navigate, useLocation } from "react-router-dom";
+import { QrCode } from "lucide-react";
 import {
   AreaChart,
   Area,
@@ -42,6 +43,7 @@ import { SupportTicketsPage } from "../shared/SupportTicketsPage";
 import { ProfileHub } from "../user/ProfileHub";
 import { AttendancePage, StreakKpi } from "../user/AttendancePage";
 import { InvoiceDownload } from "../../components/InvoiceDownload";
+import { OwnerPaymentActions } from "../../components/OwnerPaymentActions";
 import { PromotionPlacement } from "../../components/PromotionPlacement";
 import { PromotionManagement } from "../promotions/PromotionManagement";
 import { RegisterGymPage } from "../public/RegisterGymPage";
@@ -139,12 +141,25 @@ const subscriptionCols = [
   col("gymId.name", "Gym"),
   col("userId.name", "Member"),
   col("planSnapshot.name", "Plan"),
-  { ...col("startsAt", "Start"), render: (row: Row) => membershipDate(row.startsAt, row.gymId?.timezone) },
-  { ...col("endsAt", "End"), render: (row: Row) => membershipDate(row.endsAt, row.gymId?.timezone) },
+  {
+    ...col("startsAt", "Start"),
+    render: (row: Row) => membershipDate(row.startsAt, row.gymId?.timezone),
+  },
+  {
+    ...col("endsAt", "End"),
+    render: (row: Row) => membershipDate(row.endsAt, row.gymId?.timezone),
+  },
   status,
 ];
 function membershipDate(value?: string, timezone = "Asia/Kolkata") {
-  return value && Number.isFinite(Date.parse(value)) ? new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: timezone }).format(new Date(value)) : "—";
+  return value && Number.isFinite(Date.parse(value))
+    ? new Intl.DateTimeFormat("en-IN", {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+        timeZone: timezone,
+      }).format(new Date(value))
+    : "—";
 }
 const classCols = [
   name,
@@ -256,9 +271,67 @@ function Dashboard() {
             )}
           </section>
         )}
+        <div className="heading-actions">
+          {role === "USER" ? (
+            <>
+              <Link className="btn btn-primary" to="/app/attendance/qr">
+                <QrCode size={18} aria-hidden="true" />
+                Scan gym QR
+              </Link>
+              <Link
+                className="btn btn-secondary"
+                to="/app/profile?section=membership"
+              >
+                Memberships
+              </Link>
+              <Link className="btn btn-secondary" to="/app/explore">
+                Find a gym
+              </Link>
+              <Link className="btn btn-secondary" to="/app/classes">
+                Book a class
+              </Link>
+            </>
+          ) : role === "ADMIN" ? (
+            <Link className="btn btn-primary" to="/admin/registrations">
+              Review registrations
+            </Link>
+          ) : role === "TRAINER" ? (
+            <Link className="btn btn-primary" to="/trainer/workout-plans">
+              Manage workouts
+            </Link>
+          ) : (
+            <>
+              {permissions.includes("attendance:scan") && (
+                <Link className="btn btn-primary" to="/owner/scanner">
+                  View gym QR
+                </Link>
+              )}
+              {permissions.includes("member:read") && (
+                <Link className="btn btn-secondary" to="/owner/members">
+                  Manage members
+                </Link>
+              )}
+            </>
+          )}
+        </div>
         <section className="stat-grid">
           {Object.entries(data)
-            .filter(([key, v]) => typeof v === "number" && (role !== "USER" || ["activeSubscriptions", "unreadNotifications", "memberships", "activeMemberships", "bookings", "upcomingClasses", "attendance", "checkIns", "totalVisits"].includes(key)))
+            .filter(
+              ([key, v]) =>
+                typeof v === "number" &&
+                (role !== "USER" ||
+                  [
+                    "activeSubscriptions",
+                    "unreadNotifications",
+                    "memberships",
+                    "activeMemberships",
+                    "bookings",
+                    "upcomingClasses",
+                    "attendance",
+                    "checkIns",
+                    "totalVisits",
+                  ].includes(key)),
+            )
             .map(([key, value]) => (
               <article className="panel metric-tile" key={key}>
                 <span>{label(key.replace(/Minor$/, ""))}</span>
@@ -269,34 +342,42 @@ function Dashboard() {
             ))}
         </section>
       </QueryState>
-      {role === "USER" && <><StreakKpi /><PromotionPlacement placement="DASHBOARD" /></>}
+
+      {role === "USER" && (
+        <>
+          <StreakKpi />
+          <PromotionPlacement placement="DASHBOARD" />
+        </>
+      )}
       {canReadSummary && (
         <QueryState query={summary}>
-          <section className={`dashboard-chart-grid${role === "USER" ? " member-activity-chart" : ""}`}>
-            {role !== "USER" && <article className="panel chart-card">
-              <h2>
-                Gross captured payments
-              </h2>
-              <p>Last six months · INR</p>
-              {series?.revenue?.length ? (
-                <ResponsiveContainer width="100%" height={280}>
-                  <AreaChart
-                    data={series.revenue.map((v: Row) => ({
-                      ...v,
-                      amount: v.totalMinor / 100,
-                    }))}
-                  >
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="_id" />
-                    <YAxis />
-                    <Tooltip />
-                    <Area dataKey="amount" stroke="#65a30d" fill="#d9f99d" />
-                  </AreaChart>
-                </ResponsiveContainer>
-              ) : (
-                <p>No captured payments in this period.</p>
-              )}
-            </article>}
+          <section
+            className={`dashboard-chart-grid${role === "USER" ? " member-activity-chart" : ""}`}
+          >
+            {role !== "USER" && (
+              <article className="panel chart-card">
+                <h2>Gross captured payments</h2>
+                <p>Last six months · INR</p>
+                {series?.revenue?.length ? (
+                  <ResponsiveContainer width="100%" height={280}>
+                    <AreaChart
+                      data={series.revenue.map((v: Row) => ({
+                        ...v,
+                        amount: v.totalMinor / 100,
+                      }))}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="_id" />
+                      <YAxis />
+                      <Tooltip />
+                      <Area dataKey="amount" stroke="#65a30d" fill="#d9f99d" />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <p>No captured payments in this period.</p>
+                )}
+              </article>
+            )}
             <article className="panel chart-card">
               <h2>Daily check-ins</h2>
               <p>Last six months</p>
@@ -316,42 +397,6 @@ function Dashboard() {
           </section>
         </QueryState>
       )}
-      <div className="heading-actions">
-        {role === "USER" ? (
-          <>
-            <Link className="btn btn-primary" to="/app/explore">
-              Find a gym
-            </Link>
-            <Link className="btn btn-secondary" to="/app/profile?section=membership">
-              Memberships and QR
-            </Link>
-            <Link className="btn btn-secondary" to="/app/classes">
-              Book a class
-            </Link>
-          </>
-        ) : role === "ADMIN" ? (
-          <Link className="btn btn-primary" to="/admin/registrations">
-            Review registrations
-          </Link>
-        ) : role === "TRAINER" ? (
-          <Link className="btn btn-primary" to="/trainer/workout-plans">
-            Manage workouts
-          </Link>
-        ) : (
-          <>
-            {permissions.includes("attendance:scan") && (
-              <Link className="btn btn-primary" to="/owner/scanner">
-                View gym QR
-              </Link>
-            )}
-            {permissions.includes("member:read") && (
-              <Link className="btn btn-secondary" to="/owner/members">
-                Manage members
-              </Link>
-            )}
-          </>
-        )}
-      </div>
     </div>
   );
 }
@@ -399,12 +444,7 @@ function Security() {
   );
 }
 function GymProfile() {
-  return (
-    <>
-      <GymProfileEditor classFields={classFields} planFields={planFields} />
-      <Security />
-    </>
-  );
+  return <GymProfileEditor classFields={classFields} planFields={planFields} />;
 }
 function Invoices() {
   const [invoice, setInvoice] = useState<Row | null>(null);
@@ -542,7 +582,20 @@ function TrainerClients() {
         title="Assigned clients"
         resource="members"
         columns={[
-          { ...col("userId.name", "Name"), render: row => <span className="member-identity-inline"><Avatar user={row.userId} name={row.contact?.name} src={row.contact?.avatarUrl} thumbnailSrc={row.contact?.avatarThumbnailUrl} /><span>{row.contact?.name || row.userId?.name || "Member"}</span></span> },
+          {
+            ...col("userId.name", "Name"),
+            render: (row) => (
+              <span className="member-identity-inline">
+                <Avatar
+                  user={row.userId}
+                  name={row.contact?.name}
+                  src={row.contact?.avatarUrl}
+                  thumbnailSrc={row.contact?.avatarThumbnailUrl}
+                />
+                <span>{row.contact?.name || row.userId?.name || "Member"}</span>
+              </span>
+            ),
+          },
           col("memberCode"),
           col("fitnessGoal", "Goal"),
           status,
@@ -686,11 +739,30 @@ export function LiveWorkspace() {
   if (page === "notifications") return <NotificationsApiPage />;
   if (page === "messages") return <MessagesPage />;
   if (page === "support") return <SupportTicketsPage />;
-  if (role === "app" && ["favorites", "payments", "invoices", "workouts", "subscriptions", "referrals"].includes(page)) {
-    const section = page === "invoices" ? "payments" : page === "subscriptions" ? "membership" : page;
+  if (
+    role === "app" &&
+    [
+      "favorites",
+      "payments",
+      "invoices",
+      "workouts",
+      "subscriptions",
+      "referrals",
+    ].includes(page)
+  ) {
+    const section =
+      page === "invoices"
+        ? "payments"
+        : page === "subscriptions"
+          ? "membership"
+          : page;
     return <Navigate to={`/app/profile?section=${section}`} replace />;
   }
-  if (["owner", "admin"].includes(role) && (page === "offers" || page === "ads")) return <PromotionManagement kind={page} admin={role === "admin"} />;
+  if (
+    ["owner", "admin"].includes(role) &&
+    (page === "offers" || page === "ads")
+  )
+    return <PromotionManagement kind={page} admin={role === "admin"} />;
   if (page === "security") return <Security />;
   if (role === "admin") {
     if (page === "settings") return <AdminSettings />;
@@ -733,7 +805,12 @@ export function LiveWorkspace() {
     if (page === "members") return <OwnerMembersPage />;
     if (page === "trainers") return <OwnerTrainersPage />;
   }
-  if (page === "profile" && !(role === "profile" ? path[1] : path[2]) && me.data?.data.context.role === "USER") return <ProfileHub security={<Security />} />;
+  if (
+    page === "profile" &&
+    !(role === "profile" ? path[1] : path[2]) &&
+    me.data?.data.context.role === "USER"
+  )
+    return <ProfileHub security={<Security />} />;
   if (page === "profile")
     return (
       <Suspense fallback={<p role="status">Loading profile…</p>}>
@@ -776,7 +853,26 @@ export function LiveWorkspace() {
         title="Attendance"
         resource="attendance"
         columns={[
-          { ...col("userId.name", "Member"), render: row => <span className="member-identity-inline"><Avatar user={row.userId} name={row.memberProfileId?.contact?.name} src={row.memberProfileId?.contact?.avatarUrl} thumbnailSrc={row.memberProfileId?.contact?.avatarThumbnailUrl} /><span>{row.memberProfileId?.contact?.name || row.userId?.name || "Member"}</span></span> },
+          {
+            ...col("userId.name", "Member"),
+            render: (row) => (
+              <span className="member-identity-inline">
+                <Avatar
+                  user={row.userId}
+                  name={row.memberProfileId?.contact?.name}
+                  src={row.memberProfileId?.contact?.avatarUrl}
+                  thumbnailSrc={
+                    row.memberProfileId?.contact?.avatarThumbnailUrl
+                  }
+                />
+                <span>
+                  {row.memberProfileId?.contact?.name ||
+                    row.userId?.name ||
+                    "Member"}
+                </span>
+              </span>
+            ),
+          },
           col("gymId.name", "Gym"),
           col("occurredAt", "Time", "date"),
           col("localDate", "Gym date"),
@@ -848,13 +944,32 @@ export function LiveWorkspace() {
         resource={page}
         actions={
           page === "payments"
-            ? (row) => <><InvoiceDownload payment={row as { publicId: string; status: string }} />{role === "admin" && <RefundAction payment={row} />}</>
+            ? (row) => (
+                <>
+                  {role === "owner" ? (
+                    <OwnerPaymentActions payment={row} />
+                  ) : (
+                    <InvoiceDownload
+                      payment={row as { publicId: string; status: string }}
+                    />
+                  )}
+                  {role === "admin" && <RefundAction payment={row} />}
+                </>
+              )
             : undefined
         }
         columns={
           page === "payments"
             ? role === "owner"
-              ? [...paymentCols.slice(1, -1), { ...created, render: (row: Row) => membershipDate(row.createdAt, row.gymId?.timezone) }, paymentCols[0]]
+              ? [
+                  ...paymentCols.slice(1, -1),
+                  {
+                    ...created,
+                    render: (row: Row) =>
+                      membershipDate(row.createdAt, row.gymId?.timezone),
+                  },
+                  paymentCols[0],
+                ]
               : paymentCols
             : [
                 col("publicId", "Reference"),
@@ -872,7 +987,9 @@ export function LiveWorkspace() {
         title="Subscriptions"
         resource="subscriptions"
         actions={
-          role === "owner" && me.data?.data.context.role === "GYM_OWNER" && can("member:write")
+          role === "owner" &&
+          me.data?.data.context.role === "GYM_OWNER" &&
+          can("member:write")
             ? (row) => <MembershipActions row={row} />
             : undefined
         }

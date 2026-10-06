@@ -8,6 +8,7 @@
 | `MONGO_URI` | Yes | MongoDB replica-set connection in production |
 | `CLIENT_ORIGIN` | Yes | Comma-separated CORS allowlist |
 | `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET` | Yes | Independent strong signing secrets |
+| `AUTH_OTP_HMAC_SECRET` | Yes | Independent server-only HMAC key for WhatsApp OTP and abuse identifiers; at least 48 random characters in production |
 | `JWT_ACCESS_TTL`, `JWT_REFRESH_TTL` | Yes | Token lifetimes |
 | `COOKIE_DOMAIN` | Optional | Leave unset for a host-only refresh cookie; never set a frontend domain on an unrelated API domain |
 | `REDIS_URL` | Jobs/scale | BullMQ and Socket.IO adapter |
@@ -22,6 +23,7 @@
 | `WHATSAPP_COEXISTENCE_ENABLED`, `WHATSAPP_COEXISTENCE_CONFIG_ID` | WhatsApp Coexistence | Feature flag (default false) and optional Embedded Signup v4 Business App onboarding configuration ID |
 | `WHATSAPP_CREDENTIAL_ENCRYPTION_KEY` | WhatsApp | Independent server-only key used to encrypt tenant access tokens at rest |
 | `WHATSAPP_API_VERSION`, `WHATSAPP_DEFAULT_LANGUAGE`, `WHATSAPP_WEBHOOK_RETENTION_DAYS`, `WHATSAPP_WORKER_ENABLED` | WhatsApp operations | Version pin, defaults, retention and dedicated-worker controls |
+| `WHATSAPP_AUTH_TEMPLATE_NAME`, `WHATSAPP_AUTH_TEMPLATE_LANGUAGE` | WhatsApp authentication | Approved platform `AUTHENTICATION` template name and exact language code for signup/login/recovery OTPs |
 | `OBJECT_STORAGE_ENDPOINT`, `OBJECT_STORAGE_BUCKET`, `OBJECT_STORAGE_ACCESS_KEY`, `OBJECT_STORAGE_SECRET_KEY`, `OBJECT_STORAGE_REGION` | Uploads | S3-compatible storage |
 | `LOG_LEVEL` | Yes | Structured log threshold |
 
@@ -30,4 +32,4 @@
 `VITE_API_URL`, `VITE_FIREBASE_*`, `VITE_RAZORPAY_KEY_ID`. Only public browser identifiers use the `VITE_` prefix; secrets never do. LocationIQ requests, including map tiles, go through the backend. The legacy Google Maps key entries are commented out; Google sign-in configuration is independent. See [LocationIQ setup](locationiq-integration.md).
 
 
-MSG91 OTP delivery also requires `MSG91_AUTH_KEY` and `MSG91_TEMPLATE_ID`. Payment checkout receives its public key from the backend order response. `VITE_API_URL` contains the backend origin; `CLIENT_ORIGIN` contains the allowed frontend origins. Credentialed cookies require appropriate HTTPS/domain settings. Redis configuration alone does not enable a distributed worker or Socket.IO adapter. See [Vercel production setup](vercel-production.md) for the current domain values.
+The legacy MSG91 adapter is not used by public authentication; signup, login OTP, recovery and verified phone changes use the platform WhatsApp sender. Payment checkout receives its public key from the backend order response. `VITE_API_URL` contains the backend origin; `CLIENT_ORIGIN` contains the allowed frontend origins. Credentialed cookies require appropriate HTTPS/domain settings. Redis configuration alone does not enable a distributed worker or Socket.IO adapter. See [Vercel production setup](vercel-production.md) for the current domain values.

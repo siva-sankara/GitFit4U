@@ -1,11 +1,11 @@
-import { initializeApp, getApps } from "firebase/app";
+import { initializeApp, getApps } from "@firebase/app";
 import {
   deleteToken,
   getMessaging,
   getToken,
   isSupported,
   onMessage,
-} from "firebase/messaging";
+} from "@firebase/messaging";
 import workerUrl from "../firebase-messaging-sw.ts?worker&url";
 import { firebaseConfig, firebaseConfigured } from "./firebaseConfig";
 import { apiRequest, getAccessToken } from "./apiClient";

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { Gym } from "../models/Gym.js";
 import { User } from "../models/User.js";
 import { MemberProfile } from "../models/Member.js";
-import { MembershipPlan, Subscription } from "../models/Commerce.js";
+import { MembershipPlan, Payment, Subscription } from "../models/Commerce.js";
 import { listMembers } from "./ownerController.js";
 vi.mock("../services/userMediaService.js", () => ({
   withUserMedia: vi.fn(async (rows) => rows),
@@ -17,10 +17,10 @@ function chain(value: unknown) {
   return result;
 }
 const response = () => ({ json: vi.fn() }) as any;
-const req = (query: object = {}) =>
+const req = (query: object = {}, permissions = ["member:read"]) =>
   ({
     query,
-    auth: { gymId, role: "GYM_OWNER", permissions: ["member:read"] },
+    auth: { gymId, role: "GYM_OWNER", permissions },
   }) as any;
 beforeEach(() => {
   vi.spyOn(Gym, "findById").mockReturnValue(
@@ -29,6 +29,7 @@ beforeEach(() => {
   vi.spyOn(MemberProfile, "find").mockReturnValue(chain([]));
   vi.spyOn(MemberProfile, "countDocuments").mockResolvedValue(0);
   vi.spyOn(Subscription, "distinct").mockResolvedValue(["subscription-id"]);
+  vi.spyOn(Payment, "distinct").mockResolvedValue(["payment-id"]);
   vi.spyOn(MembershipPlan, "findOne").mockReturnValue(
     chain({ _id: "507f1f77bcf86cd799439015", publicId: "gold-public" }),
   );
@@ -51,6 +52,7 @@ it("applies plan and trainer filters on the backend within the authorized gym", 
   });
   expect(MemberProfile.find).toHaveBeenCalledWith({
     gymId,
+    isDeleted: { $ne: true },
     assignedTrainerId: "507f1f77bcf86cd799439012",
     currentSubscriptionId: { $in: ["subscription-id"] },
   });
@@ -126,4 +128,38 @@ it("escapes search regex metacharacters so user input is a literal search", asyn
   const query = vi.mocked(User.distinct).mock.calls[0][1] as any;
   expect(query.$or[0].name.test("aZZb")).toBe(false);
   expect(query.$or[0].name.test("a.*(b)")).toBe(true);
+});
+it("applies finance-authorized payment and name sorting filters", async () => {
+  const membersQuery = chain([]);
+  vi.mocked(MemberProfile.find).mockReturnValue(membersQuery);
+  await listMembers(
+    req(
+      { paymentStatus: "DUE", sort: "NAME_ASC" },
+      ["member:read", "finance:read"],
+    ),
+    response(),
+  );
+  expect(Payment.distinct).toHaveBeenCalledWith("_id", {
+    gymId,
+    purpose: "MEMBERSHIP",
+    status: { $in: ["CREATED", "PENDING", "AUTHORIZED"] },
+  });
+  expect(Subscription.distinct).toHaveBeenCalledWith("_id", {
+    gymId,
+    type: "GYM_MEMBERSHIP",
+    $or: [
+      { status: "PENDING_PAYMENT" },
+      { latestPaymentId: { $in: ["payment-id"] } },
+    ],
+  });
+  expect(membersQuery.sort).toHaveBeenCalledWith({
+    "contact.name": 1,
+    _id: 1,
+  });
+});
+it("rejects payment filters when the actor cannot read finance data", async () => {
+  await expect(
+    listMembers(req({ paymentStatus: "DUE" }), response()),
+  ).rejects.toMatchObject({ statusCode: 403, code: "FINANCE_ACCESS_REQUIRED" });
+  expect(Payment.distinct).not.toHaveBeenCalled();
 });

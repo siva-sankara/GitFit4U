@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Archive, ArchiveRestore, MessageSquareText, RefreshCw, Send } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import { apiRequest, type ApiEnvelope } from "../services/apiClient";
 import "../styles/whatsapp.css";
+import { Pagination } from "./DataListControls";
 
 type Conversation = {
   publicId: string;
@@ -37,10 +38,15 @@ export function WhatsAppInbox() {
   const [text, setText] = useState("");
   const [templateKey, setTemplateKey] = useState("");
   const [archived, setArchived] = useState(false);
-  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1), [limit, setLimit] = useState(10);
+  const [searchDraft, setSearchDraft] = useState(""), [search, setSearch] = useState("");
+  useEffect(() => {
+    const timer = window.setTimeout(() => { setSearch(searchDraft.trim()); setPage(1); }, 350);
+    return () => window.clearTimeout(timer);
+  }, [searchDraft]);
   const conversations = useQuery({
-    queryKey: ["whatsapp-conversations", archived, search],
-    queryFn: () => apiRequest<ApiEnvelope<Conversation[]>>(`/api/v1/whatsapp/conversations?page=1&limit=50&archived=${archived}&q=${encodeURIComponent(search)}`),
+    queryKey: ["whatsapp-conversations", archived, search, page, limit],
+    queryFn: () => apiRequest<ApiEnvelope<Conversation[]>>(`/api/v1/whatsapp/conversations?page=${page}&limit=${limit}&archived=${archived}&q=${encodeURIComponent(search)}`),
     refetchInterval: 10_000,
   });
   const details = useQuery({
@@ -49,10 +55,12 @@ export function WhatsAppInbox() {
     queryFn: () => apiRequest<ApiEnvelope<Conversation>>(`/api/v1/whatsapp/conversations/${encodeURIComponent(active)}`),
     refetchInterval: 10_000,
   });
-  const messages = useQuery({
+  const messages = useInfiniteQuery({
     queryKey: ["whatsapp-messages", active],
     enabled: Boolean(active),
-    queryFn: () => apiRequest<ApiEnvelope<Message[]>>(`/api/v1/whatsapp/conversations/${encodeURIComponent(active)}/messages?limit=100`),
+    initialPageParam: "",
+    queryFn: ({ pageParam }) => apiRequest<ApiEnvelope<Message[]>>(`/api/v1/whatsapp/conversations/${encodeURIComponent(active)}/messages?limit=20${pageParam ? `&before=${encodeURIComponent(pageParam)}` : ""}`),
+    getNextPageParam: (last) => last.meta?.hasMore ? last.meta.nextCursor : undefined,
     refetchInterval: 5_000,
   });
   const templates = useQuery({
@@ -89,14 +97,16 @@ export function WhatsAppInbox() {
   const conversation = details.data?.data;
   const canText = Boolean(conversation?.serviceWindowOpen && !conversation.sender?.outboundPaused && conversation.sender?.status === "CONNECTED");
   const canTemplate = Boolean(templateKey && !conversation?.sender?.outboundPaused && conversation?.sender?.status === "CONNECTED");
+  const messageRows = messages.data?.pages.slice().reverse().flatMap((entry) => entry.data) || [];
   return <div className="whatsapp-inbox">
     <aside className={`whatsapp-conversation-list ${active ? "is-selected" : ""}`} aria-label="WhatsApp conversations">
       <div className="whatsapp-list-header"><div><h2>WhatsApp</h2><p>Business API inbox</p></div><button className="icon-button" aria-label="Refresh WhatsApp conversations" onClick={() => void conversations.refetch()}><RefreshCw size={18} /></button></div>
-      <div className="whatsapp-list-tools"><input className="input" type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search contacts" aria-label="Search WhatsApp contacts" /><label><input type="checkbox" checked={archived} onChange={(event) => setArchived(event.target.checked)} /> Archived</label></div>
+      <div className="whatsapp-list-tools"><input className="input" type="search" value={searchDraft} onChange={(event) => setSearchDraft(event.target.value)} placeholder="Search contacts" aria-label="Search WhatsApp contacts" /><label><input type="checkbox" checked={archived} onChange={(event) => { setArchived(event.target.checked); setPage(1); }} /> Archived</label></div>
       {conversations.isPending && <p role="status">Loading conversations…</p>}
       {conversations.isError && <p role="alert">{conversations.error.message}</p>}
       <div className="whatsapp-list-scroll">{conversations.data?.data.map((item) => <button key={item.publicId} className={`whatsapp-conversation-row ${active === item.publicId ? "active" : ""}`} onClick={() => select(item.publicId)}><span className="whatsapp-avatar"><MessageSquareText size={20} /></span><span><strong>{item.contactName || "WhatsApp contact"}</strong><small>{item.displayPhone || "Private number"}</small><small>{time(item.lastMessageAt)}</small></span>{item.unreadCount > 0 && <b aria-label={`${item.unreadCount} unread`}>{item.unreadCount}</b>}</button>)}</div>
       {conversations.data && !conversations.data.data.length && <p className="whatsapp-empty">No {archived ? "archived " : ""}WhatsApp conversations.</p>}
+      <Pagination page={page} limit={limit} total={conversations.data?.meta?.total || 0} loading={conversations.isFetching} onPageChange={setPage} onLimitChange={(value) => { setLimit(value); setPage(1); }} />
     </aside>
     <section className={`whatsapp-chat ${active ? "is-selected" : ""}`}>
       {!active ? <div className="whatsapp-empty-state"><MessageSquareText size={42} /><h2>Select a WhatsApp conversation</h2><p>Member-initiated messages and authorised business conversations appear here.</p></div> : <>
@@ -106,8 +116,9 @@ export function WhatsAppInbox() {
         <div className="whatsapp-message-history" aria-live="polite">
           {messages.isPending && <p role="status">Loading messages…</p>}
           {messages.isError && <p role="alert">{messages.error.message}</p>}
-          {messages.data?.data.map((message) => <article key={message.publicId} className={`whatsapp-bubble ${message.direction === "OUTBOUND" ? "outgoing" : "incoming"}`}><p>{message.contentType === "TEXT" ? message.text : message.template?.name ? `Template: ${message.template.name}` : `${message.contentType.toLowerCase()} message`}</p><footer><time>{time(message.createdAt)}</time>{message.direction === "OUTBOUND" && <span>{message.status.toLowerCase().replaceAll("_", " ")}</span>}</footer></article>)}
-          {messages.data && !messages.data.data.length && <p className="whatsapp-empty">No messages in this conversation yet.</p>}
+          {messages.hasNextPage && <button type="button" className="btn btn-secondary" disabled={messages.isFetchingNextPage} onClick={() => void messages.fetchNextPage()}>{messages.isFetchingNextPage ? "Loading…" : "Load earlier messages"}</button>}
+          {messageRows.map((message) => <article key={message.publicId} className={`whatsapp-bubble ${message.direction === "OUTBOUND" ? "outgoing" : "incoming"}`}><p>{message.contentType === "TEXT" ? message.text : message.template?.name ? `Template: ${message.template.name}` : `${message.contentType.toLowerCase()} message`}</p><footer><time>{time(message.createdAt)}</time>{message.direction === "OUTBOUND" && <span>{message.status.toLowerCase().replaceAll("_", " ")}</span>}</footer></article>)}
+          {messages.data && !messageRows.length && <p className="whatsapp-empty">No messages in this conversation yet.</p>}
         </div>
         <form className="whatsapp-composer" onSubmit={(event) => { event.preventDefault(); if ((text.trim() && canText) || canTemplate) send.mutate(); }}>
           {!templateKey && <textarea rows={1} maxLength={5000} aria-label="WhatsApp message" value={text} disabled={!canText || send.isPending} onChange={(event) => setText(event.target.value)} placeholder={canText ? "Write a WhatsApp reply" : "Choose an approved template"} />}

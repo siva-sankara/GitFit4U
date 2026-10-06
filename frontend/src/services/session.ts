@@ -1,9 +1,12 @@
-import { useQuery } from "@tanstack/react-query";
-import { useSyncExternalStore } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useSyncExternalStore } from "react";
 import {
   apiRequest,
   ApiError,
+  flushPendingLogout,
   getAccessToken,
+  hasPendingLogout,
+  hasPersistedSession,
   refreshSession,
   type ApiEnvelope,
 } from "./apiClient";
@@ -69,7 +72,8 @@ function subscribeToAuth(onChange: () => void) {
 
 export function useSession({
   publicPage = false,
-}: { publicPage?: boolean } = {}) {
+  recoverSession = false,
+}: { publicPage?: boolean; recoverSession?: boolean } = {}) {
   const token = useSyncExternalStore(
     subscribeToAuth,
     getAccessToken,
@@ -78,14 +82,54 @@ export function useSession({
   return useQuery({
     queryKey: ["me"],
     queryFn: readSession,
-    // Public browsing never probes refresh cookies for anonymous visitors.
-    enabled: !publicPage || Boolean(token),
-    retry: false,
-    retryOnMount: false,
+    // The non-secret durable hint lets auth entry screens recover a valid
+    // HttpOnly refresh cookie without probing for every anonymous visitor.
+    enabled: !publicPage || Boolean(token) || (recoverSession && hasPersistedSession()),
+    retry: (attempt, error) =>
+      attempt < 1 && error instanceof ApiError &&
+      (error.status === 0 || error.status === 429 || error.status >= 500),
+    retryOnMount: true,
     staleTime: 60_000,
-    refetchInterval: 240_000,
-    // Layouts and route guards share this result instead of checking on every navigation.
-    refetchOnMount: false,
-    refetchOnWindowFocus: true,
+    // Lifecycle reconciliation below replaces session keep-alive polling.
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: true,
   });
+}
+
+/** Revalidates an existing session after real browser/PWA resume boundaries. */
+export function useSessionLifecycle() {
+  const client = useQueryClient();
+  useEffect(() => {
+    let timer = 0;
+    const reconcile = () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(async () => {
+        if (document.visibilityState === "hidden") return;
+        if (hasPendingLogout()) {
+          try { await flushPendingLogout(); } catch { return; }
+          return;
+        }
+        if (!hasPersistedSession()) return;
+        const state = client.getQueryState(["me"]);
+        const lastSettled = Math.max(state?.dataUpdatedAt || 0, state?.errorUpdatedAt || 0);
+        if (Date.now() - lastSettled < 30_000) return;
+        await client.refetchQueries({ queryKey: ["me"], type: "active" });
+      }, 150);
+    };
+    const visible = () => {
+      if (document.visibilityState === "visible") reconcile();
+    };
+    reconcile();
+    window.addEventListener("pageshow", reconcile);
+    window.addEventListener("online", reconcile);
+    window.addEventListener("focus", reconcile);
+    document.addEventListener("visibilitychange", visible);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("pageshow", reconcile);
+      window.removeEventListener("online", reconcile);
+      window.removeEventListener("focus", reconcile);
+      document.removeEventListener("visibilitychange", visible);
+    };
+  }, [client]);
 }

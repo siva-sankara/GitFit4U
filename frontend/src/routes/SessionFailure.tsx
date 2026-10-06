@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { apiRequest, ApiError, setAccessToken } from "../services/apiClient";
+import { ApiError, logoutSession } from "../services/apiClient";
 
 function EndUnavailableSession() {
   const client = useQueryClient(),
@@ -11,11 +11,10 @@ function EndUnavailableSession() {
   async function signOut() {
     setBusy(true);
     setError("");
+    client.clear();
+    navigate("/login", { replace: true });
     try {
-      await apiRequest("/api/v1/auth/logout", { method: "POST" });
-      setAccessToken(null);
-      client.clear();
-      navigate("/login", { replace: true });
+      await logoutSession();
     } catch (failure) {
       setError(
         failure instanceof Error

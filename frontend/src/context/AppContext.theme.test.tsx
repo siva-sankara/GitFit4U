@@ -9,6 +9,7 @@ vi.mock("../services/apiClient", () => ({
 }));
 vi.mock("../services/session", () => ({
   useSession: () => ({ data: undefined }),
+  useSessionLifecycle: vi.fn(),
 }));
 import { AppProvider, useApp } from "./AppContext";
 function Appearance() {

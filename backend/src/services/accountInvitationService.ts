@@ -16,10 +16,21 @@ import { emitDomainEvent } from "./domainEventService.js";
 
 const EXPIRY_MS = 48 * 3600_000;
 export const invitationError = () => new AppError(400, "INVITATION_INVALID", "This invitation is expired, replaced or already used. Ask the gym to resend it.");
-export async function issueMemberInvitation(member: any, user: any, gym: any, session: ClientSession, now = new Date()) {
+export async function issueMemberInvitation(
+  member: any,
+  user: any,
+  gym: any,
+  session: ClientSession,
+  now = new Date(),
+  options: { includeActionUrl?: boolean; bypassCooldown?: boolean } = {},
+) {
   if (!user.email) throw new AppError(422, "INVITATION_EMAIL_REQUIRED", "An account email is required to send a secure invitation.");
   const existing = await AccountInvitation.findOne({ memberId: member._id }).session(session);
-  if (existing && now.getTime() - existing.lastQueuedAt.getTime() < 60_000)
+  if (
+    !options.bypassCooldown &&
+    existing &&
+    now.getTime() - existing.lastQueuedAt.getTime() < 60_000
+  )
     throw new AppError(429, "INVITATION_RATE_LIMITED", "Wait one minute before requesting another invitation.");
   if (existing?.consumedAt || member.invitation?.status === "ACCEPTED")
     throw new AppError(409, "INVITATION_ALREADY_ACCEPTED", "This member has already accepted their invitation.");
@@ -37,7 +48,12 @@ export async function issueMemberInvitation(member: any, user: any, gym: any, se
   await queueTransactionalEmail({ eventKey: `invitation:${publicId}:${revision}`, userId: user._id, entityId: invitation._id, kind: "INVITATION", revision, content: { to: user.email, ...emailTemplate(`Welcome to ${gym.name}`, `Your membership at ${gym.name} is ready to review. ${kind === "ACTIVATE" ? "Set your own password to activate your GETFIT4U account." : "Sign in to your existing GETFIT4U account and accept this gym invitation."}`, action, url, "This single-use invitation expires in 48 hours. If you were not expecting it, ignore this email or contact the gym. Opening the link does not activate your account.") } }, session);
   member.invitation = { status: "PENDING", kind, expiresAt, lastQueuedAt: now };
   await member.save({ session });
-  return { status: "PENDING", expiresAt, kind };
+  return {
+    status: "PENDING",
+    expiresAt,
+    kind,
+    ...(options.includeActionUrl ? { actionUrl: url } : {}),
+  };
 }
 
 export async function acceptMemberInvitation(input: { token: string; password?: string; userId?: string }, now = new Date()) {

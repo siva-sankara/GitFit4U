@@ -34,9 +34,13 @@ Origins use the scheme and hostname, with no route path. A trailing slash is
 normalized by the backend before CORS, CSRF, and Socket.IO consume the setting.
 
 Keep the existing production database and provider credentials in Vercel.
-Production requires independent `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, and
-`ATTENDANCE_QR_SECRET` values of at least 48 characters; development defaults are
-rejected. Do not copy secrets into this document or public frontend variables.
+Production requires independent `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`,
+`AUTH_OTP_HMAC_SECRET`, and `ATTENDANCE_QR_SECRET` values of at least 48
+characters; development defaults are rejected. WhatsApp OTP additionally needs
+the platform access token, WABA ID, phone-number ID, approved
+`WHATSAPP_AUTH_TEMPLATE_NAME`, and its exact
+`WHATSAPP_AUTH_TEMPLATE_LANGUAGE`. Do not copy secrets into this document or
+public frontend variables.
 
 Redeploy the backend after saving the variables. Use the public production
 domain for browser traffic. A Vercel login redirect or authentication challenge

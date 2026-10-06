@@ -4,6 +4,7 @@ import { env } from "../config/env.js";
 import { logger } from "../config/logger.js";
 import { RoleAssignment } from "../models/Auth.js";
 import { Campaign } from "../models/Engagement.js";
+import { MemberCommunication } from "../models/Communication.js";
 import { User } from "../models/User.js";
 import {
   WhatsAppConnection,
@@ -15,6 +16,7 @@ import {
 import { AppError } from "../utils/AppError.js";
 import { sha256 } from "../utils/crypto.js";
 import { emitDomainEvents } from "./domainEventService.js";
+import { recordOtpDeliveryStatus } from "./otpService.js";
 import {
   maskedWhatsAppPhone,
   normalizeWhatsAppRecipient,
@@ -374,6 +376,22 @@ async function processStatus(connection: any, statusEvent: any) {
         },
       },
     ),
+    MemberCommunication.updateOne(
+      { whatsappOutboxId: message.outboxId },
+      {
+        $set: {
+          status: nextStatus,
+          providerMessageId,
+          ...(failure
+            ? {
+                failureCode: String(
+                  failure.code || failure.title || "PROVIDER_FAILURE",
+                ).slice(0, 120),
+              }
+            : {}),
+        },
+      },
+    ),
   ]);
   const outbox = message.outboxId
     ? await WhatsAppOutbox.findById(message.outboxId).select("businessEvent businessEntityId").lean()
@@ -398,12 +416,23 @@ async function processReceiptPayload(payload: any) {
       const value = change.value || {};
       const phoneNumberId = String(value.metadata?.phone_number_id || "");
       const wabaId = String(entry.id || "");
+      const otpStatusMatches = await Promise.all(
+        (value.statuses || []).map((status: any) => {
+          const failure = Array.isArray(status.errors) ? status.errors[0] : undefined;
+          return recordOtpDeliveryStatus(
+            String(status.id || ""),
+            String(status.status || ""),
+            failure?.code ? String(failure.code) : undefined,
+          );
+        }),
+      );
       const connection = await WhatsAppConnection.findOne({
         phoneNumberId,
         wabaId,
         status: "CONNECTED",
       });
       if (!connection) {
+        if (otpStatusMatches.some(Boolean)) continue;
         logger.error({ phoneNumberId, wabaId }, "WhatsApp webhook did not match an isolated sender binding");
         continue;
       }

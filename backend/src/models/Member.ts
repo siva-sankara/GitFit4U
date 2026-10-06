@@ -39,6 +39,9 @@ const memberProfileSchema = new Schema(
     reactivatedAt: Date,
     reactivatedBy: { type: Schema.Types.ObjectId, ref: "User" },
     reactivationReason: String,
+    isDeleted: { type: Boolean, default: false, index: true },
+    deletedAt: Date,
+    deletedBy: { type: Schema.Types.ObjectId, ref: "User" },
     approvedAt: Date,
     approvedBy: { type: Schema.Types.ObjectId, ref: "User" },
     joinedAt: { type: Date, default: Date.now },
@@ -61,6 +64,7 @@ const memberProfileSchema = new Schema(
 memberProfileSchema.index({ gymId: 1, userId: 1 }, { unique: true });
 memberProfileSchema.index({ gymId: 1, memberCode: 1 }, { unique: true });
 memberProfileSchema.index({ gymId: 1, status: 1, createdAt: -1 });
+memberProfileSchema.index({ gymId: 1, isDeleted: 1, status: 1, joinedAt: -1 });
 memberProfileSchema.index({ "contact.avatarAttachmentId": 1 });
 memberProfileSchema.index({ gymId: 1, assignedTrainerId: 1, createdAt: -1 });
 memberProfileSchema.index({ gymId: 1, currentSubscriptionId: 1 });

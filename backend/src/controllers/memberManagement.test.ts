@@ -1,10 +1,15 @@
-import { describe, expect, it } from "vitest";
-import { offlinePlanQuote, memberInputDate } from "./memberManagementController.js";
+import mongoose from "mongoose";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { MemberProfile } from "../models/Member.js";
+import { Subscription } from "../models/Commerce.js";
+vi.mock("../services/auditService.js", () => ({ writeAudit: vi.fn() }));
+import { deleteMember, offlinePlanQuote, memberInputDate } from "./memberManagementController.js";
 import {
   ownerMemberCreateInput,
   ownerTrainerInput,
   ownerMemberUpdateInput,
 } from "../routes/memberManagementSchemas.js";
+afterEach(() => vi.restoreAllMocks());
 describe("owner member creation contract", () => {
   it("interprets calendar dates in the gym timezone and preserves legacy explicit instants", () => {
     expect(memberInputDate("2026-09-27", "America/New_York").toISOString()).toBe("2026-09-27T04:00:00.000Z");
@@ -69,5 +74,51 @@ describe("owner member creation contract", () => {
         availability: [{ day: 1, from: "18:00", to: "09:00" }],
       }).success,
     ).toBe(false);
+  });
+});
+
+describe("owner member removal", () => {
+  it("soft deletes only a deactivated tenant member and keeps historical records", async () => {
+    const member: any = {
+      publicId: "member-public",
+      status: "INACTIVE",
+      directAccess: false,
+      currentSubscriptionId: null,
+      save: vi.fn(),
+    };
+    vi.spyOn(mongoose.connection, "transaction").mockImplementation(async (work: any) => work({}));
+    vi.spyOn(MemberProfile, "findOne").mockReturnValue({ session: vi.fn().mockResolvedValue(member) } as any);
+    vi.spyOn(Subscription, "exists").mockReturnValue({ session: vi.fn().mockResolvedValue(false) } as any);
+    const req: any = {
+      auth: { gymId: "507f1f77bcf86cd799439012", userId: "507f1f77bcf86cd799439011" },
+      params: { id: "member-public" },
+      requestId: "request-id",
+      header: vi.fn(),
+    };
+    const res: any = { json: vi.fn() };
+    await deleteMember(req, res);
+    expect(member.status).toBe("ARCHIVED");
+    expect(member.isDeleted).toBe(true);
+    expect(member.deletedAt).toBeInstanceOf(Date);
+    expect(member.save).toHaveBeenCalledWith({ session: {} });
+    expect(res.json).toHaveBeenCalledWith({
+      success: true,
+      data: expect.objectContaining({ publicId: "member-public" }),
+    });
+  });
+
+  it("refuses to delete an active member", async () => {
+    vi.spyOn(mongoose.connection, "transaction").mockImplementation(async (work: any) => work({}));
+    vi.spyOn(MemberProfile, "findOne").mockReturnValue({
+      session: vi.fn().mockResolvedValue({ status: "ACTIVE" }),
+    } as any);
+    const req: any = {
+      auth: { gymId: "507f1f77bcf86cd799439012", userId: "507f1f77bcf86cd799439011" },
+      params: { id: "member-public" },
+    };
+    await expect(deleteMember(req, { json: vi.fn() } as any)).rejects.toMatchObject({
+      code: "MEMBER_DEACTIVATION_REQUIRED",
+      statusCode: 409,
+    });
   });
 });

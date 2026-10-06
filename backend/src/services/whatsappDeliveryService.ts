@@ -9,6 +9,7 @@ import {
 import { MemberProfile } from "../models/Member.js";
 import { User } from "../models/User.js";
 import { Campaign } from "../models/Engagement.js";
+import { MemberCommunication } from "../models/Communication.js";
 import {
   WhatsAppConnection,
   WhatsAppConsent,
@@ -36,6 +37,9 @@ export const whatsappEventMatrix = {
   "invoice.ready": { scope: "GYM", template: "gfu_invoice_available" },
   "membership.renewed": { scope: "GYM", template: "gfu_membership_renewed" },
   "membership.renewal_reminder": { scope: "GYM", template: "gfu_membership_renewal_reminder" },
+  "member.activation_invitation": { scope: "GYM", template: "gfu_member_invitation" },
+  "membership.payment_reminder": { scope: "GYM", template: "gfu_payment_reminder" },
+  "member.general_followup": { scope: "GYM", template: "gfu_member_followup" },
   "class.booked": { scope: "GYM", template: "gfu_class_booking_confirmed" },
   "class.cancelled": { scope: "GYM", template: "gfu_class_cancelled" },
   "class.updated": { scope: "GYM", template: "gfu_class_updated" },
@@ -133,9 +137,24 @@ export async function enqueueWhatsAppDomainEvent(
     const connection = await WhatsAppConnection.findOne({
       bindingKey: bindingKey(scope, input.gymId ? String(input.gymId) : undefined),
       status: "CONNECTED",
+      outboundPaused: false,
     }).session(input.session || null);
     if (!connection) return;
     if (connection.eventPreferences?.disabledEvents?.includes(input.event)) return;
+    const approvedTemplate = await WhatsAppTemplate.findOne({
+      connectionId: connection._id,
+      name: configured.template,
+      language: env.WHATSAPP_DEFAULT_LANGUAGE,
+      status: "APPROVED",
+    })
+      .select("components")
+      .session(input.session || null)
+      .lean();
+    if (
+      !approvedTemplate ||
+      JSON.stringify(approvedTemplate.components || []).includes("{{")
+    )
+      return;
     const phoneHash = sha256(phone);
     const consent = await WhatsAppConsent.findOne({
       connectionId: connection._id,
@@ -439,11 +458,13 @@ export async function listWhatsAppMessages(
         { createdAt: cursor.createdAt, _id: { $lt: cursor._id } },
       ];
   }
-  return WhatsAppMessage.find(filter)
+  const rows = await WhatsAppMessage.find(filter)
     .sort({ createdAt: -1, _id: -1 })
-    .limit(input.limit)
-    .lean()
-    .then((rows) => rows.reverse());
+    .limit(input.limit + 1)
+    .lean();
+  const hasMore = rows.length > input.limit;
+  const page = rows.slice(0, input.limit).reverse();
+  return { rows: page, hasMore, nextCursor: hasMore ? page[0]?.publicId : undefined };
 }
 
 export async function queueWhatsAppConversationMessage(
@@ -914,6 +935,15 @@ export async function processWhatsAppOutbox(limit = 10) {
               $unset: { leaseId: 1, leaseUntil: 1 },
             }),
             WhatsAppMessage.updateOne({ outboxId: outbox._id }, { $set: { status } }),
+            MemberCommunication.updateOne(
+              { whatsappOutboxId: outbox._id },
+              {
+                $set: {
+                  status: "SUPPRESSED",
+                  failureCode: policy.reason,
+                },
+              },
+            ),
           ]);
         }
         continue;
@@ -952,6 +982,15 @@ export async function processWhatsAppOutbox(limit = 10) {
         WhatsAppConversation.updateOne(
           { _id: outbox.conversationId },
           { $set: { lastOutboundAt: acceptedAt, lastMessageAt: acceptedAt } },
+        ),
+        MemberCommunication.updateOne(
+          { whatsappOutboxId: outbox._id },
+          {
+            $set: {
+              status: "ACCEPTED",
+              providerMessageId: result.providerMessageId,
+            },
+          },
         ),
       ]);
       logger.info(
@@ -992,6 +1031,18 @@ export async function processWhatsAppOutbox(limit = 10) {
               errorCategory: providerFailure?.category || (error as any)?.code || "INTERNAL_FAILURE",
               providerErrorCode: providerFailure?.providerCode,
               failedAt: retry ? undefined : new Date(),
+            },
+          },
+        ),
+        MemberCommunication.updateOne(
+          { whatsappOutboxId: outbox._id },
+          {
+            $set: {
+              status: status === "QUEUED" ? "QUEUED" : "FAILED",
+              failureCode:
+                providerFailure?.category ||
+                (error as any)?.code ||
+                "INTERNAL_FAILURE",
             },
           },
         ),

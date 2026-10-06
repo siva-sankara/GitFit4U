@@ -11,6 +11,7 @@ const state = vi.hoisted(() => ({
   error: false,
   read: vi.fn(),
   readAll: vi.fn(),
+  unread: vi.fn(),
   refetch: vi.fn(),
   query: vi.fn(),
   remove: vi.fn(),
@@ -22,7 +23,7 @@ vi.mock("../../api/hooks", () => ({
   useNotifications: (page: number, category: string) => {
     state.query(page, category);
     return {
-      data: { data: state.rows, meta: { pages: 2, total: state.rows.length } },
+      data: { data: state.rows, meta: { pages: state.rows.length ? 2 : 1, total: state.rows.length ? 20 : 0 } },
       isLoading: state.loading,
       isFetching: state.loading,
       isError: state.error,
@@ -37,6 +38,11 @@ vi.mock("../../api/hooks", () => ({
   }),
   useReadAllNotifications: () => ({
     mutate: state.readAll,
+    isPending: false,
+    isError: false,
+  }),
+  useUnreadNotification: () => ({
+    mutate: state.unread,
     isPending: false,
     isError: false,
   }),

@@ -20,7 +20,7 @@ export function parseIndianMobile(value: string): string | undefined {
 export const signupSchema = z.object({
   name: z.string().trim().min(2, "Enter your full name").max(120),
   email: z.string().trim().toLowerCase().email("Enter a valid email address"),
-  phone: localMobileSchema,
+  phone: phoneSchema,
   role: z.enum(["USER", "GYM_OWNER"], { error: "Select your account type." }),
   password: passwordSchema,
   confirm: z.string()

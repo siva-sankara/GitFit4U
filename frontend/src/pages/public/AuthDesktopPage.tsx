@@ -6,7 +6,7 @@ import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { z } from "zod";
 import { Brand } from "../../components/Brand";
 import { PhoneInput } from "../../components/PhoneInput";
-import { BackIconLink } from "../../components/BackIconControl";
+import { BackIconButton, BackIconLink } from "../../components/BackIconControl";
 import { useApp } from "../../context/AppContext";
 import {
   apiRequest,
@@ -33,11 +33,13 @@ const otpForm = z.object({
 });
 type Challenge = {
   challengeId: string;
+  operationId?: string;
   phone: string;
-  purpose: "LOGIN" | "ACCOUNT_RECOVERY";
+  maskedPhone: string;
+  purpose: "SIGNUP" | "LOGIN" | "ACCOUNT_RECOVERY";
   expiresAt: number;
   resendAt: number;
-  devOtp?: string;
+  deliveryStatus: "SUBMITTED" | "SENT" | "DELIVERED" | "READ" | "FAILED";
 };
 type AuthResponse = ApiEnvelope<{
   accessToken: string;
@@ -69,8 +71,9 @@ export function AuthDesktopPage() {
       returnTo,
     );
   const signup = ["/register", "/auth/signup", "/auth/register"].includes(path),
+    signupOtp = path === "/auth/signup-otp",
     recovery = path === "/auth/recovery-otp";
-  const otpView = path === "/auth/otp" || recovery,
+  const otpView = path === "/auth/otp" || signupOtp || recovery,
     forgot = path === "/auth/forgot-password";
   const phoneView = path === "/auth/phone" || forgot,
     resetView = path === "/auth/reset-password",
@@ -118,19 +121,51 @@ export function AuthDesktopPage() {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, []);
-  function clearChallenge() {
+  useEffect(() => {
+    if (!otpView || !challenge?.challengeId) return;
+    let active = true;
+    const checkDelivery = async () => {
+      try {
+        const result = await apiRequest<
+          ApiEnvelope<{
+            deliveryStatus: Challenge["deliveryStatus"] | "EXPIRED";
+            expired: boolean;
+          }>
+        >(`/api/v1/auth/otp/${challenge.challengeId}/status`);
+        if (!active) return;
+        if (result.data.deliveryStatus === "FAILED") {
+          setChallenge((current) =>
+            current ? { ...current, deliveryStatus: "FAILED" } : current,
+          );
+          setError(
+            "WhatsApp could not deliver this verification message. Request a new code or use another login method.",
+          );
+        }
+      } catch {
+        // Status polling is advisory; verification and timers remain
+        // authoritative and transient polling failures must not block input.
+      }
+    };
+    void checkDelivery();
+    const timer = window.setInterval(checkDelivery, 5000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [otpView, challenge?.challengeId]);
+  function clearChallenge(resetState = true) {
     sessionStorage.removeItem("gfu_auth_challenge");
     sessionStorage.removeItem("gfu_challenge");
+    if (resetState) setChallenge(null);
   }
   function finish(response: AuthResponse, fromSignup = false) {
-    setAccessToken(null);
     setAccessToken(response.data.accessToken);
     setRole(
       response.data.user.activeRole === "GYM_STAFF"
         ? "GYM_OWNER"
         : response.data.user.activeRole,
     );
-    clearChallenge();
+    clearChallenge(false);
     sessionStorage.removeItem("gfu_reset");
     const next = fromSignup && response.data.user.activeRole === "GYM_OWNER" ? undefined : returnTo;
     navigate(loginDestination(response.data.user, next), {
@@ -162,8 +197,10 @@ export function AuthDesktopPage() {
       const r = await apiRequest<
         ApiEnvelope<{
           challengeId: string;
+          maskedPhone: string;
           expiresInSeconds: number;
-          devOtp?: string;
+          resendInSeconds: number;
+          deliveryStatus: "SUBMITTED";
         }>
       >(
         purpose === "LOGIN"
@@ -173,17 +210,17 @@ export function AuthDesktopPage() {
           method: "POST",
           body: JSON.stringify({
             phone: number,
-            ...(purpose === "LOGIN" ? { purpose } : {}),
           }),
         },
       );
       const next: Challenge = {
         challengeId: r.data.challengeId,
         phone: number,
+        maskedPhone: r.data.maskedPhone,
         purpose,
         expiresAt: Date.now() + r.data.expiresInSeconds * 1000,
-        resendAt: Date.now() + 60_000,
-        ...(import.meta.env.DEV ? { devOtp: r.data.devOtp } : {}),
+        resendAt: Date.now() + r.data.resendInSeconds * 1000,
+        deliveryStatus: r.data.deliveryStatus,
       };
       setChallenge(next);
       sessionStorage.setItem("gfu_auth_challenge", JSON.stringify(next));
@@ -194,6 +231,46 @@ export function AuthDesktopPage() {
       );
     });
   }
+  async function resendSignupCode() {
+    await run(async () => {
+      const r = await apiRequest<
+        ApiEnvelope<{
+          challengeId: string;
+          operationId: string;
+          maskedPhone: string;
+          expiresInSeconds: number;
+          resendInSeconds: number;
+          deliveryStatus: "SUBMITTED";
+        }>
+      >("/api/v1/auth/signup/resend", {
+        method: "POST",
+        body: JSON.stringify({ operationId: challenge!.operationId }),
+      });
+      const next: Challenge = {
+        challengeId: r.data.challengeId,
+        operationId: r.data.operationId,
+        phone: challenge!.phone,
+        maskedPhone: r.data.maskedPhone,
+        purpose: "SIGNUP",
+        expiresAt: Date.now() + r.data.expiresInSeconds * 1000,
+        resendAt: Date.now() + r.data.resendInSeconds * 1000,
+        deliveryStatus: r.data.deliveryStatus,
+      };
+      setChallenge(next);
+      sessionStorage.setItem("gfu_auth_challenge", JSON.stringify(next));
+      otp.reset();
+    });
+  }
+  async function changeSignupNumber() {
+    await run(async () => {
+      await apiRequest("/api/v1/auth/signup/cancel", {
+        method: "POST",
+        body: JSON.stringify({ operationId: challenge!.operationId }),
+      });
+      clearChallenge();
+      navigate(authLink("/auth/signup"), { replace: true, state: location.state });
+    });
+  }
   const remaining = Math.max(
       0,
       Math.ceil(((challenge?.expiresAt || 0) - now) / 1000),
@@ -202,11 +279,18 @@ export function AuthDesktopPage() {
   if (
     otpView &&
     (!challenge ||
-      challenge.purpose !== (recovery ? "ACCOUNT_RECOVERY" : "LOGIN"))
+      challenge.purpose !==
+        (signupOtp ? "SIGNUP" : recovery ? "ACCOUNT_RECOVERY" : "LOGIN"))
   )
     return (
       <Navigate
-        to={authLink(recovery ? "/auth/forgot-password" : "/auth/phone")}
+        to={authLink(
+          signupOtp
+            ? "/auth/signup"
+            : recovery
+              ? "/auth/forgot-password"
+              : "/auth/phone",
+        )}
         replace
       />
     );
@@ -284,17 +368,34 @@ export function AuthDesktopPage() {
                 return;
               }
               return run(async () => {
-                const { confirm: _confirm, phone: mobile, ...details } = values;
-                finish(
-                  await apiRequest<AuthResponse>("/api/v1/auth/register", {
+                const { confirm: _confirm, ...details } = values;
+                const r = await apiRequest<
+                  ApiEnvelope<{
+                    challengeId: string;
+                    operationId: string;
+                    maskedPhone: string;
+                    expiresInSeconds: number;
+                    resendInSeconds: number;
+                    deliveryStatus: "SUBMITTED";
+                  }>
+                >("/api/v1/auth/register", {
                     method: "POST",
-                    body: JSON.stringify({
-                      ...details,
-                      phone: `+91${mobile}`,
-                    }),
-                  }),
-                  true,
-                );
+                    body: JSON.stringify(details),
+                  });
+                const next: Challenge = {
+                  challengeId: r.data.challengeId,
+                  operationId: r.data.operationId,
+                  phone: values.phone,
+                  maskedPhone: r.data.maskedPhone,
+                  purpose: "SIGNUP",
+                  expiresAt: Date.now() + r.data.expiresInSeconds * 1000,
+                  resendAt: Date.now() + r.data.resendInSeconds * 1000,
+                  deliveryStatus: r.data.deliveryStatus,
+                };
+                setChallenge(next);
+                sessionStorage.setItem("gfu_auth_challenge", JSON.stringify(next));
+                otp.reset();
+                navigate(authLink("/auth/signup-otp"), { state: location.state });
               });
             })}
           >
@@ -334,15 +435,15 @@ export function AuthDesktopPage() {
               <span>Mobile number</span>
               <Controller name="phone" control={registration.control} render={({ field }) =>
                 <PhoneInput name={field.name} ref={field.ref} value={field.value} onBlur={field.onBlur}
-                  allowInternational={false} valueFormat="local" required
-                  aria-label="Mobile number, India +91" aria-invalid={Boolean(registration.formState.errors.phone)} aria-describedby="signup-phone-error"
+                  required
+                  aria-label="WhatsApp mobile number" aria-invalid={Boolean(registration.formState.errors.phone)} aria-describedby="signup-phone-error"
                   onValidityChange={invalid => { invalidPhoneInput.current = invalid; }}
                   onValueChange={value => { registration.clearErrors("phone"); field.onChange(value); }} />
               } />
               <small id="signup-phone-error" role={registration.formState.errors.phone ? "alert" : undefined}>{registration.formState.errors.phone?.message}</small>
             </label>
             <p className="auth-hint">
-              Use your 10-digit Indian mobile number for sign in and recovery.
+              India (+91) is selected by default. Choose another country format when needed. We will send a six-digit verification code to this WhatsApp number.
             </p>
             <label className="field">
               <span>Password</span>
@@ -369,7 +470,7 @@ export function AuthDesktopPage() {
               <small>{registration.formState.errors.confirm?.message}</small>
             </label>
             <button className="btn btn-primary auth-submit" disabled={busy}>
-              {busy ? "Creating account…" : "Create account"}
+              {busy ? "Submitting to WhatsApp…" : "Send WhatsApp OTP"}
             </button>
             <p className="auth-switch">
               Already have an account?{" "}
@@ -444,13 +545,25 @@ export function AuthDesktopPage() {
                   challengeId: challenge!.challengeId,
                   code: values.code,
                 });
-                if (recovery) {
+                if (signupOtp) {
+                  finish(
+                    await apiRequest<AuthResponse>("/api/v1/auth/signup/verify", {
+                      method: "POST",
+                      body: JSON.stringify({
+                        operationId: challenge!.operationId,
+                        challengeId: challenge!.challengeId,
+                        code: values.code,
+                      }),
+                    }),
+                    true,
+                  );
+                } else if (recovery) {
                   const r = await apiRequest<
                     ApiEnvelope<{ resetToken: string }>
                   >("/api/v1/auth/recovery/verify", { method: "POST", body });
                   setResetToken(r.data.resetToken);
                   sessionStorage.setItem("gfu_reset", r.data.resetToken);
-                  clearChallenge();
+                  clearChallenge(false);
                   navigate(authLink("/auth/reset-password"), { replace: true });
                 } else
                   finish(
@@ -462,21 +575,25 @@ export function AuthDesktopPage() {
               }),
             )}
           >
-            <BackIconLink
-              className="auth-step-back"
-              to={authLink(recovery ? "/auth/forgot-password" : "/auth/phone")}
-              label="Back to change phone number"
-            />
-            <h1>Check your phone</h1>
-            <p>
-              Enter the six-digit code for the number ending in{" "}
-              {challenge!.phone.slice(-4)}.
-            </p>
-            {import.meta.env.DEV && challenge?.devOtp && (
-              <p>
-                Development code: <strong>{challenge.devOtp}</strong>
-              </p>
+            {signupOtp ? (
+              <BackIconButton
+                className="auth-step-back"
+                onClick={changeSignupNumber}
+                disabled={busy}
+                label="Change phone number"
+              />
+            ) : (
+              <BackIconLink
+                className="auth-step-back"
+                to={authLink(recovery ? "/auth/forgot-password" : "/auth/phone")}
+                label="Back to change phone number"
+              />
             )}
+            <h1>Check WhatsApp</h1>
+            <p>
+              Enter the six-digit verification code sent to{" "}
+              <strong>{challenge!.maskedPhone}</strong>. Meta accepted the message for delivery; delivery may still fail and will be tracked by webhook.
+            </p>
             <label className="field">
               <span>Verification code</span>
               <input
@@ -497,18 +614,18 @@ export function AuthDesktopPage() {
               <button
                 type="button"
                 disabled={busy || resend > 0}
-                onClick={() =>
-                  requestCode(challenge!.phone, challenge!.purpose)
-                }
+                onClick={() => signupOtp
+                  ? resendSignupCode()
+                  : requestCode(challenge!.phone, challenge!.purpose)}
               >
-                {resend ? `Resend in ${resend}s` : "Resend code"}
+                {resend ? `Resend OTP in ${resend}s` : "Resend OTP"}
               </button>
             </div>
             <button
               className="btn btn-primary auth-submit"
-              disabled={busy || !remaining}
+              disabled={busy || !remaining || challenge!.deliveryStatus === "FAILED"}
             >
-              {busy ? "Verifying…" : "Verify code"}
+              {busy ? "Verifying…" : signupOtp ? "Verify and create account" : "Verify"}
             </button>
           </form>
         ) : phoneView ? (
@@ -531,7 +648,7 @@ export function AuthDesktopPage() {
             <p>
               {forgot
                 ? "Use the phone number saved on your account. Accounts without a phone number need support assistance."
-                : "Verify the mobile number on your existing account to sign in."}
+                : "Enter the WhatsApp number on your existing active account. GETFIT4U will send a six-digit code from its platform sender."}
             </p>
             <label className="field">
               <span>Phone number</span>
@@ -543,7 +660,7 @@ export function AuthDesktopPage() {
               <small>{phone.formState.errors.phone?.message}</small>
             </label>
             <button className="btn btn-primary auth-submit" disabled={busy}>
-              {busy ? "Requesting code…" : "Send verification code"}
+              {busy ? "Submitting to WhatsApp…" : "Send WhatsApp OTP"}
             </button>
             {forgot && (
               <Link className="auth-switch" to="/contact">
@@ -609,7 +726,7 @@ export function AuthDesktopPage() {
               to={authLink("/auth/phone")}
               state={location.state}
             >
-              Continue with phone OTP
+              Login with WhatsApp OTP
             </Link>
             <p className="auth-switch">
               New to GETFIT4U?{" "}

@@ -46,13 +46,15 @@ export async function updateProfile(req: Request, res: Response) {
 }
 
 export async function subscriptions(req: Request, res: Response) {
-  const data = await Subscription.find({
+  const { page, limit, skip } = paginationFromQuery(req.query);
+  const filter = {
     userId: req.auth!.userId,
     type: "GYM_MEMBERSHIP",
-  })
+  };
+  const [data, total] = await Promise.all([Subscription.find(filter)
     .populate("gymId", "publicId name slug logoUrl logoAttachmentId address")
     .sort({ createdAt: -1 })
-    .lean();
+    .skip(skip).limit(limit).lean(), Subscription.countDocuments(filter)]);
   const gyms = await withGymMedia(
     data.map((subscription) => subscription.gymId).filter(Boolean),
   );
@@ -64,7 +66,7 @@ export async function subscriptions(req: Request, res: Response) {
         gyms.find(
           (gym) => String(gym._id) === String(subscription.gymId?._id),
         ) || subscription.gymId,
-    })),
+    })), meta: pageMeta(page, limit, total),
   });
 }
 
@@ -94,10 +96,13 @@ export async function subscriptionDetails(req: Request, res: Response) {
 }
 
 export async function payments(req: Request, res: Response) {
-  const data = await Payment.find({ payerId: req.auth!.userId })
-    .sort({ createdAt: -1 })
-    .lean();
-  res.json({ success: true, data });
+  const { page, limit, skip } = paginationFromQuery(req.query);
+  const filter = { payerId: req.auth!.userId };
+  const [data, total] = await Promise.all([
+    Payment.find(filter).sort({ createdAt: -1, _id: -1 }).skip(skip).limit(limit).lean(),
+    Payment.countDocuments(filter),
+  ]);
+  res.json({ success: true, data, meta: pageMeta(page, limit, total) });
 }
 
 export async function attendance(req: Request, res: Response) {
@@ -181,6 +186,21 @@ export async function markNotificationRead(req: Request, res: Response) {
   const notification = await Notification.findOneAndUpdate(
     { _id: req.params.id, userId: req.auth!.userId, archivedAt: null },
     { readAt: new Date() },
+    { returnDocument: "after" },
+  ).lean();
+  if (!notification)
+    throw new AppError(
+      404,
+      "NOTIFICATION_NOT_FOUND",
+      "Notification not found.",
+    );
+  res.json({ success: true, data: (await withNotificationLinks([notification]))[0] });
+}
+
+export async function markNotificationUnread(req: Request, res: Response) {
+  const notification = await Notification.findOneAndUpdate(
+    { _id: req.params.id, userId: req.auth!.userId, archivedAt: null },
+    { $set: { readAt: null } },
     { returnDocument: "after" },
   ).lean();
   if (!notification)

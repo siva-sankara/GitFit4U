@@ -117,3 +117,46 @@ it("honors external cancellation without clearing auth or replaying the request"
   await expect(pending).rejects.toMatchObject({ code:"NETWORK_ERROR", message:expect.stringContaining("cancelled") });
   expect(api.getAccessToken()).toBe("old-access"); expect(fetcher).toHaveBeenCalledOnce();
 });
+
+it("keeps a non-secret recovery hint while authenticated and removes it on definitive sign-out", () => {
+  expect(api.hasPersistedSession()).toBe(true);
+  expect(localStorage.getItem("gfu-has-session")).toBe("1");
+  api.setAccessToken(null);
+  expect(api.hasPersistedSession()).toBe(false);
+  expect(localStorage.getItem("gfu-has-session")).toBeNull();
+});
+
+it("stays locally signed out after an offline logout and retries cookie revocation later", async () => {
+  fetcher.mockRejectedValueOnce(new TypeError("offline"));
+  await expect(api.logoutSession()).rejects.toMatchObject({ code: "NETWORK_ERROR" });
+  expect(api.getAccessToken()).toBeNull();
+  expect(api.hasPersistedSession()).toBe(false);
+  expect(api.hasPendingLogout()).toBe(true);
+  fetcher.mockResolvedValueOnce(new Response(null, { status: 204 }));
+  await api.flushPendingLogout();
+  expect(api.hasPendingLogout()).toBe(false);
+});
+
+it("blocks cookie recovery while an explicit logout is pending", async () => {
+  fetcher.mockRejectedValueOnce(new TypeError("offline"));
+  await expect(api.logoutSession()).rejects.toMatchObject({ code: "NETWORK_ERROR" });
+  fetcher.mockResolvedValueOnce(new Response(null, { status: 204 }));
+  await expect(api.refreshSession()).rejects.toMatchObject({ code: "LOGOUT_PENDING" });
+  expect(api.getAccessToken()).toBeNull();
+  expect(api.hasPendingLogout()).toBe(false);
+});
+
+it("emits structured session diagnostics without credentials", async () => {
+  const events: unknown[] = [];
+  const observe = (event: Event) => events.push((event as CustomEvent).detail);
+  window.addEventListener("gfu-session-diagnostic", observe);
+  fetcher.mockResolvedValue(ok({ accessToken: "new-access" }));
+  await api.refreshSession();
+  window.removeEventListener("gfu-session-diagnostic", observe);
+  expect(events).toEqual(expect.arrayContaining([
+    expect.objectContaining({ event: "refresh_started", online: expect.any(Boolean) }),
+    expect.objectContaining({ event: "refresh_succeeded" }),
+  ]));
+  expect(JSON.stringify(events)).not.toContain("old-access");
+  expect(JSON.stringify(events)).not.toContain("new-access");
+});

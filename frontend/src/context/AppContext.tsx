@@ -12,7 +12,7 @@ import {
   type ApiEnvelope,
 } from "../services/apiClient";
 import type { Role } from "../types";
-import { useSession } from "../services/session";
+import { useSession, useSessionLifecycle } from "../services/session";
 import { safeReturnTo } from "../services/authRedirect";
 import {
   savedTheme,
@@ -42,6 +42,7 @@ interface AppContextValue {
 }
 const AppContext = createContext<AppContextValue | null>(null);
 export function AppProvider({ children }: { children: ReactNode }) {
+  useSessionLifecycle();
   const client = useQueryClient(),
     [role, setRole] = useState<Role>("USER"),
     [themePreference, updateTheme] = useState<ThemePreference>(savedTheme),
@@ -306,4 +307,7 @@ export function useApp() {
   const context = useContext(AppContext);
   if (!context) throw new Error("useApp must be used inside AppProvider");
   return context;
+}
+export function useOptionalApp() {
+  return useContext(AppContext);
 }

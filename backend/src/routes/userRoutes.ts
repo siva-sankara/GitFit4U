@@ -49,6 +49,7 @@ userRoutes.get("/me/notifications/:id", notificationDetails);
 userRoutes.delete("/me/notifications", deleteNotifications);
 userRoutes.delete("/me/notifications/:id", deleteNotifications);
 userRoutes.post("/me/notifications/:id/read", controller.markNotificationRead);
+userRoutes.post("/me/notifications/:id/unread", controller.markNotificationUnread);
 userRoutes.post(
   "/me/notifications/read-all",
   controller.markAllNotificationsRead,

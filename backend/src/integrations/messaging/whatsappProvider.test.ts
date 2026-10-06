@@ -58,4 +58,45 @@ describe("WhatsAppProvider Embedded Signup exchange", () => {
     expect(firstRequest.searchParams.get("redirect_uri")).toBe("");
     expect(retryRequest.searchParams.has("redirect_uri")).toBe(false);
   });
+
+  it("sends an authentication template with matching body and Copy Code parameters", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: vi.fn().mockResolvedValue({ messages: [{ id: "wamid.authentication" }] }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      new WhatsAppProvider().sendAuthenticationCode({
+        token: "platform-token",
+        phoneNumberId: "phone-number-id",
+        to: "919876543210",
+        template: "getfit4u_verification_code",
+        language: "en_US",
+        code: "123456",
+      }),
+    ).resolves.toMatchObject({ providerMessageId: "wamid.authentication" });
+
+    const [, options] = fetchMock.mock.calls[0];
+    const body = JSON.parse(String(options.body));
+    expect(body).toMatchObject({
+      messaging_product: "whatsapp",
+      to: "919876543210",
+      type: "template",
+      template: {
+        name: "getfit4u_verification_code",
+        language: { code: "en_US" },
+        components: [
+          { type: "body", parameters: [{ type: "text", text: "123456" }] },
+          {
+            type: "button",
+            sub_type: "url",
+            index: "0",
+            parameters: [{ type: "text", text: "123456" }],
+          },
+        ],
+      },
+    });
+  });
 });

@@ -136,24 +136,9 @@
   position: relative;
   isolation: isolate;
 }
-.workspace-content > :not(.gym-watermark) {
+.workspace-content > * {
   position: relative;
   z-index: 1;
-}
-.gym-watermark {
-  position: fixed;
-  right: 4vw;
-  top: 30vh;
-  width: min(48vw, 550px);
-  height: min(48vw, 550px);
-  object-fit: contain;
-  opacity: 0.025;
-  pointer-events: none;
-  user-select: none;
-  z-index: 0;
-}
-[data-theme="dark"] .gym-watermark {
-  opacity: 0.035;
 }
 .gd-heading .gym-identity-logo {
   width: 54px;
@@ -380,11 +365,6 @@
   }
   .revenue-chart {
     height: 240px;
-  }
-  .gym-watermark {
-    width: 75vw;
-    height: 75vw;
-    right: 0;
   }
 }
 @media (max-width: 420px) {

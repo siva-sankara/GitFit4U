@@ -88,24 +88,22 @@ async function render(path: string) {
     });
   expect(ready()).toBe(true);
 }
-it("restores owner member membership, visits, payment and join columns from API records", async () => {
+it("renders the owner member directory columns, actions and working row selection", async () => {
   await render("/owner/members");
   expect(
     [...host.querySelectorAll("th")].map((cell) => cell.textContent),
   ).toEqual([
+    "",
     "Member",
-    "Member code",
-    "Phone",
-    "Membership",
-    "Expires",
-    "Visits (30 days)",
-    "Payment",
-    "Joined",
+    "Trainer",
+    "Contact",
+    "Plan / Access",
+    "Attendance",
     "Actions",
+    "Join / Renewal",
   ]);
   expect(host.textContent).toContain("Member One");
-  expect(host.textContent).toContain("Captured");
-  expect(host.textContent).toContain("Trainer: Not assigned");
+  expect(host.textContent).toContain("Not assigned");
   expect(
     host.querySelector(
       'button[aria-label="Membership status: Active. Monthly"]',
@@ -120,18 +118,24 @@ it("restores owner member membership, visits, payment and join columns from API 
   expect(
     host.querySelector('a[href="/owner/members/member-public"]'),
   ).not.toBeNull();
-  expect(host.querySelector('a[aria-label^="Call "]')).not.toBeNull();
-  expect(host.querySelector('button[aria-label^="Message "]')).not.toBeNull();
+  expect(host.querySelector('a[aria-label^="Call member "]')).not.toBeNull();
+  expect(host.querySelector('button[aria-label^="Open in-app chat "]')).not.toBeNull();
+  expect(host.querySelector('button[aria-label^="Send WhatsApp reminder "]')).not.toBeNull();
+  expect(host.querySelector('summary[aria-label^="More actions "]')).not.toBeNull();
+  expect(host.querySelector('a[href="/owner/members/member-public#member-attendance"]')).toBeNull();
+  expect(host.querySelector('a[href="/owner/members/member-public#member-payments"]')).not.toBeNull();
+  const selection = host.querySelector<HTMLInputElement>('[aria-label="Select Member One"]')!;
+  await act(async () => selection.click());
+  expect(selection.closest("tr")?.getAttribute("aria-selected")).toBe("true");
+  expect(host.textContent).toContain("1 selected");
 });
-it("omits the finance column for restricted staff", async () => {
+it("omits payment actions for staff without finance access", async () => {
   mocks.role = "GYM_STAFF";
   mocks.permissions = ["member:read"];
   await render("/owner/members");
   expect(
-    [...host.querySelectorAll("th")].some(
-      (cell) => cell.textContent === "Payment",
-    ),
-  ).toBe(false);
+    host.querySelector('a[href="/owner/members/member-public#member-payments"]'),
+  ).toBeNull();
 });
 it("uses a compact gym status label and badge instead of an oversized heading", async () => {
   await render("/owner/dashboard");

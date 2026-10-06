@@ -6,8 +6,8 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   me: vi.fn(),
-  request: vi.fn(),
-  setToken: vi.fn(),
+  beginLogout: vi.fn(),
+  flushLogout: vi.fn(),
   toast: null as string | null,
   toastActionUrl: undefined as string | undefined,
   dismissToast: vi.fn(),
@@ -30,8 +30,8 @@ vi.mock("../context/AppContext", () => ({
   }),
 }));
 vi.mock("../services/apiClient", () => ({
-  apiRequest: mocks.request,
-  setAccessToken: mocks.setToken,
+  beginLogoutSession: mocks.beginLogout,
+  flushPendingLogout: mocks.flushLogout,
 }));
 import { WorkspaceLayout } from "./WorkspaceLayout";
 let host: HTMLDivElement, root: Root, client: QueryClient;
@@ -178,16 +178,14 @@ it("removes the registration sidebar entry even when the account has owner capab
   await render();
   expect(host.querySelector('a[href="/register-gym"]')).toBeNull();
 });
-it("clears the authenticated token only after successful logout and replaces with login", async () => {
-  mocks.request.mockResolvedValue(undefined);
+it("ends the local session immediately and completes server logout in the background", async () => {
+  mocks.flushLogout.mockResolvedValue(undefined);
   await render();
   await act(async () => {
     host.querySelector<HTMLButtonElement>('[aria-label="Log out"]')!.click();
       await new Promise((resolve) => { setTimeout(resolve, 25); });
   });
-  expect(mocks.request).toHaveBeenCalledWith("/api/v1/auth/logout", {
-    method: "POST",
-  });
-  expect(mocks.setToken).toHaveBeenCalledWith(null);
+  expect(mocks.beginLogout).toHaveBeenCalledOnce();
+  expect(mocks.flushLogout).toHaveBeenCalledOnce();
   expect(host.textContent).toContain("Login screen");
 });

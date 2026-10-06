@@ -58,9 +58,10 @@ export async function validateGymLogo(gymId: string, id?: string | null, session
       "Choose a completed logo upload belonging to this gym.",
     );
 }
-export async function withGymMedia(gyms: any[]) {
+export async function withGymMedia(gyms: any[], options: { mediaLimit?: number } = {}) {
+  const mediaIds = (gym: any) => (gym.mediaAttachmentIds || []).slice(0, options.mediaLimit);
   const ids = gyms.flatMap((g) => [
-    ...(g.mediaAttachmentIds || []),
+    ...mediaIds(g),
     ...(g.logoAttachmentId ? [g.logoAttachmentId] : []),
   ]);
   const files = ids.length
@@ -71,7 +72,7 @@ export async function withGymMedia(gyms: any[]) {
       }).lean()
     : [];
   return gyms.map((gym) => {
-    const media = (gym.mediaAttachmentIds || []).flatMap((id: any) => {
+    const media = mediaIds(gym).flatMap((id: any) => {
       const file = files.find(
         (f) =>
           String(f._id) === String(id) && String(f.gymId) === String(gym._id),
@@ -84,6 +85,13 @@ export async function withGymMedia(gyms: any[]) {
           name: file.originalName,
           mimeType: file.mimeType,
           url: attachmentUrl(file),
+          thumbnailUrl: file.thumbnailObjectKey
+            ? attachmentUrl(file, true)
+            : attachmentUrl(file),
+          caption:
+            gym.mediaCaptions?.get?.(String(file._id)) ||
+            gym.mediaCaptions?.[String(file._id)] ||
+            "",
         },
       ];
     });
@@ -99,6 +107,7 @@ export async function withGymMedia(gyms: any[]) {
     return {
       ...gym,
       media,
+      mediaCount: (gym.mediaAttachmentIds || []).length,
       coverImageUrl: cover?.url || gym.coverImageUrl,
       logoUrl: logo
         ? attachmentUrl(logo)

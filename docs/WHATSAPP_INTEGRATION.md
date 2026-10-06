@@ -2,7 +2,7 @@
 
 Status date: 2026-09-29
 
-This integration is an additive channel. Internal chat, in-app notifications, Firebase push, email, SMS verification, payment, booking, membership, attendance, media and account flows remain authoritative and independent. WhatsApp failures are recorded in a separate durable outbox and never undo the committed business operation.
+This integration is an additive business-communication channel and the authoritative transport for phone OTP verification. Internal chat, in-app notifications, Firebase push, email, payment, booking, membership, attendance and media remain independent. Business-event WhatsApp failures are recorded in a durable outbox; authentication OTPs use a separate short-lived challenge lifecycle.
 
 ## Readiness status
 
@@ -39,6 +39,8 @@ WHATSAPP_APP_SECRET=
 WHATSAPP_VERIFY_TOKEN=
 WHATSAPP_API_VERSION=v26.0
 WHATSAPP_DEFAULT_LANGUAGE=en_US
+WHATSAPP_AUTH_TEMPLATE_NAME=getfit4u_verification_code
+WHATSAPP_AUTH_TEMPLATE_LANGUAGE=en_US
 WHATSAPP_EMBEDDED_SIGNUP_CONFIG_ID=
 WHATSAPP_COEXISTENCE_ENABLED=false
 WHATSAPP_COEXISTENCE_CONFIG_ID=
@@ -59,6 +61,24 @@ Modes:
 - `live`: provider requests are allowed after sender-specific outbound enablement. Required server configuration is validated at process startup.
 
 The Graph version is configuration-pinned. Confirm it against Meta’s current version lifecycle before every upgrade; do not silently change it in production.
+
+## Platform authentication OTP setup
+
+Authentication OTPs always use GETFIT4U's platform-owned `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID` and `WHATSAPP_WABA_ID`. They never resolve a gym connection and recipients do not use Embedded Signup.
+
+1. In WhatsApp Manager, open the platform WABA and create a message template.
+2. Select category **Authentication**, choose the exact language placed in `WHATSAPP_AUTH_TEMPLATE_LANGUAGE`, enable the optional security recommendation if desired, and set **code expiration to 5 minutes**.
+3. Add the **Copy Code** OTP button. Do not create a custom utility template for the code.
+4. Use a lowercase/underscore name such as `getfit4u_verification_code`, wait for status **Approved**, then set the exact name in `WHATSAPP_AUTH_TEMPLATE_NAME`.
+5. Set the template's message-send TTL to 300 seconds where Meta exposes that option, so Meta does not intentionally deliver a code after the backend expiry.
+6. Grant the platform system-user token the WABA/phone assets and `whatsapp_business_messaging` plus `whatsapp_business_management` permissions. Configure the platform WABA and phone-number IDs; the phone must report `CONNECTED`.
+7. Generate a separate random production `AUTH_OTP_HMAC_SECRET` (at least 48 characters). Keep it, the Meta token, app secret and verify token only in backend/Vercel secrets.
+8. Subscribe the app to the WABA `messages` webhook field. The public callback is `https://<api-host>/api/v1/webhooks/whatsapp`; its verify token must exactly match `WHATSAPP_VERIFY_TOKEN`. Enable the WhatsApp worker so durable receipts are processed.
+9. Restart/redeploy the backend. The OTP endpoint performs a live Meta asset/template readiness check before every submission and returns a specific configuration, permission, sender, template, rate or recipient error instead of simulating success.
+
+The send payload supplies the same six-digit code to the template body and the index-0 URL parameter used by Meta's Copy Code authentication button. Meta's accepted response is only `SUBMITTED`; `SENT`, `DELIVERED`, `READ` and `FAILED` come from signed webhook events.
+
+For a real-device acceptance test, use a non-admin active account/number, request an OTP, confirm the approved GETFIT4U template arrives, verify once, confirm replay fails, and inspect the webhook receipt/challenge status. Automated tests mock Graph API responses and must be reported separately from this physical delivery test.
 
 ## Existing WhatsApp Business App number (Coexistence)
 
@@ -144,6 +164,7 @@ WhatsApp is proposed only for the events below. All existing notification channe
 | Platform | platform subscription expiring | `gfu_platform_subscription_expiring` |
 | Platform | gym activated/suspended/archived | `gfu_gym_status_updated` |
 | Gym | account verified/member invitation | `gfu_member_invitation` |
+| Gym | owner member-list activation/payment/general reminder | `gfu_member_invitation`, `gfu_payment_reminder`, `gfu_member_followup` |
 | Gym | membership created/activated/frozen/reactivated/deactivated/expiring/expired/cancelled/renewed | Matching `gfu_membership_*` template |
 | Gym | payment successful/offline/refunded, invoice ready | `gfu_payment_confirmed`, `gfu_offline_payment_recorded`, `gfu_refund_updated`, `gfu_invoice_available` |
 | Gym | class booked/reminder/cancelled/updated/trainer changed | Matching `gfu_class_*` template |
@@ -151,6 +172,14 @@ WhatsApp is proposed only for the events below. All existing notification channe
 | Gym | trainer assigned | `gfu_trainer_assigned` |
 
 Operators can disable individual automated events per sender. Enabling WhatsApp does not replay historical events.
+
+The member-list reminder action queues an official message only when the gym
+sender is connected, outbound delivery is enabled, service consent exists, and
+the matching approved template is a server-controlled zero-variable Utility
+template. Otherwise the API returns the manual `wa.me` hand-off while still
+creating the in-app message, notification, and audit record. Personalized
+membership details and single-use activation links are never injected into an
+unreviewed Meta template.
 
 ## Submission-ready template catalog
 
@@ -173,6 +202,8 @@ These are proposals, not approvals. Create each only in the WABA that will send 
 | `gfu_membership_cancelled` | Utility | “Your membership was cancelled.” | URL: View membership |
 | `gfu_membership_renewed` | Utility | “Your membership renewal is recorded.” | URL: View updated dates |
 | `gfu_membership_renewal_reminder` | Utility | “Review your membership renewal options.” | URL: Renew membership |
+| `gfu_payment_reminder` | Utility | “Your membership or payment status needs attention.” | URL: View payment status |
+| `gfu_member_followup` | Utility | “Your gym sent an update about your membership or access.” | URL: Open GETFIT4U messages |
 | `gfu_payment_confirmed` | Utility | “Your payment is confirmed; your receipt is available.” | URL: View receipt |
 | `gfu_offline_payment_recorded` | Utility | “Your gym recorded an offline payment.” | URL: View receipt |
 | `gfu_invoice_available` | Utility | “Your invoice is ready.” | URL: Authenticated invoice screen |

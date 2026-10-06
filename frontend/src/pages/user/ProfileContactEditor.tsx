@@ -24,17 +24,13 @@ export function ProfileContactEditor({
   }
   const request = useMutation({
     mutationFn: () =>
-      apiRequest<ApiEnvelope<{ challengeId: string; devOtp?: string }>>(
+      apiRequest<ApiEnvelope<{ challengeId: string }>>(
         "/api/v1/users/me/contact/phone/request",
         { method: "POST", body: JSON.stringify({ phone: nextPhone }) },
       ),
     onSuccess: (result) => {
       setChallenge(result.data.challengeId);
-      setMessage(
-        result.data.devOtp
-          ? `Development verification code: ${result.data.devOtp}`
-          : "Verification code sent to the new phone.",
-      );
+      setMessage("The verification code was submitted to WhatsApp.");
     },
   });
   const confirm = useMutation({
@@ -143,7 +139,7 @@ export function ProfileContactEditor({
           className="btn btn-secondary"
           disabled={request.isPending || confirm.isPending}
         >
-          {challengeId ? "Verify and save phone" : "Send verification code"}
+          {challengeId ? "Verify and save phone" : "Send WhatsApp OTP"}
         </button>
       </form>
       <p>

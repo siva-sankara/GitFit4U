@@ -31,7 +31,9 @@ export type WhatsAppActor = {
 };
 
 export function normalizeWhatsAppRecipient(value: string) {
-  const digits = value.replace(/\D/g, "");
+  let digits = value.replace(/\D/g, "");
+  if (/^[6-9]\d{9}$/.test(digits)) digits = `91${digits}`;
+  else if (/^0[6-9]\d{9}$/.test(digits)) digits = `91${digits.slice(1)}`;
   if (!/^\d{8,15}$/.test(digits))
     throw new AppError(
       422,

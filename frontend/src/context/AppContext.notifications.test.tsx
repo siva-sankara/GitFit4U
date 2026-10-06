@@ -5,7 +5,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ receive: undefined as undefined | ((alert: { title: string; actionUrl?: string }) => void) }));
 vi.mock("../services/apiClient", () => ({ getAccessToken: () => "authenticated", apiRequest: vi.fn(async () => ({ data: [] })) }));
-vi.mock("../services/session", () => ({ useSession: () => ({ data: { data: { user: { _id: "user", notificationPreferences: { sound: false } } } } }) }));
+vi.mock("../services/session", () => ({
+  useSession: () => ({ data: { data: { user: { _id: "user", notificationPreferences: { sound: false } } } } }),
+  useSessionLifecycle: vi.fn(),
+}));
 vi.mock("../services/notificationAlerts", () => ({
   createNotificationTracker: (receive: typeof mocks.receive) => { mocks.receive = receive; return { receive, observe: vi.fn() }; },
   playNotificationSound: vi.fn(), setNotificationSoundEnabled: vi.fn(),

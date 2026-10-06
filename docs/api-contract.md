@@ -6,10 +6,12 @@ All endpoints use `/api/v1`. Authenticated requests use `Authorization: Bearer <
 
 | Method | Path | Role | Purpose |
 |---|---|---|---|
-| POST | `/auth/register` | Public | Register member/owner/trainer invitation |
+| POST | `/auth/register` | Public | Start member/owner signup and submit WhatsApp OTP |
+| POST | `/auth/signup/verify` | Public | Verify signup OTP, create account and issue the normal session |
+| POST | `/auth/signup/resend`, `/auth/signup/cancel` | Public | Replace or cancel pending signup verification |
 | POST | `/auth/login` | Public | Email/phone and password login |
 | POST | `/auth/google` | Public | Verify Google ID token |
-| POST | `/auth/otp/request`, `/auth/otp/verify` | Public | Rate-limited phone/email OTP |
+| POST | `/auth/otp/request`, `/auth/otp/verify` | Public | Rate-limited WhatsApp OTP login |
 | POST | `/auth/forgot-password`, `/auth/reset-password` | Public | Recovery lifecycle |
 | POST | `/auth/refresh`, `/auth/logout`, `/auth/logout-all` | Session | Rotate/revoke sessions |
 | GET/PATCH | `/users/me` | Any | Profile and preferences |

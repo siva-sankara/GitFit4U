@@ -93,7 +93,7 @@ it("fetches the next database page and renders returned records", async () => {
           name: path.includes("page=2") ? "Second gym" : "First gym",
         },
       ],
-      meta: { page: path.includes("page=2") ? 2 : 1, pages: 2, total: 2 },
+      meta: { page: path.includes("page=2") ? 2 : 1, pages: 2, total: 20 },
     }),
   );
   await render(

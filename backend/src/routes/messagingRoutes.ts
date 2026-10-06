@@ -14,7 +14,7 @@ const contactLimiter = rateLimit({ windowMs: 60_000, limit: 60, keyGenerator: re
 messagingRoutes.get("/contacts", contactLimiter, validate(z.object({ body: z.any(), params: z.object({}), query: z.object({
   q: z.string().trim().max(80).default("").refine(value => !value || value.length >= 2, "Enter at least two characters."),
   page: z.coerce.number().int().min(1).max(10000).default(1),
-  limit: z.coerce.number().int().min(1).max(50).default(20),
+  limit: z.coerce.number().int().min(1).max(50).default(10),
 }) })), controller.listContacts);
 messagingRoutes.get(
   "/broadcasts",

@@ -32,7 +32,7 @@ import { navigationSessionScope } from "../services/navigationSession";
 import { useData, type Row } from "../pages/live/LiveData";
 import { useApp } from "../context/AppContext";
 import { useCurrentUser, useNotifications } from "../api/hooks";
-import { apiRequest, setAccessToken } from "../services/apiClient";
+import { beginLogoutSession, flushPendingLogout } from "../services/apiClient";
 import type { Role } from "../types";
 const navigation: Record<string, Array<[string, string, string?]>> = {
   USER: [
@@ -49,6 +49,8 @@ const navigation: Record<string, Array<[string, string, string?]>> = {
     ["Dashboard", "dashboard", "gym:read"],
     ["Gym Profile Settings", "gym-profile", "gym:update"],
     ["Members", "members", "member:read"],
+    ["Messages", "messages"],
+    ["Notifications", "notifications"],
     ["Plans", "plans", "gym:read"],
     ["Subscriptions", "subscriptions", "member:read"],
     ["Attendance", "attendance", "member:read"],
@@ -62,8 +64,6 @@ const navigation: Record<string, Array<[string, string, string?]>> = {
     // ["Campaigns", "campaigns", "campaign:write"],
     ["Offers", "offers", "campaign:write"],
     ["Advertisements", "ads", "campaign:write"],
-    ["Messages", "messages"],
-    ["Notifications", "notifications"],
     ["Support", "support"],
   ],
   TRAINER: [
@@ -167,9 +167,9 @@ export function WorkspaceLayout() {
     return () => window.removeEventListener("keydown", close);
   }, [drawer]);
   const logout = useMutation({
-    mutationFn: () => apiRequest("/api/v1/auth/logout", { method: "POST" }),
-    onSuccess: () => {
-      setAccessToken(null);
+    mutationFn: flushPendingLogout,
+    onMutate: () => {
+      beginLogoutSession();
       client.clear();
       navigate("/login", { replace: true });
     },
@@ -249,7 +249,6 @@ export function WorkspaceLayout() {
             <Avatar user={user} size={36} />
             <span className="profile-name">
               <strong>{user?.name || "Member"}</strong>
-              <small>My profile</small>
             </span>
           </NavLink>
           <button
@@ -262,7 +261,6 @@ export function WorkspaceLayout() {
             <LogOut size={18} />
             <span>{logout.isPending ? "Logging out..." : "Log out"}</span>
           </button>
-          {logout.isError && <p role="alert">{logout.error.message}</p>}
         </div>
       </aside>
       <div className="workspace-main">
@@ -308,14 +306,6 @@ export function WorkspaceLayout() {
           </div>
         </header></AppHeader>
         <main id="workspace-content" className="workspace-content">
-          {role === "GYM_OWNER" && gym?.logoUrl && (
-            <img
-              className="gym-watermark"
-              src={gym.logoUrl}
-              alt=""
-              aria-hidden="true"
-            />
-          )}
           <PageNavigationContext.Provider value={{ role: activeRole, permissions: context?.permissions || [], navigationScope: navigationSessionScope(context) }}>
             <Outlet />
           </PageNavigationContext.Provider>

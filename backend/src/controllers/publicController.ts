@@ -114,6 +114,7 @@ export async function gymDetails(req: Request, res: Response) {
   const [plans, classes, trainers, reviews] = await Promise.all([
     MembershipPlan.find({ gymId: gym._id, status: "ACTIVE" })
       .sort({ priceMinor: 1 })
+      .limit(10)
       .lean(),
     ClassSession.find({
       gymId: gym._id,
@@ -121,11 +122,11 @@ export async function gymDetails(req: Request, res: Response) {
       startsAt: { $gte: new Date() },
     })
       .sort({ startsAt: 1 })
-      .limit(100)
+      .limit(3)
       .lean(),
     Trainer.find({ gymId: gym._id, status: "ACTIVE" })
       .select("publicId name photoUrl photoAttachmentId qualifications specializations bio")
-      .limit(100)
+      .limit(10)
       .lean(),
     Review.find({ gymId: gym._id, status: "PUBLISHED" })
       .select(
@@ -133,19 +134,56 @@ export async function gymDetails(req: Request, res: Response) {
       )
       .populate("userId", "publicId name avatarUrl avatarAttachmentId")
       .sort({ createdAt: -1 })
-      .limit(100)
+      .limit(10)
       .lean(),
   ]);
   res.json({
     success: true,
     data: {
-      gym: (await withGymMedia([gym]))[0],
+      gym: (await withGymMedia([gym], { mediaLimit: 4 }))[0],
       plans,
       classes: await withClassMedia(classes),
       trainers: await withTrainerMedia(trainers),
       reviews: await reviewsWithAvatars(reviews),
     },
   });
+}
+
+export async function gymMedia(req: Request, res: Response) {
+  const { page, limit, skip } = paginationFromQuery(req.query);
+  const gym: any = await Gym.findOne({ slug: String(req.params.slug), ...publicEligibility })
+    .select("_id mediaAttachmentIds mediaCaptions coverAttachmentId")
+    .lean();
+  if (!gym) throw new AppError(404, "GYM_NOT_FOUND", "This gym is not available.");
+  const ids = (gym.mediaAttachmentIds || []).slice(skip, skip + limit);
+  const resolved: any = (await withGymMedia([{ ...gym, mediaAttachmentIds: ids }]))[0];
+  res.json({ success: true, data: resolved.media || [], meta: pageMeta(page, limit, gym.mediaAttachmentIds.length) });
+}
+
+export async function gymClasses(req: Request, res: Response) {
+  const { page, limit, skip } = paginationFromQuery(req.query);
+  const gym = await Gym.findOne({ slug: String(req.params.slug), ...publicEligibility }).select("_id publicId name timezone").lean();
+  if (!gym) throw new AppError(404, "GYM_NOT_FOUND", "This gym is not available.");
+  const filter = { gymId: gym._id, status: "SCHEDULED", startsAt: { $gte: new Date() } };
+  const [rows, total] = await Promise.all([
+    ClassSession.find(filter).populate("trainerId", "publicId name photoUrl photoAttachmentId").sort({ startsAt: 1, _id: 1 }).skip(skip).limit(limit).lean(),
+    ClassSession.countDocuments(filter),
+  ]);
+  const trainers = await withTrainerMedia(rows.map((row: any) => row.trainerId).filter(Boolean));
+  const data = (await withClassMedia(rows)).map((row: any) => ({ ...row, gymId: gym, trainerId: trainers.find((trainer: any) => String(trainer._id) === String(row.trainerId?._id)) || row.trainerId }));
+  res.json({ success: true, data, meta: pageMeta(page, limit, total) });
+}
+
+export async function gymPlans(req: Request, res: Response) {
+  const { page, limit, skip } = paginationFromQuery(req.query);
+  const gym = await Gym.findOne({ slug: String(req.params.slug), ...publicEligibility }).select("_id").lean();
+  if (!gym) throw new AppError(404, "GYM_NOT_FOUND", "This gym is not available.");
+  const filter = { gymId: gym._id, status: "ACTIVE" };
+  const [data, total] = await Promise.all([
+    MembershipPlan.find(filter).sort({ priceMinor: 1, _id: 1 }).skip(skip).limit(limit).lean(),
+    MembershipPlan.countDocuments(filter),
+  ]);
+  res.json({ success: true, data, meta: pageMeta(page, limit, total) });
 }
 
 async function reviewsWithAvatars(reviews: any[]) {
