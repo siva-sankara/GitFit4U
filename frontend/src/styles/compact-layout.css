@@ -16,6 +16,7 @@
 .compact-filter-fields > *, .compact-filter-fields label, .compact-filter-fields input, .compact-filter-fields select { min-width: 0; max-width: 100%; width: 100%; box-sizing: border-box; }
 .compact-filter-fields label { display: grid; gap: 5px; align-content: start; }
 .compact-filter-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.compact-filter-reset { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .filter-count { display: inline-grid; place-items: center; min-width: 20px; height: 20px; border-radius: 50%; background: var(--selected-bg); color: var(--selected-text); font-size: .75rem; }
 .explore-filter-toolbar.table-toolbar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; min-width: 0; }
 .explore-filter-toolbar .explore-search { display: flex; flex: 1 1 270px; gap: 8px; min-width: 0; }

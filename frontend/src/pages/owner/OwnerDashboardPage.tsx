@@ -42,6 +42,7 @@ export function OwnerDashboardPage() {
           <p>Memberships, attendance and your gym's performance.</p>
         </div>
       </PageHeader>
+      
       <QueryState query={stats}>
         {data && (
           <>
@@ -103,6 +104,7 @@ export function OwnerDashboardPage() {
                         : `Your platform subscription expires ${subscription.daysRemaining === 0 ? "today" : `in ${subscription.daysRemaining} days`}.`}
                     </p>
                   )}
+                  
                   <Link
                     className="btn btn-secondary"
                     to={subscription.renewalUrl}
@@ -114,6 +116,23 @@ export function OwnerDashboardPage() {
                 </article>
               )}
             </section>
+            <div className="heading-actions">
+        {permissions.includes("attendance:scan") && (
+          <Link className="btn btn-primary" to="/owner/scanner">
+            View gym QR
+          </Link>
+        )}
+        {permissions.includes("member:read") && (
+          <Link className="btn btn-secondary" to="/owner/members">
+            Manage members
+          </Link>
+        )}
+        {/* {permissions.includes("gym:read") && (
+          <Link className="btn btn-secondary" to="/owner/classes">
+            Classes
+          </Link>
+        )} */}
+      </div>
             <section className="stat-grid">
               {metrics.map(([key, label]) => (
                 <article className="panel metric-tile" key={key}>
@@ -129,23 +148,7 @@ export function OwnerDashboardPage() {
           </>
         )}
       </QueryState>
-      <div className="heading-actions">
-        {permissions.includes("attendance:scan") && (
-          <Link className="btn btn-primary" to="/owner/scanner">
-            View gym QR
-          </Link>
-        )}
-        {permissions.includes("member:read") && (
-          <Link className="btn btn-secondary" to="/owner/members">
-            Manage members
-          </Link>
-        )}
-        {permissions.includes("gym:read") && (
-          <Link className="btn btn-secondary" to="/owner/classes">
-            Classes
-          </Link>
-        )}
-      </div>
+      
       {finance && (
         <>
           <RevenueAnalytics embedded />

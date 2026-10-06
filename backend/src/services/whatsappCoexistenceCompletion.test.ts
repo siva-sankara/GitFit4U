@@ -126,10 +126,11 @@ describe("Coexistence completion ordering and idempotency", () => {
       platform_type: "CLOUD_API",
     }]);
     mocks.findConnection.mockImplementation(() => ({ lean: () => Promise.resolve(null) }));
-    mocks.claimSession.mockImplementation(() => Promise.resolve({
-      ...row,
-      finalizationLeaseUntil: new Date(Date.now() + 60_000),
-    }));
+    mocks.claimSession.mockImplementation((_filter, update) => {
+      Object.assign(row, update?.$set || {});
+      for (const key of Object.keys(update?.$unset || {})) delete row[key];
+      return Promise.resolve(row);
+    });
     mocks.upsertConnection.mockResolvedValue(connection);
     mocks.findConnectionById.mockImplementation(() => ({ lean: () => Promise.resolve(connection) }));
     mocks.subscribe.mockResolvedValue({ success: true });
@@ -168,6 +169,7 @@ describe("Coexistence completion ordering and idempotency", () => {
     });
     expect(completed).toMatchObject({
       status: "COMPLETED",
+      completedNow: true,
       connection: {
         publicId: connection.publicId,
         connectionMode: "COEXISTENCE",
@@ -184,6 +186,7 @@ describe("Coexistence completion ordering and idempotency", () => {
     const replay = await completeWhatsAppOnboarding(actor, { ...base, sessionEvent: event });
     expect(replay).toMatchObject({
       status: "COMPLETED",
+      completedNow: false,
       connection: {
         publicId: connection.publicId,
         connectionMode: "COEXISTENCE",
@@ -253,5 +256,89 @@ describe("Coexistence completion ordering and idempotency", () => {
       }),
       expect.any(Object),
     );
+  });
+
+  it("does not exchange a code while another request owns the authorization lease", async () => {
+    row.status = "AWAITING_AUTHORIZATION";
+    row.authorizationStatus = "EXCHANGING";
+    row.authorizationLeaseId = "another-request";
+    row.authorizationLeaseUntil = new Date(Date.now() + 60_000);
+    mocks.claimSession.mockResolvedValueOnce(null);
+
+    const pending = await completeWhatsAppOnboarding(actor, {
+      ...base,
+      code: "authorization-code",
+    });
+
+    expect(pending).toMatchObject({
+      status: "AWAITING_AUTHORIZATION",
+      completedNow: false,
+    });
+    expect(mocks.exchange).not.toHaveBeenCalled();
+  });
+
+  it("reclaims an expired authorization lease and completes the exchange", async () => {
+    row.status = "AWAITING_AUTHORIZATION";
+    row.authorizationStatus = "EXCHANGING";
+    row.authorizationLeaseId = "expired-request";
+    row.authorizationLeaseUntil = new Date(Date.now() - 1_000);
+
+    const progress = await completeWhatsAppOnboarding(actor, {
+      ...base,
+      code: "fresh-authorization-code",
+    });
+
+    expect(progress.status).toBe("AWAITING_OWNER_CONFIRMATION");
+    expect(mocks.exchange).toHaveBeenCalledOnce();
+    expect(row.authorizationStatus).toBe("READY");
+    expect(row.authorizationLeaseId).toBeUndefined();
+    expect(row.authorizationLeaseUntil).toBeUndefined();
+    expect(mocks.claimSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        authorizationStatus: { $ne: "READY" },
+        $or: expect.arrayContaining([
+          expect.objectContaining({ authorizationLeaseUntil: expect.objectContaining({ $lte: expect.any(Date) }) }),
+        ]),
+      }),
+      expect.any(Object),
+      expect.any(Object),
+    );
+  });
+
+  it("preserves Action Required when a Meta event arrives after authorization failed", async () => {
+    row.status = "ACTION_REQUIRED";
+    row.authorizationStatus = "FAILED";
+    row.lastErrorCode = "100";
+
+    const progress = await completeWhatsAppOnboarding(actor, {
+      ...base,
+      sessionEvent: event,
+    });
+
+    expect(progress.status).toBe("ACTION_REQUIRED");
+    expect(row.lastErrorCode).toBe("100");
+  });
+
+  it("maps a raced unique phone binding to a conflict instead of a provider 502", async () => {
+    await completeWhatsAppOnboarding(actor, { ...base, sessionEvent: event });
+    await completeWhatsAppOnboarding(actor, { ...base, code: "authorization-code" });
+    mocks.upsertConnection.mockRejectedValueOnce(Object.assign(
+      new Error("E11000 duplicate key phoneNumberId"),
+      {
+        code: 11000,
+        keyPattern: { phoneNumberId: 1 },
+        keyValue: { phoneNumberId: "123456789012346" },
+      },
+    ));
+
+    await expect(completeWhatsAppOnboarding(actor, {
+      ...base,
+      selectedPhoneNumberId: "123456789012346",
+    })).rejects.toMatchObject({
+      statusCode: 409,
+      code: "WHATSAPP_SENDER_ALREADY_BOUND",
+    });
+    expect(row.status).toBe("ACTION_REQUIRED");
+    expect(row.lastErrorCode).toBe("WHATSAPP_SENDER_ALREADY_BOUND");
   });
 });

@@ -126,21 +126,35 @@ try {
     autoIndex: false,
   });
   await testDatabase.initialize();
-  const owner = await call("post", "/auth/register", undefined, {
+  // Authentication signup is covered by the WhatsApp OTP controller/service
+  // suites. This payment-registration check seeds authenticated applicants so
+  // it never depends on a real Meta delivery.
+  const ownerUser = await User.create({
+    publicId: "registration-owner",
     name: "Gym applicant",
     email: "owner@registration.example",
-    phone: "9876501201",
-    role: "GYM_OWNER",
-    password: "RegistrationPass123",
+    phone: "+919876501201",
+    roles: ["GYM_OWNER"],
+    activeRole: "GYM_OWNER",
+    status: "ACTIVE",
   });
-  const token = owner.data.accessToken;
-  const other = await call("post", "/auth/register", undefined, {
+  const token = (await createSession({
+    userId: String(ownerUser._id),
+    activeRole: "GYM_OWNER",
+  })).accessToken;
+  const otherUser = await User.create({
+    publicId: "registration-other-owner",
     name: "Other applicant",
     email: "other@registration.example",
-    phone: "9876501202",
-    role: "GYM_OWNER",
-    password: "RegistrationPass123",
+    phone: "+919876501202",
+    roles: ["GYM_OWNER"],
+    activeRole: "GYM_OWNER",
+    status: "ACTIVE",
   });
+  const other = { data: { accessToken: (await createSession({
+    userId: String(otherUser._id),
+    activeRole: "GYM_OWNER",
+  })).accessToken } };
   const admin = await User.create({
     publicId: "registration-admin",
     roles: ["ADMIN"],

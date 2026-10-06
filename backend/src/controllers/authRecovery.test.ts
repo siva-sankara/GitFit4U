@@ -27,6 +27,8 @@ vi.mock("../models/Auth.js", () => ({
     updateMany: mocks.revokeGrants,
     create: mocks.createGrant,
   },
+  OtpChallenge: {},
+  PendingAuthOperation: {},
 }));
 vi.mock("bcrypt", () => ({ default: { hash: mocks.hash } }));
 vi.mock("../services/otpService.js", () => ({
@@ -241,11 +243,16 @@ describe("recovery grant issuance and administrative identity edits", () => {
     expect(mocks.createGrant).not.toHaveBeenCalled();
   });
 
-  it("does not let a login code create a password recovery grant", async () => {
-    mocks.otp.mockResolvedValue({ purpose: "LOGIN", phone: "+919876543210" });
+  it("requires the OTP service to enforce an account-recovery challenge", async () => {
+    mocks.otp.mockRejectedValue(
+      Object.assign(new Error("Wrong purpose"), { code: "OTP_PURPOSE_INVALID" }),
+    );
     await expect(
       verifyRecoveryOtp(otpRequest(), response()),
-    ).rejects.toMatchObject({ code: "RECOVERY_CHALLENGE_REQUIRED" });
+    ).rejects.toMatchObject({ code: "OTP_PURPOSE_INVALID" });
+    expect(mocks.otp).toHaveBeenCalledWith("challenge", "123456", {
+      expectedPurpose: "ACCOUNT_RECOVERY",
+    });
     expect(mocks.userLock).not.toHaveBeenCalled();
     expect(mocks.createGrant).not.toHaveBeenCalled();
   });

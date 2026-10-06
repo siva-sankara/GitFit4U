@@ -1,8 +1,8 @@
 import { PageHeader } from "../../components/PageHeader";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useCurrentUser } from "../../api/hooks";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { apiRequest, type ApiEnvelope } from "../../services/apiClient";
 import { StatusBadge } from "../../components/StatusBadge";
 import { Modal } from "../../components/Modal";
@@ -18,6 +18,7 @@ import {
 } from "./OwnerMembersPage";
 
 export function OwnerMemberDetailsPage({ id }: { id: string }) {
+  const location = useLocation();
   const session = useCurrentUser();
   const canManage =
     session.data?.data.context.permissions.includes("member:write");
@@ -40,12 +41,12 @@ export function OwnerMemberDetailsPage({ id }: { id: string }) {
     retry: false,
   });
   const trainers = useQuery({
-    queryKey: ["api", "/api/v1/owner/trainers"],
+    queryKey: ["api", "/api/v1/owner/trainers?limit=100"],
     enabled:
       !!canManage &&
       !!session.data?.data.context.permissions.includes("gym:read"),
     queryFn: () =>
-      apiRequest<ApiEnvelope<MemberRow[]>>("/api/v1/owner/trainers"),
+      apiRequest<ApiEnvelope<MemberRow[]>>("/api/v1/owner/trainers?limit=100"),
   });
   const [edit, setEdit] = useState(false),
     [action, setAction] = useState(""),
@@ -55,6 +56,17 @@ export function OwnerMemberDetailsPage({ id }: { id: string }) {
     subscription = member?.currentSubscriptionId;
   const timezone = query.data?.data.timezone || "Asia/Kolkata";
   const assignedTrainer = member?.assignedTrainerId;
+  useEffect(() => {
+    if (!member || !location.hash) return;
+    const targetId = decodeURIComponent(location.hash.slice(1));
+    const timer = window.setTimeout(() => {
+      document.getElementById(targetId)?.scrollIntoView?.({
+        behavior: "smooth",
+        block: "start",
+      });
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [location.hash, member]);
   const saved = () => {
     setEdit(false);
     setAction("");
@@ -120,7 +132,12 @@ export function OwnerMemberDetailsPage({ id }: { id: string }) {
           <span className="eyebrow">Member details</span>
           <h1>{memberName(member)}</h1>
           <p>{member.memberCode}</p>
-          <MemberQuickActions member={member} expanded />
+          <MemberQuickActions
+            member={member}
+            expanded
+            ownerMember
+            canMessage={Boolean(canManage)}
+          />
         </div>
         <div className="heading-actions">
           <Link to="/owner/members" className="btn btn-secondary">
@@ -186,7 +203,7 @@ export function OwnerMemberDetailsPage({ id }: { id: string }) {
             </div>
           </dl>
         </section>
-        <section className="panel">
+        <section id="member-membership" className="panel">
           <h2>Gym access and membership</h2>
           {subscription ? (
             <>
@@ -281,6 +298,7 @@ export function OwnerMemberDetailsPage({ id }: { id: string }) {
           )}
           <label className="field" style={{ marginTop: 20 }}>
             <span>Assigned trainer</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <select
               className="select"
               value={
@@ -305,6 +323,7 @@ export function OwnerMemberDetailsPage({ id }: { id: string }) {
                   </option>
                 ))}
             </select>
+           </div>
           </label>
           {trainers.isError && <p role="alert">{trainers.error.message}</p>}
           {canManageAccess && member.status !== "ARCHIVED" && (
@@ -408,7 +427,7 @@ export function OwnerMemberDetailsPage({ id }: { id: string }) {
           )}
         </section>
         {canReadFinance && (
-          <section className="panel member-management-scroll">
+          <section id="member-payments" className="panel member-management-scroll">
             <h2>Payment history</h2>
             <p>Latest 50 payments. The Payments page contains the full history.</p>
             <table className="member-management-table">
@@ -445,7 +464,7 @@ export function OwnerMemberDetailsPage({ id }: { id: string }) {
             )}
           </section>
         )}
-        <section className="panel member-management-scroll">
+        <section id="member-attendance" className="panel member-management-scroll">
           <h2>Recent attendance</h2>
           <table className="member-management-table">
             <thead>

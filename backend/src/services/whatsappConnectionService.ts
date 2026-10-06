@@ -31,7 +31,9 @@ export type WhatsAppActor = {
 };
 
 export function normalizeWhatsAppRecipient(value: string) {
-  const digits = value.replace(/\D/g, "");
+  let digits = value.replace(/\D/g, "");
+  if (/^[6-9]\d{9}$/.test(digits)) digits = `91${digits}`;
+  else if (/^0[6-9]\d{9}$/.test(digits)) digits = `91${digits.slice(1)}`;
   if (!/^\d{8,15}$/.test(digits))
     throw new AppError(
       422,
@@ -306,11 +308,12 @@ type OnboardingCompletionInput = {
   };
 };
 
-function onboardingProgress(session: any, connection?: any) {
+function onboardingProgress(session: any, connection?: any, completedNow = false) {
   return {
     status: session.status,
     connectionMode: session.connectionMode,
     diagnosticReference: session.diagnosticReference,
+    completedNow,
     candidates: (session.candidatePhones || []).map((candidate: any) => ({
       phoneNumberId: candidate.phoneNumberId,
       displayPhoneNumber: candidate.displayPhoneNumber,
@@ -350,6 +353,7 @@ export async function completeWhatsAppOnboarding(
     return onboardingProgress(session, existing);
   }
 
+  let sessionChanged = false;
   if (input.sessionEvent) {
     const normalized = normalizeEmbeddedSignupEvent(
       session.connectionMode,
@@ -366,6 +370,7 @@ export async function completeWhatsAppOnboarding(
     session.wabaId = normalized.wabaId;
     session.phoneNumberId = normalized.phoneNumberId;
     session.historySharing = normalized.historySharing;
+    sessionChanged = true;
   }
 
   if (input.selectedPhoneNumberId) {
@@ -379,58 +384,154 @@ export async function completeWhatsAppOnboarding(
         "Select a phone number returned by this protected onboarding attempt.",
       );
     session.selectedPhoneNumberId = input.selectedPhoneNumberId;
+    sessionChanged = true;
   }
 
+  // Persist Meta's independently-delivered session event/phone selection before
+  // claiming the authorization exchange. Mongoose saves only modified paths, so
+  // an overlapping exchange cannot erase an event delivered by another request.
+  if (sessionChanged) await session.save();
+
   if (input.code && session.authorizationStatus !== "READY") {
-    if (session.authorizationStatus === "EXCHANGING")
-      return onboardingProgress(session);
-    session.authorizationStatus = "EXCHANGING";
-    await session.save();
-    try {
-      const exchanged = await provider.exchangeEmbeddedSignupCode(input.code);
-      const tokenState = await provider.inspectToken(exchanged.accessToken);
-      const requiredPermissions = [
-        "whatsapp_business_messaging",
-        "whatsapp_business_management",
-      ];
-      if (
-        !tokenState.valid ||
-        tokenState.appId !== env.WHATSAPP_APP_ID ||
-        requiredPermissions.some((permission) => !tokenState.scopes.includes(permission))
-      )
-        throw new AppError(
-          403,
-          "WHATSAPP_PERMISSIONS_REQUIRED",
-          "Meta did not grant the required WhatsApp permissions. Review the app access and try again.",
+    const authorizationLeaseId = nanoid(20);
+    const authorizationLeaseNow = new Date();
+    const claimedAuthorization: any = await WhatsAppOnboardingSession.findOneAndUpdate(
+      {
+        _id: session._id,
+        status: { $nin: ["COMPLETED", "CANCELLED", "EXPIRED"] },
+        authorizationStatus: { $ne: "READY" },
+        $or: [
+          { authorizationStatus: { $in: ["PENDING", "FAILED"] } },
+          { authorizationStatus: "EXCHANGING", authorizationLeaseUntil: { $exists: false } },
+          { authorizationStatus: "EXCHANGING", authorizationLeaseUntil: null },
+          { authorizationStatus: "EXCHANGING", authorizationLeaseUntil: { $lte: authorizationLeaseNow } },
+        ],
+      },
+      {
+        $set: {
+          authorizationStatus: "EXCHANGING",
+          authorizationLeaseId,
+          authorizationLeaseUntil: new Date(authorizationLeaseNow.getTime() + 60_000),
+          status: "AWAITING_AUTHORIZATION",
+        },
+      },
+      { returnDocument: "after" },
+    );
+    if (!claimedAuthorization) {
+      const latest: any = await WhatsAppOnboardingSession.findOne({ _id: session._id })
+        .select("+stateHash +credentialCiphertext +credentialFingerprint");
+      if (!latest) throw new AppError(404, "WHATSAPP_ONBOARDING_NOT_FOUND", "Onboarding session is unavailable.");
+      if (latest.status === "COMPLETED") {
+        const existing = latest.connectionId
+          ? await WhatsAppConnection.findById(latest.connectionId).lean()
+          : null;
+        return onboardingProgress(latest, existing);
+      }
+      if (latest.authorizationStatus !== "READY") return onboardingProgress(latest);
+      session = latest;
+    } else {
+      session = claimedAuthorization;
+    }
+
+    if (session.authorizationStatus === "EXCHANGING") {
+      try {
+        const exchanged = await provider.exchangeEmbeddedSignupCode(input.code);
+        const tokenState = await provider.inspectToken(exchanged.accessToken);
+        const requiredPermissions = [
+          "whatsapp_business_messaging",
+          "whatsapp_business_management",
+        ];
+        if (
+          !tokenState.valid ||
+          tokenState.appId !== env.WHATSAPP_APP_ID ||
+          requiredPermissions.some((permission) => !tokenState.scopes.includes(permission))
+        )
+          throw new AppError(
+            403,
+            "WHATSAPP_PERMISSIONS_REQUIRED",
+            "Meta did not grant the required WhatsApp permissions. Review the app access and try again.",
+          );
+        const credentialCiphertext = encryptWhatsAppCredential(exchanged.accessToken);
+        const credentialFingerprint = sha256(exchanged.accessToken);
+        const credentialExpiresAt = exchanged.expiresIn
+          ? new Date(Date.now() + exchanged.expiresIn * 1000)
+          : null;
+        const authorized = await WhatsAppOnboardingSession.findOneAndUpdate(
+          { _id: session._id, authorizationLeaseId },
+          {
+            $set: {
+              credentialCiphertext,
+              credentialFingerprint,
+              credentialExpiresAt,
+              authorizationStatus: "READY",
+            },
+            $unset: {
+              authorizationLeaseId: 1,
+              authorizationLeaseUntil: 1,
+              lastErrorCode: 1,
+              lastErrorMessage: 1,
+            },
+          },
+          { returnDocument: "after" },
         );
-      session.credentialCiphertext = encryptWhatsAppCredential(exchanged.accessToken);
-      session.credentialFingerprint = sha256(exchanged.accessToken);
-      session.credentialExpiresAt = exchanged.expiresIn
-        ? new Date(Date.now() + exchanged.expiresIn * 1000)
-        : undefined;
-      session.authorizationStatus = "READY";
-      session.lastErrorCode = undefined;
-      session.lastErrorMessage = undefined;
-    } catch (error: any) {
-      session.authorizationStatus = "FAILED";
-      session.status = "ACTION_REQUIRED";
-      session.lastErrorCode = String(
-        error?.providerCode || error?.code || error?.category || "WHATSAPP_AUTHORIZATION_FAILED",
-      );
-      session.lastErrorMessage = String(error?.message || "Meta authorization failed.").slice(0, 500);
-      await session.save();
-      if (error instanceof AppError) throw error;
-      throw new AppError(
-        502,
-        "WHATSAPP_AUTHORIZATION_FAILED",
-        `Meta authorization could not be completed. Reference ${session.diagnosticReference}.`,
-      );
+        if (!authorized) {
+          const latest: any = await WhatsAppOnboardingSession.findOne({ _id: session._id })
+            .select("+stateHash +credentialCiphertext +credentialFingerprint");
+          if (latest?.status === "COMPLETED") {
+            const existing = latest.connectionId
+              ? await WhatsAppConnection.findById(latest.connectionId).lean()
+              : null;
+            return onboardingProgress(latest, existing);
+          }
+          return onboardingProgress(latest || session);
+        }
+        const refreshed: any = await WhatsAppOnboardingSession.findOne({ _id: session._id })
+          .select("+stateHash +credentialCiphertext +credentialFingerprint");
+        if (!refreshed)
+          throw new AppError(404, "WHATSAPP_ONBOARDING_NOT_FOUND", "Onboarding session is unavailable.");
+        session = refreshed;
+      } catch (error: any) {
+        const lastErrorCode = String(
+          error?.providerCode || error?.code || error?.category || "WHATSAPP_AUTHORIZATION_FAILED",
+        );
+        const lastErrorMessage = String(error?.message || "Meta authorization failed.").slice(0, 500);
+        const failed = await WhatsAppOnboardingSession.findOneAndUpdate(
+          { _id: session._id, authorizationLeaseId },
+          {
+            $set: {
+              authorizationStatus: "FAILED",
+              status: "ACTION_REQUIRED",
+              lastErrorCode,
+              lastErrorMessage,
+            },
+            $unset: {
+              authorizationLeaseId: 1,
+              authorizationLeaseUntil: 1,
+            },
+          },
+          { returnDocument: "after" },
+        );
+        if (!failed) {
+          const latest: any = await WhatsAppOnboardingSession.findOne({ _id: session._id })
+            .select("+stateHash +credentialCiphertext +credentialFingerprint");
+          return onboardingProgress(latest || session);
+        }
+        session = failed;
+        if (error instanceof AppError) throw error;
+        throw new AppError(
+          502,
+          "WHATSAPP_AUTHORIZATION_FAILED",
+          `Meta authorization could not be completed. Reference ${session.diagnosticReference}.`,
+        );
+      }
     }
   }
 
   if (session.authorizationStatus !== "READY") {
-    session.status = "AWAITING_AUTHORIZATION";
-    await session.save();
+    if (session.authorizationStatus !== "FAILED") {
+      session.status = "AWAITING_AUTHORIZATION";
+      await session.save();
+    }
     return onboardingProgress(session);
   }
   if (!session.wabaId || !session.sessionEvent) {
@@ -450,7 +551,7 @@ export async function completeWhatsAppOnboarding(
   } catch (error: any) {
     session.status = "ACTION_REQUIRED";
     session.lastErrorCode = String(
-      error?.code || error?.category || "WHATSAPP_ASSET_INSPECTION_FAILED",
+      error?.providerCode || error?.code || error?.category || "WHATSAPP_ASSET_INSPECTION_FAILED",
     ).slice(0, 100);
     session.lastErrorMessage = "Meta could not validate the authorized WhatsApp assets.";
     await session.save();
@@ -607,17 +708,32 @@ export async function completeWhatsAppOnboarding(
     session.finalizationLeaseId = undefined;
     session.finalizationLeaseUntil = undefined;
     await session.save({ validateBeforeSave: false });
-    return onboardingProgress(session, connection);
+    return onboardingProgress(session, connection, true);
   } catch (error: any) {
+    const duplicatePhoneBinding = Number(error?.code) === 11000 && Boolean(
+      error?.keyPattern?.phoneNumberId ||
+      error?.keyValue?.phoneNumberId ||
+      String(error?.message || "").includes("phoneNumberId"),
+    );
     session.status = "ACTION_REQUIRED";
     session.lastErrorCode = String(
-      error?.code || error?.category || "WHATSAPP_PROVIDER_SETUP_FAILED",
+      duplicatePhoneBinding
+        ? "WHATSAPP_SENDER_ALREADY_BOUND"
+        : error?.providerCode || error?.code || error?.category || "WHATSAPP_PROVIDER_SETUP_FAILED",
     ).slice(0, 100);
-    session.lastErrorMessage = "Meta could not finish the WhatsApp connection. Retry this protected onboarding session.";
+    session.lastErrorMessage = duplicatePhoneBinding
+      ? "This WhatsApp phone number is already connected to another GETFIT4U business scope."
+      : "Meta could not finish the WhatsApp connection. Retry this protected onboarding session.";
     session.finalizationLeaseId = undefined;
     session.finalizationLeaseUntil = undefined;
     await session.save({ validateBeforeSave: false });
     if (error instanceof AppError) throw error;
+    if (duplicatePhoneBinding)
+      throw new AppError(
+        409,
+        "WHATSAPP_SENDER_ALREADY_BOUND",
+        "This WhatsApp phone number is already connected to another GETFIT4U business scope.",
+      );
     throw new AppError(
       502,
       "WHATSAPP_PROVIDER_SETUP_FAILED",

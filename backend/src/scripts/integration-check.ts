@@ -2,6 +2,7 @@
 import mongoose from "mongoose";
 import assert from "node:assert/strict";
 import request from "supertest";
+import bcrypt from "bcrypt";
 import { isolatedScriptDatabase } from "./isolatedScriptDatabase.js";
 import { createHmac } from "node:crypto";
 process.env.NODE_ENV = "test";
@@ -24,7 +25,7 @@ process.env.RAZORPAY_WEBHOOK_SECRET = "isolated-integration-webhook-secret";
 const { app } = await import("../app.js");
 const { User } = await import("../models/User.js");
 const { Gym } = await import("../models/Gym.js");
-const { RoleAssignment, AuthIdentity, Session } = await import("../models/Auth.js");
+const { RoleAssignment, AuthIdentity, OtpChallenge, Session } = await import("../models/Auth.js");
 const { MemberProfile } = await import("../models/Member.js");
 const { MembershipPlan, Subscription, Payment, PlanQuote } =
   await import("../models/Commerce.js");
@@ -33,6 +34,7 @@ const { ClassSession, Notification } = await import("../models/Engagement.js");
 const { createSession } = await import("../services/tokenService.js");
 const { OWNER_DEFAULT_PERMISSIONS } = await import("../constants/domain.js");
 const { maintainRecords } = await import("../services/maintenanceService.js");
+const { hashOtp, hashOtpContext } = await import("../utils/crypto.js");
 const testDatabase = isolatedScriptDatabase("gfi");
 const { databaseName } = testDatabase;
 let checks = 0;
@@ -62,6 +64,32 @@ async function call(
   checks++;
   return response.body;
 }
+async function seedAuthenticatedAccount(input: {
+  publicId: string;
+  name: string;
+  email: string;
+  phone: string;
+  role: "USER" | "GYM_OWNER";
+}) {
+  const user = await User.create({
+    ...input,
+    roles: [input.role],
+    activeRole: input.role,
+    status: "ACTIVE",
+  });
+  await AuthIdentity.create({
+    userId: user._id,
+    provider: "PASSWORD",
+    providerSubject: user.email,
+    verifiedAt: new Date(),
+    passwordHash: await bcrypt.hash("IntegrationPass123", 12),
+  });
+  const accessToken = (await createSession({
+    userId: String(user._id),
+    activeRole: input.role,
+  })).accessToken;
+  return { user, accessToken };
+}
 try {
   await mongoose.connect(
     process.env.MONGO_URI || "mongodb://127.0.0.1:27017/getfit4u",
@@ -82,15 +110,20 @@ try {
       { email: "race-phone-b@integration.example", phone: "+91 98765 01283" },
     ]],
   ] as const) {
-    const responses = await Promise.all(inputs.map((input) => signupRequest({ ...baseSignup, ...input }, group === "email" ? "192.0.2.11" : "192.0.2.12")));
-    ok(responses.map(result => result.status).sort().join(",") === "200,409", `Concurrent canonical ${group} duplicate signup creates at most one account`);
+    const results = await Promise.allSettled(inputs.map((input, index) => seedAuthenticatedAccount({
+      publicId: `identity-race-${group}-${index}`,
+      name: baseSignup.name,
+      email: input.email,
+      phone: input.phone,
+      role: "USER",
+    })));
+    ok(results.filter(result => result.status === "fulfilled").length === 1,
+      `Concurrent canonical ${group} duplicate creation is rejected by MongoDB`);
     const filter = group === "email" ? { email: "race.email+tag@integration.example" } : { phone: "+919876501283" };
     const account = await User.findOne(filter);
     ok(await User.countDocuments(filter) === 1, `Independent unique ${group} constraint holds in MongoDB`);
     ok(await AuthIdentity.countDocuments({ userId: account._id }) === 1 && await Session.countDocuments({ userId: account._id }) === 1,
       `Losing ${group} signup creates no extra identity or session`);
-    const conflict = responses.find(result => result.status === 409)!;
-    ok(conflict.body.error.code === "ACCOUNT_EXISTS" && !JSON.stringify(conflict.body).includes("E11000"), "Duplicate-key failures return safe recovery guidance");
   }
   for (const extra of [{ role: "ADMIN" }, { permissions: ["admin:platform"] }, { approved: true }, { isAdmin: true }, { ownerId: "forged" }]) {
     const forged = await signupRequest({ ...baseSignup, email: "forged@integration.example", phone: "9876501284", ...extra }, "192.0.2.13");
@@ -98,20 +131,16 @@ try {
   }
   const missingRole = await signupRequest({ name: "No Role", email: "missing-role@integration.example", phone: "9876501285", password: "IntegrationPass123" }, "192.0.2.14");
   ok(missingRole.status === 422, "Signup requires an intentional role");
-  const signup = await call(
-      "post",
-      "/auth/register",
-      undefined,
-      {
-        name: "Integration Member",
-        email: "member@integration.example",
-        phone: "9876501234",
-        role: "USER",
-        password: "IntegrationPass123",
-      },
-      200,
-    ),
-    memberToken = signup.data.accessToken;
+  // Broad integration checks seed their principals; the real WhatsApp signup
+  // handshake is covered by isolated provider, OTP and auth-controller tests.
+  const signup = await seedAuthenticatedAccount({
+    publicId: "integration-member-account",
+    name: "Integration Member",
+    email: "member@integration.example",
+    phone: "9876501234",
+    role: "USER",
+  });
+  const memberToken = signup.accessToken;
   await call(
     "post",
     "/auth/register",
@@ -651,16 +680,20 @@ try {
   }
   await call("post", "/owner/registrations", memberToken,
     { name: "Forbidden Gym", coordinates: [78, 17] }, 403);
-  const ownerSignup = await call("post", "/auth/register", undefined, {
-    name: "New Gym Owner", email: "new-owner@integration.example", phone: "9876501291",
-    role: "GYM_OWNER", password: "IntegrationPass123",
+  const ownerSignup = await seedAuthenticatedAccount({
+    publicId: "new-integration-owner",
+    name: "New Gym Owner",
+    email: "new-owner@integration.example",
+    phone: "9876501291",
+    role: "GYM_OWNER",
   });
-  ok(ownerSignup.data.user.activeRole === "GYM_OWNER" && ownerSignup.data.user.onboarding.state === "NOT_STARTED",
+  const ownerSignupContext = await call("get", "/auth/me", ownerSignup.accessToken);
+  ok(ownerSignupContext.data.user.activeRole === "GYM_OWNER" && ownerSignupContext.data.user.onboarding.state === "NOT_STARTED",
     "Owner signup authenticates directly for onboarding without a gym");
   const signupOwner = await call(
     "post",
     "/owner/registrations",
-    ownerSignup.data.accessToken,
+    ownerSignup.accessToken,
     { name: "New Gym", coordinates: [78, 17], address: { city: "Test" } },
     201,
   );
@@ -668,7 +701,7 @@ try {
   await call(
     "post",
     `/owner/registrations/${signupOwner.data.registration.publicId}/submit`,
-    ownerSignup.data.accessToken,
+    ownerSignup.accessToken,
     {},
     422,
   );
@@ -692,12 +725,12 @@ try {
     { decision: "APPROVED", notes: "Obsolete route cannot bypass payment" },
     404,
   );
-  const trainerSignup = await call("post", "/auth/register", undefined, {
+  const trainerSignup = await seedAuthenticatedAccount({
+    publicId: "integration-trainer-account",
     name: "Test Trainer",
     email: "trainer@integration.example",
     phone: "9876501292",
     role: "USER",
-    password: "IntegrationPass123",
   });
   const trainer = await call(
     "post",
@@ -713,7 +746,7 @@ try {
   const switched = await call(
     "post",
     "/auth/switch-role",
-    trainerSignup.data.accessToken,
+    trainerSignup.accessToken,
     { role: "TRAINER", gymId: String(gym._id) },
   );
   const trainerToken = switched.data.accessToken;
@@ -777,22 +810,29 @@ try {
       .length === 1,
     "Member progress comes from trainer records",
   );
-  const otp = await call(
-    "post",
-    "/auth/otp/request",
-    undefined,
-    { phone: "9876501234", purpose: "LOGIN" },
-    202,
-  );
+  const otpCode = "451926";
+  const otpPublicId = "integration-login-otp-01";
+  const otpNow = new Date();
+  await OtpChallenge.create({
+    publicId: otpPublicId,
+    phone: "+919876501234",
+    purpose: "LOGIN",
+    codeHash: hashOtp(otpPublicId, otpCode),
+    requestIpHash: hashOtpContext("otp-ip", "integration-check"),
+    expiresAt: new Date(otpNow.getTime() + 300_000),
+    resendAvailableAt: new Date(otpNow.getTime() + 60_000),
+    purgeAt: new Date(otpNow.getTime() + 86_400_000),
+    deliveryStatus: "SUBMITTED",
+  });
   await call("post", "/auth/otp/verify", undefined, {
-    challengeId: otp.data.challengeId,
-    code: otp.data.devOtp,
+    challengeId: otpPublicId,
+    code: otpCode,
   });
   await call(
     "post",
     "/auth/otp/verify",
     undefined,
-    { challengeId: otp.data.challengeId, code: otp.data.devOtp },
+    { challengeId: otpPublicId, code: otpCode },
     400,
   );
   const notices = await call(

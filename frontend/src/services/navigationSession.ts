@@ -14,17 +14,46 @@ export function clearNavigationSession() {
     }
   } catch { /* Navigation remains available when browser storage is disabled. */ }
 }
-export interface MemberListState { page: number; search: string; status: string; planId: string; trainerId: string }
-const empty: MemberListState = { page: 1, search: "", status: "", planId: "", trainerId: "" };
+export interface MemberListState {
+  page: number;
+  limit: number;
+  search: string;
+  status: string;
+  planId: string;
+  trainerId: string;
+  paymentStatus: string;
+  sort: string;
+}
+const empty: MemberListState = {
+  page: 1,
+  limit: 10,
+  search: "",
+  status: "",
+  planId: "",
+  trainerId: "",
+  paymentStatus: "",
+  sort: "JOINED_DESC",
+};
 const statuses = new Set(["JOIN_REQUESTED", "ACTIVE", "EXPIRING", "FROZEN", "EXPIRED", "CANCELLED", "DEACTIVATED", "GRACE", "PENDING_PAYMENT", "NONE"]);
+const paymentStatuses = new Set(["CAPTURED", "DUE", "FAILED", "NONE"]);
+const sorts = new Set(["JOINED_DESC", "JOINED_ASC", "NAME_ASC", "NAME_DESC"]);
 function normalized(value: unknown): MemberListState {
   const row = value && typeof value === "object" ? value as Record<string, unknown> : {};
   return {
     page: typeof row.page === "number" && Number.isSafeInteger(row.page) && row.page > 0 && row.page <= 100000 ? row.page : 1,
+    limit: typeof row.limit === "number" && [10, 25, 50].includes(row.limit) ? row.limit : 10,
     search: typeof row.search === "string" ? row.search.slice(0, 200) : "",
     status: typeof row.status === "string" && statuses.has(row.status) ? row.status : "",
     planId: typeof row.planId === "string" ? row.planId.slice(0, 100) : "",
     trainerId: typeof row.trainerId === "string" ? row.trainerId.slice(0, 100) : "",
+    paymentStatus:
+      typeof row.paymentStatus === "string" && paymentStatuses.has(row.paymentStatus)
+        ? row.paymentStatus
+        : "",
+    sort:
+      typeof row.sort === "string" && sorts.has(row.sort)
+        ? row.sort
+        : "JOINED_DESC",
   };
 }
 function read(key?: string) {

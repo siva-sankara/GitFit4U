@@ -169,6 +169,12 @@ export async function createMemberWithMembership(req: Request, res: Response) {
       gymId,
       userId: user._id,
     }).session(session);
+    if (member?.isDeleted)
+      throw new AppError(
+        409,
+        "MEMBER_RECORD_REMOVED",
+        "This member record was removed. Contact an administrator if it must be restored.",
+      );
     const needsInvitation = !member || member.invitation?.status === "PENDING";
     if (needsInvitation && !email)
       throw new AppError(422, "MEMBER_EMAIL_REQUIRED", "Enter the member's existing account email to send their secure invitation.");
@@ -329,6 +335,7 @@ export async function updateMember(req: Request, res: Response) {
     const member = await MemberProfile.findOne({
       gymId: req.auth!.gymId,
       publicId: req.params.id,
+      isDeleted: { $ne: true },
     }).session(session);
     if (!member)
       throw new AppError(404, "MEMBER_NOT_FOUND", "Member not found.");
@@ -418,6 +425,67 @@ export async function updateMember(req: Request, res: Response) {
     entityId: data.publicId,
   });
   res.json({ success: true, data });
+}
+
+export async function deleteMember(req: Request, res: Response) {
+  const now = new Date();
+  const data = await mongoose.connection.transaction(async (session) => {
+    const member = await MemberProfile.findOne({
+      gymId: req.auth!.gymId,
+      publicId: req.params.id,
+      isDeleted: { $ne: true },
+    }).session(session);
+    if (!member)
+      throw new AppError(404, "MEMBER_NOT_FOUND", "Member not found.");
+    if (!["INACTIVE", "SUSPENDED", "ARCHIVED"].includes(member.status))
+      throw new AppError(
+        409,
+        "MEMBER_DEACTIVATION_REQUIRED",
+        "Deactivate this member before removing their gym record.",
+      );
+    if (
+      member.currentSubscriptionId &&
+      (await Subscription.exists({
+        _id: member.currentSubscriptionId,
+        gymId: req.auth!.gymId,
+        memberProfileId: member._id,
+        status: { $in: ["ACTIVE", "FROZEN", "GRACE", "PENDING_PAYMENT"] },
+      }).session(session))
+    )
+      throw new AppError(
+        409,
+        "MEMBERSHIP_DEACTIVATION_REQUIRED",
+        "Deactivate or cancel the current membership before removing this member.",
+      );
+    const before = {
+      status: member.status,
+      directAccess: member.directAccess,
+      currentSubscriptionId: member.currentSubscriptionId,
+    };
+    member.status = "ARCHIVED";
+    member.directAccess = false;
+    member.isDeleted = true;
+    member.deletedAt = now;
+    member.deletedBy = new mongoose.Types.ObjectId(req.auth!.userId);
+    await member.save({ session });
+    return { member, before };
+  });
+  await writeAudit(req, {
+    action: "member.soft_deleted",
+    entityType: "MemberProfile",
+    entityId: data.member.publicId,
+    before: data.before,
+    after: {
+      status: data.member.status,
+      isDeleted: data.member.isDeleted,
+      deletedAt: data.member.deletedAt,
+      deletedBy: data.member.deletedBy,
+    },
+  });
+  res.json({
+    success: true,
+    data: { publicId: data.member.publicId, deletedAt: data.member.deletedAt },
+  });
 }
 export async function requestGymJoin(req: Request, res: Response) {
   const gymId = typeof req.body.gymId === "string" ? req.body.gymId : "";

@@ -12,6 +12,7 @@ import "./styles/product-polish.css";
 import "./styles/dialog.css";
 import "./styles/workspace-navigation.css";
 import "./styles/enhancement-layout.css";
+import "./styles/data-controls.css";
 
 startPwaLifecycle();
 

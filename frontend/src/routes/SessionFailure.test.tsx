@@ -4,10 +4,9 @@ import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-const mocks = vi.hoisted(() => ({ request: vi.fn(), token: vi.fn() }));
+const mocks = vi.hoisted(() => ({ logout: vi.fn() }));
 vi.mock("../services/apiClient", () => ({
-  apiRequest: mocks.request,
-  setAccessToken: mocks.token,
+  logoutSession: mocks.logout,
   ApiError: class extends Error {
     constructor(
       public status: number,
@@ -63,20 +62,16 @@ async function render() {
   );
 }
 it("can end a revoked-role session and open login without a retry loop", async () => {
-  mocks.request.mockResolvedValue(undefined);
+  mocks.logout.mockResolvedValue(undefined);
   await render();
   await act(async () => host.querySelector("button")!.click());
-  expect(mocks.request).toHaveBeenCalledWith("/api/v1/auth/logout", {
-    method: "POST",
-  });
-  expect(mocks.token).toHaveBeenCalledWith(null);
+  expect(mocks.logout).toHaveBeenCalledOnce();
   expect(host.textContent).toContain("Login screen");
 });
-it("keeps session recovery available if server logout fails", async () => {
-  mocks.request.mockRejectedValue(new Error("Unable to connect"));
+it("stays locally signed out if server revocation must be retried later", async () => {
+  mocks.logout.mockRejectedValue(new Error("Unable to connect"));
   await render();
   await act(async () => host.querySelector("button")!.click());
-  expect(mocks.token).not.toHaveBeenCalled();
-  expect(host.textContent).toContain("Unable to connect");
-  expect(host.querySelector("button")?.disabled).toBe(false);
+  expect(mocks.logout).toHaveBeenCalledOnce();
+  expect(host.textContent).toContain("Login screen");
 });

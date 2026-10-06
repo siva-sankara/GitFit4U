@@ -4,7 +4,6 @@ import { Modal } from "../../components/Modal";
 import { GymLogoEditor } from "./GymLogoEditor";
 import { GymTermsEditor } from "./GymTermsEditor";
 import { WhatsAppConnectionSettings } from "../../components/WhatsAppConnectionSettings";
-import { OwnerClassManagement } from "./OwnerClassManagement";
 import { Link } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useCurrentUser } from "../../api/hooks";
@@ -12,6 +11,10 @@ import { apiRequest, type ApiEnvelope } from "../../services/apiClient";
 import { uploadDocumentBytes } from "../../services/documentUpload";
 import { LocationPicker } from "../../components/LocationPicker";
 import { validCoordinates, type LocatedPoint } from "../../services/location";
+import { Pagination, SectionAccordion } from "../../components/DataListControls";
+import { StatusBadge } from "../../components/StatusBadge";
+import { ClassCard } from "../../components/ClassCard";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import {
   EditForm,
   QueryState,
@@ -73,17 +76,21 @@ export function GymProfileEditor({
         <div>
           <span className="eyebrow">Your gym</span>
           <h1>{gym.data?.data?.name || "Gym profile"}</h1>
-          <p>Show members your space, what you offer, and when to visit.</p>
+          <p>Keep your gym identity, public details, gallery and member experience current.</p>
         </div>
-        {gym.data?.data?.status === "ACTIVE" &&
-          gym.data.data.platformSubscriptionStatus === "ACTIVE" && (
+        <div className="heading-actions">
+          {gym.data?.data?.status && <StatusBadge status={gym.data.data.status} />}
+          {gym.data?.data?.status === "ACTIVE" &&
+            gym.data.data.platformSubscriptionStatus === "ACTIVE" && (
             <Link
               className="btn btn-secondary"
-              to={`/gyms/${gym.data.data.slug}`}
+              to={`/gyms/${gym.data.data.slug}?from=settings`}
+              state={{ from: "gym-profile-settings" }}
             >
               View public gym page
             </Link>
           )}
+        </div>
       </PageHeader>
       {gym.data?.data &&
         (gym.data.data.status !== "ACTIVE" ||
@@ -96,34 +103,13 @@ export function GymProfileEditor({
             platform subscription is required for public checkout.
           </p>
         )}
-      <nav className="profile-section-nav" aria-label="Gym profile sections">
-        {[
-          "Details",
-          "Logo",
-          "WhatsApp",
-          "Memberships",
-          "Media",
-          "Location",
-          "Hours",
-          "Classes",
-          "Terms",
-        ].map((s) => (
-          <a key={s} href={`#gym-${s.toLowerCase()}`}>
-            {s}
-          </a>
-        ))}
-      </nav>
       <QueryState query={gym}>
         {gym.data?.data && (
-          <>
-            <GymLogoEditor
-              key={`logo-${gym.data.data._id}`}
-              gym={gym.data.data}
-              disabled={!canEdit}
-            />
-            {canEdit && <WhatsAppConnectionSettings />}
-            <section id="gym-details" className="panel form-section page-stack">
-              <h2>About your gym</h2>
+          <div className="gym-profile-sections">
+            <SectionAccordion id="gym-logo" title="Gym logo" description="The identity members see across GETFIT4U." defaultOpen>
+              <GymLogoEditor key={`logo-${gym.data.data._id}`} gym={gym.data.data} disabled={!canEdit} embedded />
+            </SectionAccordion>
+            <SectionAccordion id="gym-details" title="Basic and contact details" description="Gym name, description, contact channels and facilities." defaultOpen>
               <fieldset disabled={!canEdit} className="profile-fieldset">
                 <EditForm
                   method="PATCH"
@@ -153,50 +139,35 @@ export function GymProfileEditor({
                   ]}
                 />
               </fieldset>
-            </section>
+            </SectionAccordion>
             {permissions.includes("gym:read") && (
-              <GymProfilePlans
-                fields={planFields}
-                canWrite={permissions.includes("plan:write")}
-                slug={gym.data.data.slug}
-                published={
-                  gym.data.data.status === "ACTIVE" &&
-                  gym.data.data.platformSubscriptionStatus === "ACTIVE"
-                }
-              />
+              <SectionAccordion id="gym-memberships" title="Membership plans" description="Preview and manage the plans shown to members.">
+                <GymProfilePlans fields={planFields} canWrite={permissions.includes("plan:write")} slug={gym.data.data.slug} published={gym.data.data.status === "ACTIVE" && gym.data.data.platformSubscriptionStatus === "ACTIVE"} embedded />
+              </SectionAccordion>
             )}
-            <section id="gym-media" className="panel form-section page-stack">
-              <h2>Photos and videos</h2>
-              <p>
-                Add photos of your training areas and an MP4 tour. Choose a
-                photo as the cover for gym listings.
-              </p>
-              <GymMediaEditor
-                key={`media-${gym.data.data._id}`}
-                gym={gym.data.data}
-                disabled={!canEdit}
-              />
-            </section>
-            <section
-              id="gym-location"
-              className="panel form-section page-stack"
-            >
-              <h2>Location and entrance</h2>
+            <SectionAccordion id="gym-media" title="Media gallery" description={`${gym.data.data.mediaCount || gym.data.data.mediaAttachmentIds?.length || 0} photos and videos. Preview uses optimized thumbnails.`} defaultOpen>
+              <GymMediaEditor key={`media-${gym.data.data._id}`} gym={gym.data.data} disabled={!canEdit} />
+            </SectionAccordion>
+            <SectionAccordion id="gym-location" title="Address and location" description="Public address, entrance pin and attendance radius.">
               <GymLocationEditor gym={gym.data.data} disabled={!canEdit} />
-            </section>
-            <section id="gym-hours" className="panel form-section page-stack">
-              <h2>Opening hours</h2>
+            </SectionAccordion>
+            <SectionAccordion id="gym-hours" title="Opening hours" description="Weekly opening and closing schedule.">
               <GymHoursEditor gym={gym.data.data} disabled={!canEdit} />
-            </section>
-            <GymProfileClasses
-              fields={classFields}
-              canWrite={permissions.includes("class:write")}
-              canRead={permissions.includes("gym:read")}
-            />
-            <ClassReminderSettings gym={gym.data.data} disabled={!canEdit} />
-            <MembershipReminderSettings gym={gym.data.data} disabled={!canEdit} />
-            <GymTermsEditor terms={gym.data.data.terms} disabled={!canEdit} />
-          </>
+            </SectionAccordion>
+            <SectionAccordion id="gym-classes" title="Classes preview" description="The next three gym classes, without an internal scrolling panel." defaultOpen>
+              <GymProfileClasses fields={classFields} canWrite={permissions.includes("class:write")} canRead={permissions.includes("gym:read")} />
+            </SectionAccordion>
+            <SectionAccordion id="gym-communication" title="Notification and communication settings" description="WhatsApp connection and automated member reminders.">
+              <div className="gym-profile-nested-grid">
+                {canEdit && <WhatsAppConnectionSettings />}
+                <ClassReminderSettings gym={gym.data.data} disabled={!canEdit} />
+                <MembershipReminderSettings gym={gym.data.data} disabled={!canEdit} />
+              </div>
+            </SectionAccordion>
+            <SectionAccordion id="gym-terms" title="Social and public page settings" description="Gym-specific terms and public information.">
+              <GymTermsEditor terms={gym.data.data.terms} disabled={!canEdit} />
+            </SectionAccordion>
+          </div>
         )}
       </QueryState>
     </div>
@@ -241,7 +212,11 @@ export function GymMediaEditor({
     client = useQueryClient();
   const [file, setFile] = useState<File | null>(null),
     [progress, setProgress] = useState(0),
-    [error, setError] = useState("");
+    [error, setError] = useState(""),
+    [galleryOpen, setGalleryOpen] = useState(false),
+    [galleryPage, setGalleryPage] = useState(1),
+    [editingCaption, setEditingCaption] = useState<Row | null>(null),
+    [caption, setCaption] = useState("");
   const staged = useRef<Row | null>(null),
     abort = useRef<AbortController | null>(null),
     input = useRef<HTMLInputElement>(null);
@@ -306,7 +281,45 @@ export function GymMediaEditor({
     },
     onError: (e) => setError(e.message),
   });
-  const busy = upload.isPending || save.isPending;
+  const gallery = useData<Row[]>(
+    `/api/v1/owner/gym/media?page=${galleryPage}&limit=12`,
+    galleryOpen,
+  );
+  const remove = useMutation({
+    mutationFn: (mediaId: string) => apiRequest(`/api/v1/owner/gym/media/${mediaId}`, { method: "DELETE" }),
+    onSuccess: async () => client.invalidateQueries({ queryKey: ["api"] }),
+  });
+  const saveCaption = useMutation({
+    mutationFn: () => apiRequest(`/api/v1/owner/gym/media/${editingCaption!._id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ caption }),
+    }),
+    onSuccess: async () => {
+      setEditingCaption(null);
+      await client.invalidateQueries({ queryKey: ["api"] });
+    },
+  });
+  const busy = upload.isPending || save.isPending || remove.isPending;
+  const mediaCard = (m: Row) => (
+    <article className="gym-media-item" key={m._id}>
+      {m.mimeType.startsWith("video/") ? (
+        <video controls preload="metadata" src={m.url} aria-label={m.caption || m.name} />
+      ) : (
+        <img loading="lazy" src={m.thumbnailUrl || m.url} alt={m.caption || m.name} />
+      )}
+      <p>{m.caption || m.name}</p>
+      <div className="heading-actions gym-media-actions">
+        <a className="btn btn-ghost" href={m.url} target="_blank" rel="noreferrer">View</a>
+        {!disabled && <button type="button" className="btn btn-ghost" onClick={() => { setCaption(m.caption || ""); setEditingCaption(m); }}>Edit caption</button>}
+        {m.mimeType.startsWith("image/") && (
+          <button type="button" className="btn btn-secondary" disabled={disabled || busy || gym.coverAttachmentId === m._id} onClick={() => save.mutate({ coverAttachmentId: m._id })}>
+            {gym.coverAttachmentId === m._id ? "Cover photo" : "Set as cover"}
+          </button>
+        )}
+        <button type="button" className="btn btn-ghost" disabled={disabled || busy} onClick={() => remove.mutate(m._id)}>Delete</button>
+      </div>
+    </article>
+  );
   return (
     <>
       <fieldset
@@ -359,54 +372,28 @@ export function GymMediaEditor({
       {upload.isSuccess && !file && (
         <p role="status">Media added to your gym profile.</p>
       )}
-      <div className="gym-media-grid">
-        {(gym.media || []).map((m: Row) => (
-          <article className="gym-media-item" key={m._id}>
-            {m.mimeType.startsWith("video/") ? (
-              <video
-                controls
-                preload="metadata"
-                src={m.url}
-                aria-label={m.name}
-              />
-            ) : (
-              <img loading="lazy" src={m.url} alt={m.name} />
-            )}
-            <p>{m.name}</p>
-            <div className="heading-actions">
-              {m.mimeType.startsWith("image/") && (
-                <button
-                  className="btn btn-secondary"
-                  disabled={disabled || busy || gym.coverAttachmentId === m._id}
-                  onClick={() => save.mutate({ coverAttachmentId: m._id })}
-                >
-                  {gym.coverAttachmentId === m._id
-                    ? "Cover photo"
-                    : "Use as cover"}
-                </button>
-              )}
-              <button
-                className="btn btn-ghost"
-                disabled={disabled || busy}
-                onClick={() =>
-                  save.mutate({
-                    mediaAttachmentIds: gym.mediaAttachmentIds.filter(
-                      (id: string) => id !== m._id,
-                    ),
-                    ...(gym.coverAttachmentId === m._id
-                      ? { coverAttachmentId: null }
-                      : {}),
-                  })
-                }
-              >
-                Remove from profile
-              </button>
-            </div>
-          </article>
-        ))}
+      {(gym.mediaCount || gym.media?.length || 0) > (gym.media?.length || 0) && (
+        <div className="section-inline-heading"><span>Showing a lightweight preview</span><button type="button" className="btn btn-secondary" onClick={() => { setGalleryPage(1); setGalleryOpen(true); }}>See all media ({gym.mediaCount})</button></div>
+      )}
+      <div className="gym-media-grid gym-media-preview-grid">
+        {(gym.media || []).slice(0, 4).map((m: Row) => mediaCard(m))}
       </div>
       {!gym.media?.length && <p>No uploaded photos or videos yet.</p>}
       <SaveResult save={save} />
+      <Modal open={galleryOpen} title="Full media gallery" onClose={() => setGalleryOpen(false)} wide>
+        <QueryState query={gallery}>
+          <div className="gym-media-grid full-media-gallery">{gallery.data?.data.map((item) => mediaCard(item))}</div>
+          {!gallery.data?.data.length && <p className="state-card">No media found.</p>}
+          <Pagination page={galleryPage} limit={12} total={gallery.data?.meta?.total || 0} loading={gallery.isFetching} onPageChange={setGalleryPage} />
+        </QueryState>
+      </Modal>
+      <Modal open={!!editingCaption} title="Edit media caption" onClose={() => !saveCaption.isPending && setEditingCaption(null)}>
+        <form className="page-stack" onSubmit={(event) => { event.preventDefault(); saveCaption.mutate(); }}>
+          <label className="field"><span>Caption</span><textarea className="textarea" maxLength={500} value={caption} onChange={(event) => setCaption(event.target.value)} /></label>
+          <button className="btn btn-primary" disabled={saveCaption.isPending}>{saveCaption.isPending ? "Saving…" : "Save caption"}</button>
+          {saveCaption.isError && <p className="form-alert" role="alert">{saveCaption.error.message}</p>}
+        </form>
+      </Modal>
     </>
   );
 }
@@ -655,7 +642,7 @@ export function GymLocationEditor({
   );
 }
 function GymProfileClasses({
-  fields,
+  fields: _fields,
   canWrite,
   canRead,
 }: {
@@ -663,7 +650,31 @@ function GymProfileClasses({
   canWrite: boolean;
   canRead: boolean;
 }) {
-  return <OwnerClassManagement embedded canRead={canRead} canWrite={canWrite} />;
+  const [page, setPage] = useState(1);
+  const classes = useData<Row[]>(`/api/v1/owner/classes?page=${page}&limit=3`, canRead);
+  const pages = classes.data?.meta?.pages || 1;
+  return (
+    <div className="page-stack gym-class-preview">
+      <div className="section-inline-heading">
+        <p>Preview scheduled sessions here. Open Classes for editing, bookings, trainers and status controls.</p>
+        <Link className="btn btn-secondary" to="/owner/classes">See all classes</Link>
+      </div>
+      <QueryState query={classes}>
+        <div className="class-card-grid class-preview-carousel">
+          {classes.data?.data.map((session) => <ClassCard key={session.publicId} session={session} />)}
+        </div>
+        {!classes.data?.data.length && <p className="state-card">No classes are scheduled.</p>}
+      </QueryState>
+      {(classes.data?.meta?.total || 0) > 3 && (
+        <div className="class-preview-controls" aria-label="Class preview pages">
+          <button type="button" className="icon-btn" aria-label="Previous classes" disabled={page <= 1 || classes.isFetching} onClick={() => setPage((value) => value - 1)}><ChevronLeft size={18} /></button>
+          <span>Page {page} of {pages}</span>
+          <button type="button" className="icon-btn" aria-label="Next classes" disabled={page >= pages || classes.isFetching} onClick={() => setPage((value) => value + 1)}><ChevronRight size={18} /></button>
+        </div>
+      )}
+      {canWrite && <Link className="btn btn-primary class-preview-add" to="/owner/classes">Add or manage classes</Link>}
+    </div>
+  );
 }
 
 export function GymProfilePlans({
@@ -671,16 +682,18 @@ export function GymProfilePlans({
   canWrite,
   slug,
   published = true,
+  embedded = false,
 }: {
   fields: Field[];
   canWrite: boolean;
   slug: string;
   published?: boolean;
+  embedded?: boolean;
 }) {
   const plans = useData<Row[]>("/api/v1/owner/plans");
   const [editing, setEditing] = useState<Row | null>(null);
   return (
-    <section id="gym-memberships" className="panel form-section page-stack">
+    <section id={embedded ? undefined : "gym-memberships"} className={`${embedded ? "" : "panel form-section "}page-stack`}>
       <div className="page-heading">
         <div>
           <h2>Member subscription plans</h2>

@@ -85,17 +85,33 @@ afterEach(async () => {
   await act(async () => root.unmount());
   host.remove();
 });
-async function render() {
+async function render(source?: { returnTo: string; returnLabel: string }) {
   await act(async () =>
     root.render(
       <MemoryRouter
-        initialEntries={["/messages?conversation=conversation-one"]}
+        initialEntries={[{
+          pathname: "/messages",
+          search: "?conversation=conversation-one",
+          state: source,
+        }]}
       >
         <MessagesPage />
       </MemoryRouter>,
     ),
   );
 }
+it("offers a source-aware back link to the filtered member directory", async () => {
+  await render({
+    returnTo: "/owner/members?page=2&status=ACTIVE",
+    returnLabel: "Back to members",
+  });
+  const link = host.querySelector<HTMLAnchorElement>(
+    'a[aria-label="Back to members"]',
+  );
+  expect(link?.getAttribute("href")).toBe(
+    "/owner/members?page=2&status=ACTIVE",
+  );
+});
 it("aligns messages by authenticated IDs even when sender names are identical", async () => {
   await render();
   expect(host.querySelector(".outgoing")?.textContent).toContain("My message");

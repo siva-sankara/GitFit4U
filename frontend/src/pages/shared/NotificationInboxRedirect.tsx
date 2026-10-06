@@ -19,5 +19,5 @@ export function NotificationInboxRedirect({
           : "app";
   const search = new URLSearchParams(location.search);
   if (destination === "messages" && params.conversationId) search.set("conversation", params.conversationId);
-  return <Navigate to={`/${prefix}/${destination}${search.size ? `?${search}` : ""}`} replace />;
+  return <Navigate to={`/${prefix}/${destination}${search.size ? `?${search}` : ""}`} state={location.state} replace />;
 }

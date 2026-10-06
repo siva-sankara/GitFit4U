@@ -315,7 +315,7 @@ function ProfileContent({ id }: { id: string }) {
     queryKey: ["api", endpoint, "stories", storyPage],
     queryFn: () =>
       apiRequest<Paged<Content>>(
-        `${endpoint}/stories?page=${storyPage}&limit=20`,
+        `${endpoint}/stories?page=${storyPage}&limit=10`,
       ),
     enabled: Boolean(profile.data?.data.canView),
     refetchInterval: 30000,

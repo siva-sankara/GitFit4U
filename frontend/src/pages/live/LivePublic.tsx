@@ -11,6 +11,7 @@ import { useState, useEffect, useRef } from "react";
 import { flushSync } from "react-dom";
 import {
   Link,
+  useLocation,
   useNavigate,
   useParams,
   useSearchParams,
@@ -27,6 +28,7 @@ import { Modal } from "../../components/Modal";
 import { ReviewEditor } from "../../components/ReviewEditor";
 import { GymIdentity } from "../../components/GymIdentity";
 import { GymOffers, PromotionPlacement } from "../../components/PromotionPlacement";
+import { Pagination } from "../../components/DataListControls";
 export function DatabaseGymCard({ gym }: { gym: Row }) {
   const { favorites, toggleFavorite } = useApp();
   const navigate = useNavigate();
@@ -223,11 +225,25 @@ export function LiveExplore() {
   const [maximumPrice, setMaximumPrice] = useState(params.get("maxPrice") ? String(Number(params.get("maxPrice")) / 100) : "");
   const [priceError, setPriceError] = useState("");
   useEffect(() => { setMaximumPrice(params.get("maxPrice") ? String(Number(params.get("maxPrice")) / 100) : ""); setPriceError(""); }, [params]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const value = q.trim();
+      setParams((current) => {
+        if ((current.get("q") || "") === value) return current;
+        const next = new URLSearchParams(current);
+        if (value) next.set("q", value); else next.delete("q");
+        next.set("page", "1");
+        return next;
+      }, { replace: true });
+    }, 350);
+    return () => window.clearTimeout(timer);
+  }, [q, setParams]);
   const nearby = params.has("lat");
   const query = useData<Row[]>(
     `/api/v1/public/gyms${nearby ? "/nearby" : ""}?${params}`,
   );
   const page = Number(params.get("page") || 1);
+  const limit = [10, 25, 50].includes(Number(params.get("limit"))) ? Number(params.get("limit")) : 10;
   function filter(key: string, value: string) {
     const next = new URLSearchParams(params);
     if (value) next.set(key, value); else next.delete(key);
@@ -398,31 +414,7 @@ export function LiveExplore() {
             <p>Try a wider area or fewer filters.</p>
           </section>
         )}
-        <footer className="table-footer">
-          <button
-            disabled={page <= 1}
-            onClick={() => {
-              const next = new URLSearchParams(params);
-              next.set("page", String(page - 1));
-              setParams(next);
-            }}
-          >
-            Previous
-          </button>
-          <span>
-            Page {page} of {query.data?.meta?.pages || 1}
-          </span>
-          <button
-            disabled={page >= (query.data?.meta?.pages || 1)}
-            onClick={() => {
-              const next = new URLSearchParams(params);
-              next.set("page", String(page + 1));
-              setParams(next);
-            }}
-          >
-            Next
-          </button>
-        </footer>
+        <Pagination page={page} limit={limit} total={query.data?.meta?.total || 0} loading={query.isFetching} onPageChange={(value) => { const next = new URLSearchParams(params); next.set("page", String(value)); next.set("limit", String(limit)); setParams(next); }} onLimitChange={(value) => { const next = new URLSearchParams(params); next.set("page", "1"); next.set("limit", String(value)); setParams(next); }} />
       </QueryState>
     </div>
   );
@@ -778,6 +770,7 @@ export function PaymentCheckout({
 }
 export function LiveGymDetails() {
   const { slug } = useParams(),
+    location = useLocation(),
     query = useQuery<ApiEnvelope<Row>>({
       queryKey: [
         "api",
@@ -798,11 +791,29 @@ export function LiveGymDetails() {
     navigate = useNavigate(),
     { favorites, toggleFavorite } = useApp();
   const [params, setParams] = useSearchParams();
+  const fromSettings =
+    params.get("from") === "settings" ||
+    (location.state as { from?: string } | null)?.from === "gym-profile-settings";
   const data = query.data?.data,
     gym = data?.gym;
   const [reviewPage, setReviewPage] = useState(1);
+  const [classPage, setClassPage] = useState(1), [classLimit, setClassLimit] = useState(10);
+  const [mediaPage, setMediaPage] = useState(1), [mediaEnabled, setMediaEnabled] = useState(false);
+  const [planPage, setPlanPage] = useState(1), [planLimit, setPlanLimit] = useState(10);
   const reviewsQuery = useData<Row[]>(
     `/api/v1/public/gyms/${encodeURIComponent(slug || "")}/reviews?page=${reviewPage}&limit=10`,
+    !!gym,
+  );
+  const classesQuery = useData<Row[]>(
+    `/api/v1/public/gyms/${encodeURIComponent(slug || "")}/classes?page=${classPage}&limit=${classLimit}`,
+    !!gym,
+  );
+  const mediaQuery = useData<Row[]>(
+    `/api/v1/public/gyms/${encodeURIComponent(slug || "")}/media?page=${mediaPage}&limit=12`,
+    !!gym && mediaEnabled,
+  );
+  const plansQuery = useData<Row[]>(
+    `/api/v1/public/gyms/${encodeURIComponent(slug || "")}/plans?page=${planPage}&limit=${planLimit}`,
     !!gym,
   );
   const ownReview = useData<Row | null>(
@@ -825,6 +836,10 @@ export function LiveGymDetails() {
     setReview(false);
     setPlanNotice("");
     setReviewPage(1);
+    setClassPage(1);
+    setMediaPage(1);
+    setMediaEnabled(false);
+    setPlanPage(1);
     join.reset();
   }, [slug]);
   useEffect(() => {
@@ -864,12 +879,17 @@ export function LiveGymDetails() {
               key={gym.publicId}
               data={{
                 ...data,
+                gym: { ...data.gym, media: mediaQuery.data?.data || data.gym?.media },
+                plans: plansQuery.data?.data || data?.plans,
+                classes: classesQuery.data?.data || data?.classes,
                 reviews: reviewsQuery.data?.data || data?.reviews,
                 ownReview: ownReview.data?.data,
                 reviewDistribution: (reviewsQuery.data?.meta as any)
                   ?.distribution,
               }}
               saved={favorites.includes(gym.publicId)}
+              backTo={fromSettings ? "/owner/gym-profile" : "/explore"}
+              backLabel={fromSettings ? "Back to Gym Profile Settings" : "Back to Explore gyms"}
               onFavorite={() =>
                 getAccessToken()
                   ? toggleFavorite(gym.publicId)
@@ -918,6 +938,31 @@ export function LiveGymDetails() {
                   ? reviewsQuery.error.message
                   : undefined,
                 onPage: setReviewPage,
+              }}
+              classesState={{
+                page: classPage,
+                limit: classLimit,
+                total: classesQuery.data?.meta?.total || 0,
+                loading: classesQuery.isFetching,
+                error: classesQuery.isError ? classesQuery.error.message : undefined,
+                onPage: setClassPage,
+                onLimit: (value) => { setClassLimit(value); setClassPage(1); },
+              }}
+              mediaState={{
+                page: mediaPage,
+                limit: 12,
+                total: mediaQuery.data?.meta?.total || gym.mediaCount || gym.media?.length || 0,
+                loading: mediaQuery.isFetching,
+                onOpen: () => setMediaEnabled(true),
+                onPage: setMediaPage,
+              }}
+              plansState={{
+                page: planPage,
+                limit: planLimit,
+                total: plansQuery.data?.meta?.total || 0,
+                loading: plansQuery.isFetching,
+                onPage: setPlanPage,
+                onLimit: (value) => { setPlanLimit(value); setPlanPage(1); },
               }}
             />
             <Modal

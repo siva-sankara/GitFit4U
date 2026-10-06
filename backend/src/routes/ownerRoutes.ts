@@ -1,10 +1,14 @@
 import { Router } from "express";
 import rateLimit from "express-rate-limit";
+import multer from "multer";
 import { resendMemberInvitation } from "../controllers/accountInvitationController.js";
 import { z } from "zod";
 import * as controller from "../controllers/ownerController.js";
 import * as members from "../controllers/memberManagementController.js";
 import * as attendance from "../controllers/attendanceController.js";
+import * as communication from "../controllers/memberCommunicationController.js";
+import * as memberImports from "../controllers/memberImportController.js";
+import * as ownerPayments from "../controllers/ownerPaymentController.js";
 import {
   ownerMemberCreateInput,
   ownerMemberUpdateInput,
@@ -56,6 +60,11 @@ ownerRoutes.use((req, _res, next) => {
     ["POST", "PATCH"].includes(req.method) &&
     schemas[base] &&
     !(base === "/members" && req.path.includes("/join/")) &&
+    !(base === "/members" && req.path.includes("/communication/")) &&
+    !(base === "/members" && req.path.includes("/import")) &&
+    !(base === "/members" && req.path.endsWith("/export")) &&
+    !(base === "/members" && req.path.includes("/bulk/")) &&
+    !(base === "/gym" && req.path.includes("/media")) &&
     !req.path.endsWith("/invitation/resend") &&
     !(base === "/classes" && req.path.endsWith("/cancel"))
   ) {
@@ -116,10 +125,123 @@ ownerRoutes.patch(
   requirePermission("gym:update"),
   controller.updateGym,
 );
+ownerRoutes.get("/gym/media", requirePermission("gym:read"), controller.listGymMedia);
+ownerRoutes.patch("/gym/media/:mediaId", requirePermission("gym:update"), controller.updateGymMediaCaption);
+ownerRoutes.delete("/gym/media/:mediaId", requirePermission("gym:update"), controller.deleteGymMedia);
 ownerRoutes.get(
   "/members",
   requirePermission("member:read"),
   controller.listMembers,
+);
+const memberImportUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5_000_000, files: 1, fields: 5 },
+  fileFilter: (_req, file, done) =>
+    done(
+      null,
+      [".csv", ".xls", ".xlsx"].some((extension) =>
+        file.originalname.toLowerCase().endsWith(extension),
+      ),
+    ),
+});
+const importRateLimit = rateLimit({
+  windowMs: 15 * 60_000,
+  limit: 30,
+  keyGenerator: (req) => req.auth!.userId,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+ownerRoutes.get(
+  "/members/import/template",
+  requirePermission("member:write"),
+  memberImports.memberImportTemplate,
+);
+ownerRoutes.post(
+  "/members/import/preview",
+  requirePermission("member:write"),
+  importRateLimit,
+  memberImportUpload.single("file"),
+  memberImports.uploadMemberImport,
+);
+ownerRoutes.post(
+  "/members/import/:importId/validate",
+  requirePermission("member:write"),
+  importRateLimit,
+  memberImports.validateMemberImport,
+);
+ownerRoutes.post(
+  "/members/import/:importId/confirm",
+  requirePermission("member:write"),
+  importRateLimit,
+  requireIdempotencyKey,
+  memberImports.confirmMemberImport,
+);
+ownerRoutes.get(
+  "/members/import/:importId/errors",
+  requirePermission("member:write"),
+  memberImports.memberImportErrors,
+);
+ownerRoutes.post(
+  "/members/export",
+  requirePermission("member:read"),
+  rateLimit({ windowMs: 15 * 60_000, limit: 20, keyGenerator: (req) => req.auth!.userId, standardHeaders: true, legacyHeaders: false }),
+  memberImports.exportMembers,
+);
+ownerRoutes.post(
+  "/members/bulk/assign-trainer",
+  requirePermission("member:write"),
+  requireIdempotencyKey,
+  memberImports.bulkAssignTrainer,
+);
+ownerRoutes.post(
+  "/members/bulk/notify",
+  requirePermission("member:write"),
+  rateLimit({ windowMs: 15 * 60_000, limit: 12, keyGenerator: (req) => req.auth!.userId, standardHeaders: true, legacyHeaders: false }),
+  requireIdempotencyKey,
+  memberImports.bulkNotifyMembers,
+);
+ownerRoutes.post(
+  "/members/:id/communication/in-app",
+  requirePermission("member:write"),
+  rateLimit({
+    windowMs: 60_000,
+    limit: 30,
+    keyGenerator: (req) => req.auth!.userId,
+    standardHeaders: true,
+    legacyHeaders: false,
+  }),
+  communication.openInAppConversation,
+);
+ownerRoutes.post(
+  "/members/:id/communication/whatsapp-reminder",
+  requirePermission("member:write"),
+  rateLimit({
+    windowMs: 15 * 60_000,
+    limit: 30,
+    standardHeaders: true,
+    legacyHeaders: false,
+  }),
+  requireIdempotencyKey,
+  validate(
+    z.object({
+      body: z
+        .object({
+          reason: z
+            .enum([
+              "activation_invitation",
+              "renewal_reminder",
+              "payment_reminder",
+              "general_followup",
+            ])
+            .optional(),
+          source: z.literal("members_list"),
+        })
+        .strict(),
+      params: z.object({ id: z.string().min(3).max(64) }),
+      query: z.object({}),
+    }),
+  ),
+  communication.sendWhatsAppReminder,
 );
 ownerRoutes.post(
   "/members",
@@ -135,6 +257,11 @@ ownerRoutes.patch(
   "/members/:id",
   requirePermission("member:write"),
   members.updateMember,
+);
+ownerRoutes.delete(
+  "/members/:id",
+  requirePermission("member:write"),
+  members.deleteMember,
 );
 ownerRoutes.post(
   "/members/:id/join/:decision",
@@ -247,6 +374,25 @@ ownerRoutes.post(
   requirePermission("member:write"),
   requireIdempotencyKey,
   controller.subscriptionAction,
+);
+ownerRoutes.get(
+  "/classes/:id/bookings",
+  requirePermission("gym:read"),
+  controller.listClassBookings,
+);
+ownerRoutes.post(
+  "/payments/:id/collect",
+  requirePermission("finance:read"),
+  requirePermission("member:write"),
+  requireIdempotencyKey,
+  ownerPayments.collectPayment,
+);
+ownerRoutes.post(
+  "/payments/:id/reminder",
+  requirePermission("finance:read"),
+  requirePermission("member:write"),
+  requireIdempotencyKey,
+  ownerPayments.remindPayment,
 );
 ownerRoutes.get(
   "/offers",

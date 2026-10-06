@@ -156,6 +156,7 @@ const subscriptionSchema = new Schema(
 );
 subscriptionSchema.index({ userId: 1, status: 1, endsAt: 1 });
 subscriptionSchema.index({ gymId: 1, status: 1, endsAt: 1 });
+subscriptionSchema.index({ gymId: 1, renewalAt: 1, status: 1 });
 subscriptionSchema.index({ gymId: 1, type: 1, "planSnapshot.planId": 1 });
 subscriptionSchema.index({ type: 1, status: 1, endsAt: 1, _id: 1 });
 

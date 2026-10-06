@@ -46,11 +46,27 @@ try {
       partialFilterExpression: { dedupeKey: { $type: "string" } },
     },
   );
+  const otpCollection = mongoose.connection.collection("otpchallenges");
+  const otpIndexes = await otpCollection
+    .listIndexes()
+    .toArray()
+    .catch((error) => {
+      if (error.code === 26) return [];
+      throw error;
+    });
+  // Older releases deleted challenges at their five-minute verification
+  // expiry, which also erased the evidence needed for the 15-minute abuse
+  // window. Retention now uses purgeAt; no challenge documents are deleted by
+  // this migration itself.
+  const oldOtpExpiry = otpIndexes.find(
+    (index) => index.key.expiresAt === 1 && index.expireAfterSeconds !== undefined,
+  );
+  if (oldOtpExpiry?.name) await otpCollection.dropIndex(oldOtpExpiry.name);
   await import("../app.js");
   for (const model of Object.values(mongoose.models))
     await model.createIndexes();
   console.log(
-    "Database indexes created; notification migration completed; records preserved.",
+    "Database indexes created; notification and OTP retention migrations completed; records preserved.",
   );
 } catch (error) {
   console.error(

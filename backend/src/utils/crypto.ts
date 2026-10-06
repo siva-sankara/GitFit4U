@@ -9,8 +9,15 @@ export function randomDigits(length = 6): string {
 
 export function hashOtp(challengeId: string, code: string): string {
   return crypto
-    .createHmac("sha256", env.JWT_ACCESS_SECRET)
+    .createHmac("sha256", env.AUTH_OTP_HMAC_SECRET)
     .update(`${challengeId}:${code}`)
+    .digest("hex");
+}
+
+export function hashOtpContext(kind: string, value: string): string {
+  return crypto
+    .createHmac("sha256", env.AUTH_OTP_HMAC_SECRET)
+    .update(`${kind}:${value}`)
     .digest("hex");
 }
 

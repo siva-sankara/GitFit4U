@@ -229,6 +229,7 @@ const favoriteSchema = new Schema(
   { timestamps: true },
 );
 favoriteSchema.index({ userId: 1, gymId: 1 }, { unique: true });
+favoriteSchema.index({ userId: 1, createdAt: -1 });
 const referralSchema = new Schema(
   {
     referrerId: {
@@ -250,6 +251,7 @@ const referralSchema = new Schema(
   },
   { timestamps: true },
 );
+referralSchema.index({ referrerId: 1, createdAt: -1 });
 
 const bankAccountSchema = new Schema(
   {

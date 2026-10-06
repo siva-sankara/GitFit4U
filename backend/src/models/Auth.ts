@@ -55,17 +55,57 @@ const otpChallengeSchema = new Schema(
   {
     publicId: { type: String, required: true, unique: true },
     phone: { type: String, required: true, index: true },
-    purpose: { type: String, enum: ["LOGIN", "STEP_UP", "ACCOUNT_RECOVERY"], default: "LOGIN" },
+    purpose: { type: String, enum: ["SIGNUP", "LOGIN", "STEP_UP", "ACCOUNT_RECOVERY"], default: "LOGIN" },
+    pendingOperationId: { type: Schema.Types.ObjectId, ref: "PendingAuthOperation", index: true },
     codeHash: { type: String, required: true, select: false },
+    requestIpHash: { type: String, required: true, select: false },
     attempts: { type: Number, default: 0 },
     maxAttempts: { type: Number, default: 5 },
     expiresAt: { type: Date, required: true },
-    consumedAt: Date
+    resendAvailableAt: { type: Date, required: true },
+    consumedAt: Date,
+    providerMessageId: { type: String, unique: true, sparse: true, index: true },
+    deliveryStatus: {
+      type: String,
+      enum: ["PENDING", "SUBMITTED", "SENT", "DELIVERED", "READ", "FAILED", "UNKNOWN"],
+      default: "PENDING",
+      index: true,
+    },
+    providerErrorCode: String,
+    submittedAt: Date,
+    failedAt: Date,
+    purgeAt: { type: Date, required: true },
   },
   { timestamps: true }
 );
-otpChallengeSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+otpChallengeSchema.index({ purgeAt: 1 }, { expireAfterSeconds: 0 });
 otpChallengeSchema.index({ phone: 1, purpose: 1, createdAt: -1 });
+otpChallengeSchema.index({ requestIpHash: 1, createdAt: -1 });
+
+const pendingAuthOperationSchema = new Schema(
+  {
+    publicId: { type: String, required: true, unique: true },
+    type: { type: String, enum: ["SIGNUP"], required: true },
+    name: { type: String, required: true, trim: true, maxlength: 120 },
+    email: { type: String, required: true, trim: true, lowercase: true, index: true },
+    phone: { type: String, required: true, trim: true, index: true },
+    role: { type: String, enum: ["USER", "GYM_OWNER"], required: true },
+    passwordHash: { type: String, required: true, select: false },
+    status: {
+      type: String,
+      enum: ["PENDING", "COMPLETED", "CANCELLED"],
+      default: "PENDING",
+      index: true,
+    },
+    completedAt: Date,
+    expiresAt: { type: Date, required: true },
+    purgeAt: { type: Date, required: true },
+  },
+  { timestamps: true },
+);
+pendingAuthOperationSchema.index({ purgeAt: 1 }, { expireAfterSeconds: 0 });
+pendingAuthOperationSchema.index({ phone: 1, status: 1, createdAt: -1 });
+pendingAuthOperationSchema.index({ email: 1, status: 1, createdAt: -1 });
 
 const passwordResetGrantSchema = new Schema({
   publicId: { type: String, required: true, unique: true },
@@ -79,4 +119,5 @@ export const AuthIdentity = models.AuthIdentity || model("AuthIdentity", authIde
 export const RoleAssignment = models.RoleAssignment || model("RoleAssignment", roleAssignmentSchema);
 export const Session = models.Session || model("Session", sessionSchema);
 export const OtpChallenge = models.OtpChallenge || model("OtpChallenge", otpChallengeSchema);
+export const PendingAuthOperation = models.PendingAuthOperation || model("PendingAuthOperation", pendingAuthOperationSchema);
 export const PasswordResetGrant = models.PasswordResetGrant || model("PasswordResetGrant", passwordResetGrantSchema);

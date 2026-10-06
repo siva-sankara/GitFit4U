@@ -28,9 +28,11 @@ it("pages through both classes and booking history, and cancels a booking outsid
   await act(async () => root.render(<MemoryRouter><QueryClientProvider client={client}><UserClassesPage /></QueryClientProvider></MemoryRouter>));
   await until(() => host.textContent!.includes("Booking page 1") && host.textContent!.includes("Class page 1"));
   expect(host.querySelector(".class-card")!.textContent).toContain("Cancel booking");
-  const click = async (text: string) => act(async () => Array.from(host.querySelectorAll("button")).find((button) => button.textContent === text)!.click());
-  await click("Next classes"); await until(() => host.textContent!.includes("Class page 2"));
-  await click("Next bookings"); await until(() => host.textContent!.includes("Booking page 2"));
+  const paginations = host.querySelectorAll<HTMLElement>('[aria-label="Pagination"]');
+  await act(async () => paginations[0].querySelector<HTMLButtonElement>('[aria-label="Next page"]')!.click());
+  await until(() => host.textContent!.includes("Class page 2"));
+  await act(async () => paginations[1].querySelector<HTMLButtonElement>('[aria-label="Next page"]')!.click());
+  await until(() => host.textContent!.includes("Booking page 2"));
   await act(async () => host.querySelector<HTMLButtonElement>("tbody button")!.click());
   await until(() => mocks.request.mock.calls.some(([path, options]) => path === "/api/v1/users/classes/history-class/bookings/history-booking" && options?.method === "DELETE"));
 });
@@ -90,7 +92,7 @@ it("does not reuse another account's class or booking cache while the new accoun
 it("searches only the subscribed class endpoint and resets pagination", async () => {
   await act(async () => root.render(<MemoryRouter><QueryClientProvider client={client}><UserClassesPage /></QueryClientProvider></MemoryRouter>));
   await until(() => host.textContent!.includes("Class page 1"));
-  await act(async () => [...host.querySelectorAll("button")].find(button => button.textContent === "Next classes")!.click());
+  await act(async () => host.querySelector<HTMLElement>('[aria-label="Pagination"]')!.querySelector<HTMLButtonElement>('[aria-label="Next page"]')!.click());
   await until(() => host.textContent!.includes("Class page 2"));
   const input = host.querySelector<HTMLInputElement>('input[type="search"]')!;
   await act(async () => {

@@ -159,6 +159,11 @@ export const notificationEvents = {
     "Platform announcement",
     "A new platform announcement is available.",
   ],
+  "gym.announcement": [
+    "GYM",
+    "Update from your gym",
+    "Your gym has shared a member update. Open GETFIT4U to read it.",
+  ],
   "gym.activated": ["GYM", "Gym activated", "Your gym is now active."],
   "gym.suspended": [
     "GYM",

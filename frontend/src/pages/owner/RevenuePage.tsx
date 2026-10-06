@@ -124,10 +124,10 @@ export function RevenueAnalytics({ embedded = false }: { embedded?: boolean }) {
               ))}
               <article className="panel revenue-kpi">
                 <span>Transactions</span>
-                <strong>{data.transactionCount || 0}</strong>
+                <strong>{data.transactionCount }</strong>
               </article>
             </div>
-            <section className="panel form-section">
+            {data.series?.length  && (   <section className="panel form-section">
               <h2>Revenue over time</h2>
               <p>
                 Dates use {data.dateRangeTimezone}. Refunds reduce the original
@@ -193,7 +193,8 @@ export function RevenueAnalytics({ embedded = false }: { embedded?: boolean }) {
                   {peak.transactionCount || 0} transactions.
                 </p>
               )}
-            </section>
+            </section>)}
+         
           </>
         )}
       </QueryState>

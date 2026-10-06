@@ -10,11 +10,11 @@ const mocks = vi.hoisted(() => ({
   register: vi.fn(),
   onMessage: vi.fn(),
 }));
-vi.mock("firebase/app", () => ({
+vi.mock("@firebase/app", () => ({
   getApps: () => [],
   initializeApp: () => ({}),
 }));
-vi.mock("firebase/messaging", () => ({
+vi.mock("@firebase/messaging", () => ({
   getMessaging: () => ({}),
   getToken: mocks.getToken,
   deleteToken: mocks.remove,

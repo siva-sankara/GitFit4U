@@ -45,6 +45,7 @@ const gymSchema = new Schema(
     gallery: [{ type: String }],
     videos: [{ type: String }],
     mediaAttachmentIds: [{ type: Schema.Types.ObjectId, ref: "Attachment" }],
+    mediaCaptions: { type: Map, of: { type: String, maxlength: 500 }, default: {} },
     coverAttachmentId: { type: Schema.Types.ObjectId, ref: "Attachment" },
     benefits: [{ type: String }],
     facilities: [{ type: String }],
@@ -128,6 +129,7 @@ const gymSchema = new Schema(
 );
 
 gymSchema.index({ location: "2dsphere" });
+gymSchema.index({ ownerId: 1, status: 1, createdAt: -1 });
 gymSchema.index({
   status: 1,
   verificationStatus: 1,

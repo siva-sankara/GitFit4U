@@ -1,5 +1,5 @@
-import { initializeApp } from "firebase/app";
-import { getMessaging, onBackgroundMessage } from "firebase/messaging/sw";
+import { initializeApp } from "@firebase/app";
+import { getMessaging, onBackgroundMessage } from "@firebase/messaging/sw";
 import { firebaseConfig } from "./services/firebaseConfig";
 const worker = self as unknown as {
   location: Location;

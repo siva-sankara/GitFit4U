@@ -13,6 +13,7 @@ import { Modal } from "../../components/Modal";
 import { StatusBadge } from "../../components/StatusBadge";
 import { GymIdentity } from "../../components/GymIdentity";
 import "../../styles/member-workspace.css";
+import { Pagination } from "../../components/DataListControls";
 
 export interface MemberSubscription {
   _id: string;
@@ -242,13 +243,13 @@ export function MemberSubscriptions() {
   const location = useLocation();
   const joinedGymName: unknown = location.state?.joinedGymName;
   const client = useQueryClient();
-  const [page, setPage] = useState(1);
+  const [page, setPage] = useState(1), [limit, setLimit] = useState(10);
   const [status, setStatus] = useState("");
   const [search, setSearch] = useState("");
   const [draftSearch, setDraftSearch] = useState("");
   const [selection, setSelection] = useState<Selection | null>(null);
   const [notice, setNotice] = useState("");
-  const path = `${resourcePath}?${new URLSearchParams({ page: String(page), limit: "12", status, q: search })}`;
+  const path = `${resourcePath}?${new URLSearchParams({ page: String(page), limit: String(limit), status, q: search })}`;
   const query = useQuery({
     queryKey: ["api", path],
     queryFn: () => apiRequest<ApiEnvelope<MemberSubscription[]>>(path),
@@ -575,26 +576,7 @@ export function MemberSubscriptions() {
         </div>
       )}
       {!!rows.length && (
-        <footer className="table-footer panel">
-          <span>
-            {meta?.total ?? rows.length} memberships · Page {meta?.page || page}{" "}
-            of {meta?.pages || 1}
-          </span>
-          <div>
-            <button
-              disabled={page <= 1 || query.isFetching}
-              onClick={() => setPage((previous) => previous - 1)}
-            >
-              Previous
-            </button>
-            <button
-              disabled={page >= (meta?.pages || 1) || query.isFetching}
-              onClick={() => setPage((previous) => previous + 1)}
-            >
-              Next
-            </button>
-          </div>
-        </footer>
+        <div className="panel"><Pagination page={page} limit={limit} total={meta?.total || 0} loading={query.isFetching} onPageChange={setPage} onLimitChange={(value) => { setLimit(value); setPage(1); }} /></div>
       )}
       {selection && (
         <SubscriptionCommand

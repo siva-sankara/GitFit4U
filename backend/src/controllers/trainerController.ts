@@ -12,6 +12,7 @@ import {
 import { Notification } from "../models/Engagement.js";
 import { AppError } from "../utils/AppError.js";
 import { withMemberMedia } from "../services/userMediaService.js";
+import { paginationFromQuery, pageMeta } from "../utils/pagination.js";
 
 async function trainerFor(req: Request) {
   const trainer = await Trainer.findOne({
@@ -76,45 +77,53 @@ export async function dashboard(req: Request, res: Response) {
 
 export async function clients(req: Request, res: Response) {
   const trainer = await trainerFor(req);
+  const { page, limit, skip } = paginationFromQuery(req.query);
   const memberIds = await WorkoutAssignment.distinct("memberProfileId", {
     trainerId: trainer._id,
     status: { $ne: "CANCELLED" },
   });
-  const data = await MemberProfile.find({
+  const filter = {
     $or: [{ _id: { $in: memberIds } }, { assignedTrainerId: trainer._id }],
     gymId: trainer.gymId,
-  })
+  };
+  const [data, total] = await Promise.all([MemberProfile.find(filter)
     .populate(
       "userId",
       "publicId name phone email avatarUrl avatarAttachmentId",
     )
     .populate("currentSubscriptionId", "publicId status startsAt endsAt")
-    .lean();
-  res.json({ success: true, data: await withMemberMedia(data) });
+    .skip(skip).limit(limit).lean(), MemberProfile.countDocuments(filter)]);
+  res.json({ success: true, data: await withMemberMedia(data), meta: pageMeta(page, limit, total) });
 }
 
 export async function sessions(req: Request, res: Response) {
   const trainer = await trainerFor(req);
+  const { page, limit, skip } = paginationFromQuery(req.query);
   const filter: any = { trainerId: trainer._id };
   if (req.query.from || req.query.to)
     filter.startsAt = {
       ...(req.query.from ? { $gte: new Date(String(req.query.from)) } : {}),
       ...(req.query.to ? { $lte: new Date(String(req.query.to)) } : {}),
     };
-  const data = await ClassSession.find(filter).sort({ startsAt: 1 }).lean();
-  res.json({ success: true, data });
+  const [data, total] = await Promise.all([
+    ClassSession.find(filter).sort({ startsAt: 1, _id: 1 }).skip(skip).limit(limit).lean(),
+    ClassSession.countDocuments(filter),
+  ]);
+  res.json({ success: true, data, meta: pageMeta(page, limit, total) });
 }
 
 export async function workoutPlans(req: Request, res: Response) {
   const trainer = await trainerFor(req);
+  const { page, limit, skip } = paginationFromQuery(req.query);
+  const filter = { trainerId: trainer._id, status: { $ne: "ARCHIVED" } };
+  const [data, total] = await Promise.all([
+    WorkoutPlan.find(filter).sort({ updatedAt: -1, _id: -1 }).skip(skip).limit(limit).lean(),
+    WorkoutPlan.countDocuments(filter),
+  ]);
   res.json({
     success: true,
-    data: await WorkoutPlan.find({
-      trainerId: trainer._id,
-      status: { $ne: "ARCHIVED" },
-    })
-      .sort({ updatedAt: -1 })
-      .lean(),
+    data,
+    meta: pageMeta(page, limit, total),
   });
 }
 export async function createWorkoutPlan(req: Request, res: Response) {
@@ -190,17 +199,19 @@ export async function assignWorkout(req: Request, res: Response) {
 
 export async function progress(req: Request, res: Response) {
   const trainer = await trainerFor(req);
+  const { page, limit, skip } = paginationFromQuery(req.query);
   const member = await MemberProfile.findOne({
     publicId: req.params.memberId,
     gymId: trainer.gymId,
     assignedTrainerId: trainer._id,
   });
   if (!member) throw new AppError(404, "MEMBER_NOT_FOUND", "Member not found.");
-  const data = await ProgressEntry.find({ memberProfileId: member._id })
-    .sort({ recordedAt: -1 })
-    .limit(100)
-    .lean();
-  res.json({ success: true, data });
+  const filter = { memberProfileId: member._id };
+  const [data, total] = await Promise.all([
+    ProgressEntry.find(filter).sort({ recordedAt: -1, _id: -1 }).skip(skip).limit(limit).lean(),
+    ProgressEntry.countDocuments(filter),
+  ]);
+  res.json({ success: true, data, meta: pageMeta(page, limit, total) });
 }
 export async function recordProgress(req: Request, res: Response) {
   const trainer = await trainerFor(req);

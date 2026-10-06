@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useCurrentUser } from "../../api/hooks";
 import { apiRequest, type ApiEnvelope } from "../../services/apiClient";
@@ -7,6 +7,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { ClassCard } from "../../components/ClassCard";
 import { StatusBadge } from "../../components/StatusBadge";
 import { Action, QueryState, Table, type Row } from "../live/LiveData";
+import { Pagination } from "../../components/DataListControls";
 
 function useMemberData<T>(path: string, userId?: string, enabled = true) {
   return useQuery({
@@ -27,14 +28,20 @@ export function UserClassesPage() {
   const bookingId = search.get("booking") || "";
   const validBookingId = /^[a-f\d]{24}$/i.test(bookingId);
   const selectedBooking = useMemberData<Row>(`/api/v1/users/classes/bookings/${encodeURIComponent(bookingId)}`, userId, validBookingId);
-  const [day, setDay] = useState(""), [page, setPage] = useState(1), [bookingPage, setBookingPage] = useState(1);
+  const [day, setDay] = useState(""), [page, setPage] = useState(1), [sessionLimit, setSessionLimit] = useState(10), [bookingPage, setBookingPage] = useState(1), [bookingLimit, setBookingLimit] = useState(10);
   const [query, setQuery] = useState(""), [searchDraft, setSearchDraft] = useState("");
+  useEffect(() => {
+    const next = searchDraft.trim();
+    if (next === query) return;
+    const timer = window.setTimeout(() => { setQuery(next); setPage(1); }, 350);
+    return () => window.clearTimeout(timer);
+  }, [searchDraft, query]);
   const sessions = useMemberData<Row[]>(
-    `/api/v1/users/classes?${new URLSearchParams({ day, q:query, page: String(page), limit: "12" })}`,
+    `/api/v1/users/classes?${new URLSearchParams({ day, q:query, page: String(page), limit: String(sessionLimit) })}`,
     userId,
   );
   const bookings = useMemberData<Row[]>(
-    `/api/v1/workspace/records/bookings?limit=20&page=${bookingPage}`,
+    `/api/v1/workspace/records/bookings?limit=${bookingLimit}&page=${bookingPage}`,
     userId,
   );
   return (
@@ -112,11 +119,7 @@ export function UserClassesPage() {
           </div>
         )}
       </QueryState>
-      <nav className="table-footer" aria-label="Class pages">
-        <button disabled={page <= 1 || sessions.isPending} onClick={() => setPage(page - 1)}>Previous classes</button>
-        <span>Page {page} of {sessions.data?.meta?.pages || 1}</span>
-        <button disabled={sessions.isPending || page >= (sessions.data?.meta?.pages || 1)} onClick={() => setPage(page + 1)}>Next classes</button>
-      </nav>
+      <Pagination page={page} limit={sessionLimit} total={sessions.data?.meta?.total || 0} loading={sessions.isFetching} onPageChange={setPage} onLimitChange={(value) => { setSessionLimit(value); setPage(1); }} />
       <section className="panel form-section">
         <h2>Your bookings</h2>
         <p>Your booking history stays available when a membership ends or changes.</p>
@@ -133,11 +136,7 @@ export function UserClassesPage() {
               : null}
           />
         </QueryState>
-        <nav className="table-footer" aria-label="Booking pages">
-          <button disabled={bookingPage <= 1 || bookings.isPending} onClick={() => setBookingPage(bookingPage - 1)}>Previous bookings</button>
-          <span>Page {bookingPage} of {bookings.data?.meta?.pages || 1}</span>
-          <button disabled={bookings.isPending || bookingPage >= (bookings.data?.meta?.pages || 1)} onClick={() => setBookingPage(bookingPage + 1)}>Next bookings</button>
-        </nav>
+        <Pagination page={bookingPage} limit={bookingLimit} total={bookings.data?.meta?.total || 0} loading={bookings.isFetching} onPageChange={setBookingPage} onLimitChange={(value) => { setBookingLimit(value); setBookingPage(1); }} />
       </section>
     </div>
   );

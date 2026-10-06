@@ -31,13 +31,15 @@ import {
 import { paginationFromQuery, pageMeta } from "../utils/pagination.js";
 
 export async function favorites(req: Request, res: Response) {
-  const data = await Favorite.find({ userId: req.auth!.userId })
+  const { page, limit, skip } = paginationFromQuery(req.query);
+  const filter = { userId: req.auth!.userId };
+  const [data, total] = await Promise.all([Favorite.find(filter)
     .populate(
       "gymId",
       "publicId name slug logoUrl logoAttachmentId rating address startingPriceMinor",
     )
     .sort({ createdAt: -1 })
-    .lean();
+    .skip(skip).limit(limit).lean(), Favorite.countDocuments(filter)]);
   const gyms = await withGymMedia(
     data.map((favorite) => favorite.gymId).filter(Boolean),
   );
@@ -48,7 +50,7 @@ export async function favorites(req: Request, res: Response) {
       gymId:
         gyms.find((gym) => String(gym._id) === String(favorite.gymId?._id)) ||
         favorite.gymId,
-    })),
+    })), meta: pageMeta(page, limit, total),
   });
 }
 export async function addFavorite(req: Request, res: Response) {
@@ -492,10 +494,13 @@ export async function subscriptionCommand(req: Request, res: Response) {
 }
 
 export async function referrals(req: Request, res: Response) {
-  const data = await Referral.find({ referrerId: req.auth!.userId })
-    .sort({ createdAt: -1 })
-    .lean();
-  res.json({ success: true, data });
+  const { page, limit, skip } = paginationFromQuery(req.query);
+  const filter = { referrerId: req.auth!.userId };
+  const [data, total] = await Promise.all([
+    Referral.find(filter).sort({ createdAt: -1, _id: -1 }).skip(skip).limit(limit).lean(),
+    Referral.countDocuments(filter),
+  ]);
+  res.json({ success: true, data, meta: pageMeta(page, limit, total) });
 }
 export async function inviteReferral(req: Request, res: Response) {
   let existing = await Referral.findOne({

@@ -78,6 +78,7 @@ classBookingSchema.index(
   { unique: true },
 );
 classBookingSchema.index({ sessionId: 1, status: 1, bookedAt: 1 });
+classBookingSchema.index({ memberProfileId: 1, status: 1, bookedAt: -1 });
 
 const trainerSchema = new Schema(
   {
@@ -109,6 +110,8 @@ const trainerSchema = new Schema(
   },
   { timestamps: true },
 );
+trainerSchema.index({ gymId: 1, status: 1, createdAt: -1 });
+trainerSchema.index({ gymId: 1, userId: 1 }, { unique: true, sparse: true });
 
 const notificationSchema = new Schema(
   {

@@ -1,6 +1,6 @@
 import { PageHeader } from "../../components/PageHeader";
 import { CompactFilters } from "../../components/CompactFilters";
-import { useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { apiRequest, type ApiEnvelope } from "../../services/apiClient";
@@ -10,6 +10,7 @@ import { validCoordinates } from "../../services/location";
 import { StatusBadge } from "../../components/StatusBadge";
 import { PhoneInput } from "../../components/PhoneInput";
 import { isPhoneField } from "../../services/contactPhoneInput";
+import { EmptyState, Pagination, SkeletonTableRows } from "../../components/DataListControls";
 export type Row = Record<string, any>;
 export const read = (row: Row, path: string): any =>
   path.split(".").reduce((value, key) => value?.[key], row);
@@ -40,12 +41,7 @@ export function QueryState({
   query: any;
   children: ReactNode;
 }) {
-  if (query.isPending)
-    return (
-      <div className="state-card panel" role="status">
-        Loading…
-      </div>
-    );
+  if (query.isPending) return <SkeletonTableRows />;
   if (query.isError)
     return (
       <div className="state-card panel">
@@ -483,6 +479,7 @@ export function ResourcePage({
   transform?: (body: Row) => Row;
 }) {
   const [page, setPage] = useState(1),
+    [limit, setLimit] = useState(10),
     [q, setQ] = useState(""),
     [search, setSearch] = useState(""),
     [from, setFrom] = useState(""),
@@ -490,8 +487,17 @@ export function ResourcePage({
     [status, setStatus] = useState(""),
     [editing, setEditing] = useState<Row | null>(null),
     [adding, setAdding] = useState(false);
+  useEffect(() => {
+    const next = q.trim();
+    if (next === search) return;
+    const timer = window.setTimeout(() => {
+      setSearch(next);
+      setPage(1);
+    }, 350);
+    return () => window.clearTimeout(timer);
+  }, [q, search]);
   const query = useData<Row[]>(
-    `/api/v1/workspace/records/${resource}?${new URLSearchParams({ page: String(page), q: search, status, ...(from ? { from } : {}), ...(to ? { to } : {}) })}`,
+    `/api/v1/workspace/records/${resource}?${new URLSearchParams({ page: String(page), limit: String(limit), q: search, status, ...(from ? { from } : {}), ...(to ? { to } : {}) })}`,
   );
   const rows = query.data?.data || [],
     meta = query.data?.meta;
@@ -636,22 +642,20 @@ export function ResourcePage({
                 : undefined
             }
           />
-          <footer className="table-footer">
-            <span>
-              Page {page} of {meta?.pages || 1} · {meta?.total || 0} records
-            </span>
-            <div>
-              <button disabled={page <= 1} onClick={() => setPage(page - 1)}>
-                Previous
-              </button>
-              <button
-                disabled={page >= (meta?.pages || 1)}
-                onClick={() => setPage(page + 1)}
-              >
-                Next
-              </button>
-            </div>
-          </footer>
+          {!rows.length && (
+            <EmptyState title="No records found" detail="Try changing your search or filters." />
+          )}
+          <Pagination
+            page={page}
+            limit={limit}
+            total={meta?.total || 0}
+            loading={query.isFetching}
+            onPageChange={setPage}
+            onLimitChange={(value) => {
+              setLimit(value);
+              setPage(1);
+            }}
+          />
         </QueryState>
       </section>
       <Modal

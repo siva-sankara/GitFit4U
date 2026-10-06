@@ -8,18 +8,19 @@ import { Modal } from "../../components/Modal";
 import { StatusBadge } from "../../components/StatusBadge";
 import { QueryState, date, type Row } from "../live/LiveData";
 import "../../styles/support-tickets.css";
+import { Pagination } from "../../components/DataListControls";
 
 const endpoint = "/api/v1/conversations";
 const statuses = ["OPEN", "IN_PROGRESS", "WAITING_FOR_USER", "RESOLVED", "CLOSED"];
 export function SupportTicketsPage() {
   const client = useQueryClient(), [params, setParams] = useSearchParams();
-  const [page, setPage] = useState(1), [creating, setCreating] = useState(false);
+  const [page, setPage] = useState(1), [limit, setLimit] = useState(10), [creating, setCreating] = useState(false);
   const [subject, setSubject] = useState(""), [description, setDescription] = useState("");
   const key = useRef(crypto.randomUUID());
   const selected = params.get("ticket") || params.get("conversation") || "";
   const tickets = useQuery({
-    queryKey: ["support-tickets", page],
-    queryFn: () => apiRequest<ApiEnvelope<Row[]>>(endpoint + "?type=SUPPORT&limit=20&page=" + page),
+    queryKey: ["support-tickets", page, limit],
+    queryFn: () => apiRequest<ApiEnvelope<Row[]>>(endpoint + `?type=SUPPORT&limit=${limit}&page=${page}`),
     refetchInterval: 15000,
   });
   const create = useMutation({
@@ -48,11 +49,7 @@ export function SupportTicketsPage() {
           </tr>)}
         </tbody></table></div>
         {!tickets.data?.data.length && <p className="state-card">No support tickets yet.</p>}
-        <nav className="support-ticket-pagination" aria-label="Support ticket pages">
-          <button className="btn btn-secondary" disabled={page <= 1} onClick={() => setPage(value => value - 1)}>Previous</button>
-          <span>Page {page} of {tickets.data?.meta?.pages || 1}</span>
-          <button className="btn btn-secondary" disabled={page >= (tickets.data?.meta?.pages || 1)} onClick={() => setPage(value => value + 1)}>Next</button>
-        </nav>
+        <Pagination page={page} limit={limit} total={tickets.data?.meta?.total || 0} loading={tickets.isFetching} onPageChange={setPage} onLimitChange={(value) => { setLimit(value); setPage(1); }} />
       </QueryState>
     </section>
     {selected && <TicketDetail key={selected} id={selected} onClose={() => setParams({})} />}

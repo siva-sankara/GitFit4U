@@ -89,13 +89,32 @@ async function signupFields(role: "USER" | "GYM_OWNER" = "USER") {
   await fill("password", "StrongPass123");
   await fill("confirm", "StrongPass123");
 }
+const submittedOtp = {
+  data: {
+    challengeId: "signup-challenge-identifier",
+    operationId: "signup-operation-identifier",
+    maskedPhone: "+91••••••3210",
+    expiresInSeconds: 300,
+    resendInSeconds: 60,
+    deliveryStatus: "SUBMITTED",
+  },
+};
+function mockSignupSession(user: Record<string, unknown>) {
+  mocks.request.mockImplementation(async (path) =>
+    path === "/api/v1/auth/register"
+      ? submittedOtp
+      : { data: { accessToken: "token", user } },
+  );
+}
+async function verifySignup() {
+  await fill("code", "123456");
+  await submit();
+}
 describe("account screens", () => {
   it.each(["/register", "/auth/signup"])(
     "submits signup from %s and enters the member workspace",
     async (path) => {
-      mocks.request.mockResolvedValue({
-        data: { accessToken: "token", user: { activeRole: "USER" } },
-      });
+      mockSignupSession({ activeRole: "USER" });
       await render(path);
       await fill("name", "Test Member");
       await fill("email", "member@example.com");
@@ -104,14 +123,24 @@ describe("account screens", () => {
       await fill("password", "StrongPass123");
       await fill("confirm", "StrongPass123");
       await submit();
-      expect(mocks.request).toHaveBeenCalledWith("/api/v1/auth/register", {
+      expect(mocks.request.mock.calls[0][0]).toBe("/api/v1/auth/register");
+      expect(JSON.parse(mocks.request.mock.calls[0][1].body)).toEqual({
+        name: "Test Member",
+        email: "member@example.com",
+        role: "USER",
+        password: "StrongPass123",
+        phone: "+919876543210",
+      });
+      expect(host.textContent).toContain("Check WhatsApp");
+      expect(host.textContent).toContain("+91••••••3210");
+      expect(mocks.setToken).not.toHaveBeenCalled();
+      await verifySignup();
+      expect(mocks.request).toHaveBeenCalledWith("/api/v1/auth/signup/verify", {
         method: "POST",
         body: JSON.stringify({
-          name: "Test Member",
-          email: "member@example.com",
-          role: "USER",
-          password: "StrongPass123",
-          phone: "+919876543210",
+          operationId: "signup-operation-identifier",
+          challengeId: "signup-challenge-identifier",
+          code: "123456",
         }),
       });
       expect(mocks.setToken).toHaveBeenCalledWith("token");
@@ -166,28 +195,22 @@ it("returns to the exact gym and selected membership after login", async () => {
   expect(host.textContent).toContain("Selected gym: " + selectedGym);
 });
 it("keeps the selected gym when switching from login to signup", async () => {
-  mocks.request.mockResolvedValue({
-    data: { accessToken: "token", user: { activeRole: "USER" } },
-  });
+  mockSignupSession({ activeRole: "USER" });
   await render(loginUrl);
   await clickLink("Create an account");
-  await fill("name", "New Member");
-  await fill("email", "member@example.com");
-  await selectRole("USER");
-  await fill("phone", "9876543210");
-  await fill("password", "StrongPass123");
-  await fill("confirm", "StrongPass123");
+  await signupFields();
   await submit();
+  await verifySignup();
   expect(host.textContent).toContain("Selected gym: " + selectedGym);
 });
 it("keeps the selected gym through the phone OTP flow", async () => {
   mocks.request.mockImplementation(async (path) =>
     path.endsWith("/request")
-      ? { data: { challengeId: "challenge", expiresInSeconds: 300 } }
+      ? { data: { challengeId: "challenge", maskedPhone: "+91••••••3210", expiresInSeconds: 300, resendInSeconds: 60, deliveryStatus: "SUBMITTED" } }
       : { data: { accessToken: "token", user: { activeRole: "USER" } } },
   );
   await render(loginUrl);
-  await clickLink("Continue with phone OTP");
+  await clickLink("Login with WhatsApp OTP");
   await fill("phone", "+919876543210");
   await submit();
   await fill("code", "123456");
@@ -197,7 +220,7 @@ it("keeps the selected gym through the phone OTP flow", async () => {
 it("keeps the gym through password recovery and a subsequent login", async () => {
   mocks.request.mockImplementation(async (path) => {
     if (path.endsWith("/forgot-password"))
-      return { data: { challengeId: "recovery", expiresInSeconds: 300 } };
+      return { data: { challengeId: "recovery", maskedPhone: "+91••••••3210", expiresInSeconds: 300, resendInSeconds: 60, deliveryStatus: "SUBMITTED" } };
     if (path.endsWith("/recovery/verify"))
       return { data: { resetToken: "reset" } };
     return { data: { accessToken: "token", user: { activeRole: "USER" } } };
@@ -240,10 +263,11 @@ it("requires a deliberate role choice and focuses the first invalid field", asyn
   expect(document.activeElement?.getAttribute("name")).toBe("role");
 });
 it.each(["/app/home", "/owner/support"])("routes a new gym owner directly to onboarding despite return link %s", async returnTo => {
-  mocks.request.mockResolvedValue({ data: { accessToken: "owner", user: { activeRole: "GYM_OWNER", onboarding: { state: "NOT_STARTED" } } } });
+  mockSignupSession({ activeRole: "GYM_OWNER", onboarding: { state: "NOT_STARTED" } });
   await render(`/register?returnTo=${encodeURIComponent(returnTo)}`);
   await signupFields("GYM_OWNER");
   await submit();
+  await verifySignup();
   expect(host.textContent).toContain("Register gym onboarding");
   expect(JSON.parse(mocks.request.mock.calls[0][1].body)).toMatchObject({ role: "GYM_OWNER", phone: "+919876543210" });
 });
@@ -263,10 +287,11 @@ it.each([
   expect(host.textContent).toContain(destination);
 });
 it("blocks a member's registration return link", async () => {
-  mocks.request.mockResolvedValue({ data: { accessToken: "session", user: { activeRole: "USER", roles: ["USER"] } } });
+  mockSignupSession({ activeRole: "USER", roles: ["USER"] });
   await render("/register?returnTo=%2Fregister-gym");
   await signupFields();
   await submit();
+  await verifySignup();
   expect(host.textContent).toContain("Member home");
 });
 it("keeps login/signup route state and clears irrelevant validation errors", async () => {
@@ -342,4 +367,30 @@ it("offers intentional signup when an unknown phone cannot log in", async () => 
   await submit();
   expect(host.querySelector('.form-alert a')?.textContent).toBe("Create an account");
   expect(host.querySelector('.form-alert a')?.getAttribute("href")).toBe("/register");
+});
+it("shows an asynchronous Meta delivery failure and disables verification", async () => {
+  mocks.request.mockImplementation(async (path) => {
+    if (path.endsWith("/otp/request"))
+      return {
+        data: {
+          challengeId: "delivery-failure-challenge",
+          maskedPhone: "+91••••••3210",
+          expiresInSeconds: 300,
+          resendInSeconds: 60,
+          deliveryStatus: "SUBMITTED",
+        },
+      };
+    if (path.includes("/status"))
+      return { data: { deliveryStatus: "FAILED", expired: false } };
+    throw new Error("Unexpected request");
+  });
+  await render("/auth/phone");
+  await fill("phone", "9876543210");
+  await submit();
+  await act(async () => Promise.resolve());
+  expect(host.textContent).toContain("WhatsApp could not deliver this verification message");
+  const verify = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+    (button) => button.textContent?.trim() === "Verify",
+  );
+  expect(verify?.disabled).toBe(true);
 });

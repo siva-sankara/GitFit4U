@@ -55,7 +55,7 @@ export function membershipPresentation(
     daysRemaining: days,
     plan:
       subscription?.planSnapshot?.name ||
-      (member.directAccess ? "Approved direct access" : "No membership"),
+      (member.directAccess ? "Direct access" : "No membership"),
   };
 }
 export function MembershipStatusDot({

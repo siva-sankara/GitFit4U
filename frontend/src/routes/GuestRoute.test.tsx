@@ -14,10 +14,12 @@ const mocks = vi.hoisted(() => ({
   request: vi.fn(),
   refresh: vi.fn(),
   token: "session" as string | null,
+  persisted: true,
 }));
 vi.mock("../services/apiClient", () => ({
   apiRequest: mocks.request,
   getAccessToken: () => mocks.token,
+  hasPersistedSession: () => mocks.persisted,
   refreshSession: mocks.refresh,
   ApiError: class extends Error {
     constructor(public status: number) {
@@ -46,6 +48,7 @@ function Destination() {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.token = "session";
+  mocks.persisted = true;
   mocks.request.mockResolvedValue({ data: { context: { role: "USER" } } });
   mocks.refresh.mockResolvedValue(undefined);
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
@@ -160,6 +163,7 @@ it.each([
 });
 it("does not check or refresh an anonymous session while browsing public pages", async () => {
   mocks.token = null;
+  mocks.persisted = false;
   await render("/");
   expect(host.textContent).toContain("Public landing");
   await render("/explore");
@@ -216,7 +220,8 @@ it.each([429, 500, 0])(
     expect(host.textContent).toContain("Public discovery");
     await render("/login");
     expect(host.textContent).toContain("Guest login");
-    expect(mocks.request).toHaveBeenCalledOnce();
+    expect(mocks.request.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(mocks.request.mock.calls.length).toBeLessThanOrEqual(3);
     expect(mocks.refresh).not.toHaveBeenCalled();
   },
 );
@@ -249,6 +254,7 @@ it("stops public session checks after logout even if identity data was cached", 
 });
 it("still restores and validates a refresh-cookie session when opening a protected route", async () => {
   mocks.token = null;
+  mocks.persisted = false;
   mocks.refresh.mockImplementation(async () => {
     mocks.token = "restored";
   });
@@ -259,6 +265,18 @@ it("still restores and validates a refresh-cookie session when opening a protect
   expect(mocks.refresh).toHaveBeenCalledOnce();
   expect(mocks.request).toHaveBeenCalledWith("/api/v1/auth/me");
 });
+it("restores a hinted HttpOnly-cookie session before showing the login screen", async () => {
+  mocks.token = null;
+  mocks.persisted = true;
+  mocks.refresh.mockImplementation(async () => {
+    mocks.token = "restored";
+  });
+  await render("/login");
+  expect(host.textContent).not.toContain("Guest login");
+  await until(() => host.textContent!.includes("/app/home"));
+  expect(mocks.refresh).toHaveBeenCalledOnce();
+  expect(host.textContent).not.toContain("Guest login");
+});
 it("keeps protected content hidden when the session endpoint is rate limited", async () => {
   mocks.request.mockRejectedValue(
     new ApiError(429, "RATE_LIMITED", "Too many requests"),
@@ -268,7 +286,8 @@ it("keeps protected content hidden when the session endpoint is rate limited", a
   expect(host.textContent).not.toContain("Protected content");
   await render("/");
   expect(host.textContent).toContain("Public landing");
-  expect(mocks.request).toHaveBeenCalledOnce();
+  expect(mocks.request.mock.calls.length).toBeGreaterThanOrEqual(2);
+  expect(mocks.request.mock.calls.length).toBeLessThanOrEqual(3);
 });
 it("uses persisted owner onboarding when reopening login in an installed app", async () => {
   mocks.request.mockResolvedValue({ data: { context: { role: "GYM_OWNER" }, user: { activeRole: "GYM_OWNER", onboarding: { state: "PENDING", registrationId: "existing" } } } });

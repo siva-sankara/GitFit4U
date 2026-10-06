@@ -59,6 +59,12 @@ const messageSchema = new Schema(
       index: true,
     },
     clientMessageId: { type: String, required: true },
+    source: {
+      type: String,
+      enum: ["USER", "SYSTEM", "WHATSAPP_REMINDER"],
+      default: "USER",
+      index: true,
+    },
     invoiceId: { type: Schema.Types.ObjectId, ref: "Invoice" },
     actionUrl: { type: String, maxlength: 2000 },
     type: {

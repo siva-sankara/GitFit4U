@@ -18,6 +18,8 @@ export interface InboxNotification {
   source?: string;
   entityType?: string;
   entityId?: string;
+  channels?: string[];
+  pushStatus?: string;
   metadata?: {
     gymName?: string;
     planName?: string;

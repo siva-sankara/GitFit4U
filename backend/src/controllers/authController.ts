@@ -10,6 +10,8 @@ import { nanoid } from "nanoid";
 import { env } from "../config/env.js";
 import {
   AuthIdentity,
+  OtpChallenge,
+  PendingAuthOperation,
   PasswordResetGrant,
   RoleAssignment,
   Session,
@@ -17,6 +19,7 @@ import {
 import { User } from "../models/User.js";
 import {
   normalizePhone,
+  invalidateOtpOperation,
   requestOtp,
   verifyOtp,
 } from "../services/otpService.js";
@@ -112,47 +115,164 @@ export async function register(req: Request, res: Response) {
   });
   if (exists) throw duplicateAccountError();
   const passwordHash = await bcrypt.hash(body.password, 12);
-  const user = await mongoose.connection.transaction(async (session) => {
-    const [created] = await User.create(
-      [
-        {
-          publicId: nanoid(18),
-          name: body.name,
-          email,
-          phone,
-          roles: [role],
-          activeRole: role,
-          status: "ACTIVE",
-        },
-      ],
-      { session },
-    );
-    await AuthIdentity.create(
-      [
-        {
-          userId: created._id,
-          provider: "PASSWORD",
-          providerSubject: email,
-          verifiedAt: new Date(),
-          passwordHash,
-        },
-      ],
-      { session },
-    );
-    await emitDomainEvent({
-      event: "account.registered",
-      userId: created._id,
-      entityId: created.publicId,
-      session,
-    });
-    return created;
-  }).catch((error: unknown) => {
-    // Unique email/phone indexes are the final concurrency arbiter. A failed
-    // insert rolls back credentials/events and never issues a login session.
-    if (isDuplicateKey(error)) throw duplicateAccountError();
-    throw error;
+  const now = new Date();
+  await PendingAuthOperation.updateMany(
+    {
+      type: "SIGNUP",
+      status: "PENDING",
+      $or: [{ email }, { phone }],
+    },
+    { $set: { status: "CANCELLED" } },
+  );
+  const operation = await PendingAuthOperation.create({
+    publicId: nanoid(24),
+    type: "SIGNUP",
+    name: body.name,
+    email,
+    phone,
+    role,
+    passwordHash,
+    expiresAt: new Date(now.getTime() + 30 * 60_000),
+    purgeAt: new Date(now.getTime() + 24 * 60 * 60_000),
   });
-  // Creation has committed. Subsequent sign-in writes must not reuse its closed session.
+  try {
+    const challenge = await requestOtp(phone, "SIGNUP", {
+      ipAddress: req.ip,
+      pendingOperationId: operation._id,
+    });
+    res.status(202).json({
+      success: true,
+      message: "The verification code was submitted to Meta for WhatsApp delivery.",
+      data: { ...challenge, operationId: operation.publicId, purpose: "SIGNUP" },
+    });
+  } catch (error) {
+    await PendingAuthOperation.updateOne(
+      { _id: operation._id, status: "PENDING" },
+      { $set: { status: "CANCELLED" } },
+    );
+    throw error;
+  }
+}
+
+function invalidSignupOperation() {
+  return new AppError(
+    400,
+    "SIGNUP_OPERATION_INVALID",
+    "This signup verification has expired or is no longer valid. Start again.",
+  );
+}
+
+export async function resendSignupOtp(req: Request, res: Response) {
+  const operation = await PendingAuthOperation.findOne({
+    publicId: req.body.operationId,
+    type: "SIGNUP",
+    status: "PENDING",
+    expiresAt: { $gt: new Date() },
+  });
+  if (!operation) throw invalidSignupOperation();
+  const challenge = await requestOtp(operation.phone, "SIGNUP", {
+    ipAddress: req.ip,
+    pendingOperationId: operation._id,
+  });
+  res.status(202).json({
+    success: true,
+    message: "A new verification code was submitted to Meta for WhatsApp delivery.",
+    data: { ...challenge, operationId: operation.publicId, purpose: "SIGNUP" },
+  });
+}
+
+export async function cancelSignup(req: Request, res: Response) {
+  const operation = await PendingAuthOperation.findOneAndUpdate(
+    {
+      publicId: req.body.operationId,
+      type: "SIGNUP",
+      status: "PENDING",
+    },
+    { $set: { status: "CANCELLED" } },
+    { returnDocument: "after" },
+  );
+  if (operation) await invalidateOtpOperation(operation._id);
+  res.status(204).send();
+}
+
+export async function verifySignupOtp(req: Request, res: Response) {
+  const pending = await PendingAuthOperation.findOne({
+    publicId: req.body.operationId,
+    type: "SIGNUP",
+    status: "PENDING",
+    expiresAt: { $gt: new Date() },
+  });
+  if (!pending) throw invalidSignupOperation();
+  const verified = await verifyOtp(req.body.challengeId, req.body.code, {
+    expectedPurpose: "SIGNUP",
+    pendingOperationId: pending._id,
+  });
+  if (verified.phone !== pending.phone) throw invalidSignupOperation();
+  const user = await mongoose.connection
+    .transaction(async (session) => {
+      const operation = await PendingAuthOperation.findOne({
+        publicId: req.body.operationId,
+        type: "SIGNUP",
+        status: "PENDING",
+        expiresAt: { $gt: new Date() },
+      })
+        .select("+passwordHash")
+        .session(session);
+      if (!operation) throw invalidSignupOperation();
+      const exists = await User.exists({
+        $or: [{ email: operation.email }, { phone: operation.phone }],
+      }).session(session);
+      if (exists) throw duplicateAccountError();
+      const claimed = await PendingAuthOperation.findOneAndUpdate(
+        { _id: operation._id, status: "PENDING" },
+        { $set: { status: "COMPLETED", completedAt: new Date() } },
+        { session, returnDocument: "after" },
+      );
+      if (!claimed) throw invalidSignupOperation();
+      const [created] = await User.create(
+        [
+          {
+            publicId: nanoid(18),
+            name: operation.name,
+            email: operation.email,
+            phone: operation.phone,
+            roles: [operation.role],
+            activeRole: operation.role,
+            status: "ACTIVE",
+          },
+        ],
+        { session },
+      );
+      await AuthIdentity.create(
+        [
+          {
+            userId: created._id,
+            provider: "PASSWORD",
+            providerSubject: operation.email,
+            verifiedAt: new Date(),
+            passwordHash: operation.passwordHash,
+          },
+          {
+            userId: created._id,
+            provider: "PHONE",
+            providerSubject: operation.phone,
+            verifiedAt: new Date(),
+          },
+        ],
+        { session },
+      );
+      await emitDomainEvent({
+        event: "account.registered",
+        userId: created._id,
+        entityId: created.publicId,
+        session,
+      });
+      return created;
+    })
+    .catch((error: unknown) => {
+      if (isDuplicateKey(error)) throw duplicateAccountError();
+      throw error;
+    });
   user.$session(null);
   await loginResponse(req, res, user);
 }
@@ -192,7 +312,9 @@ export async function passwordLogin(req: Request, res: Response) {
 }
 
 export async function forgotPassword(req: Request, res: Response) {
-  const result = await requestOtp(req.body.phone, "ACCOUNT_RECOVERY");
+  const result = await requestOtp(req.body.phone, "ACCOUNT_RECOVERY", {
+    ipAddress: req.ip,
+  });
   res.status(202).json({
     success: true,
     message: "If the account exists, a verification code was sent.",
@@ -201,13 +323,9 @@ export async function forgotPassword(req: Request, res: Response) {
 }
 
 export async function verifyRecoveryOtp(req: Request, res: Response) {
-  const verified = await verifyOtp(req.body.challengeId, req.body.code);
-  if (verified.purpose !== "ACCOUNT_RECOVERY")
-    throw new AppError(
-      400,
-      "RECOVERY_CHALLENGE_REQUIRED",
-      "Use an account recovery code.",
-    );
+  const verified = await verifyOtp(req.body.challengeId, req.body.code, {
+    expectedPurpose: "ACCOUNT_RECOVERY",
+  });
   const secret = crypto.randomBytes(48).toString("base64url");
   const publicId = nanoid(20);
   const token = `${publicId}.${secret}`;
@@ -309,38 +427,86 @@ export async function resetPassword(req: Request, res: Response) {
 }
 
 export async function otpRequest(req: Request, res: Response) {
-  const result = await requestOtp(req.body.phone, req.body.purpose);
-  res.status(202).json({ success: true, data: result });
+  const result = await requestOtp(req.body.phone, "LOGIN", {
+    ipAddress: req.ip,
+  });
+  res.status(202).json({
+    success: true,
+    message: "If eligible, the verification code was submitted to Meta for WhatsApp delivery.",
+    data: { ...result, purpose: "LOGIN" },
+  });
+}
+
+export async function otpStatus(req: Request, res: Response) {
+  const challenge = await OtpChallenge.findOne({
+    publicId: req.params.challengeId,
+  })
+    .select("deliveryStatus expiresAt")
+    .lean();
+  const expired = !challenge || challenge.expiresAt <= new Date();
+  res.json({
+    success: true,
+    data: {
+      deliveryStatus: expired
+        ? "EXPIRED"
+        : challenge.deliveryStatus || "SUBMITTED",
+      expired,
+    },
+  });
 }
 
 export async function otpVerify(req: Request, res: Response) {
-  const verified = await verifyOtp(req.body.challengeId, req.body.code);
-  if (verified.purpose !== "LOGIN")
+  const verified = await verifyOtp(req.body.challengeId, req.body.code, {
+    expectedPurpose: "LOGIN",
+  });
+  const accountCount = await User.countDocuments({ phone: verified.phone });
+  if (accountCount > 1)
     throw new AppError(
-      400,
-      "LOGIN_CHALLENGE_REQUIRED",
-      "Use a login verification code.",
+      409,
+      "PHONE_ACCOUNT_CONFLICT",
+      "This verified phone number is linked to multiple legacy accounts. Contact support; accounts are never merged automatically.",
     );
-  let user = await User.findOne({ phone: verified.phone });
-  if (user?.status === "PENDING_VERIFICATION") {
-    user.status = "ACTIVE";
-    await user.save();
-    await AuthIdentity.findOneAndUpdate(
-      { userId: user._id, provider: "PHONE" },
-      { $set: { providerSubject: verified.phone, verifiedAt: new Date() } },
-      { upsert: true },
-    );
-  }
+  const user = await User.findOne({ phone: verified.phone });
   if (!user) {
     throw new AppError(409, "SIGNUP_REQUIRED", "Complete sign up with your account type, email and mobile number before signing in.");
   }
   if (user.status !== "ACTIVE")
     throw new AppError(403, "ACCOUNT_DISABLED", "This account is not active.");
-  await emitDomainEvent({
-    event: "account.verified",
-    userId: user._id,
-    entityId: user.publicId,
+  if (user.roles?.includes("ADMIN"))
+    throw new AppError(
+      403,
+      "ADMIN_OTP_LOGIN_FORBIDDEN",
+      "Administrator accounts must use the existing privileged sign-in and MFA flow.",
+    );
+  const existingPhoneIdentity = await AuthIdentity.findOne({
+    provider: "PHONE",
+    providerSubject: verified.phone,
   });
+  if (
+    existingPhoneIdentity &&
+    String(existingPhoneIdentity.userId) !== String(user._id)
+  )
+    throw new AppError(
+      409,
+      "PHONE_ACCOUNT_CONFLICT",
+      "This verified phone identity is linked to another account. Contact support; accounts are never merged automatically.",
+    );
+  await AuthIdentity.findOneAndUpdate(
+    { userId: user._id, provider: "PHONE" },
+    {
+      $set: {
+        providerSubject: verified.phone,
+        verifiedAt: new Date(),
+      },
+    },
+    { upsert: true, returnDocument: "after", runValidators: true },
+  );
+  if (!existingPhoneIdentity)
+    await emitDomainEvent({
+      event: "account.verified",
+      userId: user._id,
+      entityId: user.publicId,
+    });
   await loginResponse(req, res, user);
 }
 

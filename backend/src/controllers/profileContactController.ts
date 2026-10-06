@@ -29,7 +29,7 @@ export async function requestPhoneChange(req: Request, res: Response) {
       "CONTACT_UNAVAILABLE",
       "This contact detail is unavailable.",
     );
-  const challenge = await requestOtp(phone, "STEP_UP");
+  const challenge = await requestOtp(phone, "STEP_UP", { ipAddress: req.ip });
   await ProfileContactChange.create({
     userId: req.auth!.userId,
     challengeId: challenge.challengeId,
@@ -58,7 +58,9 @@ export async function confirmPhoneChange(req: Request, res: Response) {
       "CONTACT_CHALLENGE_INVALID",
       "Request a new verification code for this account.",
     );
-  const verified = await verifyOtp(body.challengeId, body.code);
+  const verified = await verifyOtp(body.challengeId, body.code, {
+    expectedPurpose: "STEP_UP",
+  });
   if (verified.purpose !== "STEP_UP" || verified.phone !== change.phone)
     throw new AppError(
       400,

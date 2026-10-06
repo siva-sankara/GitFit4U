@@ -13,11 +13,14 @@ describe("public signup trust boundary", () => {
   it.each(["isAdmin", "permissions", "approved", "ownerId", "roles", "gymId"])("rejects forged %s", key => {
     expect(publicSignupInput.safeParse({ ...signup, [key]: "forged" }).success).toBe(false);
   });
-  it.each([undefined, "", "98765", "98765432101", "919876543210", "09876543210", "+449876543210", "abc9876543210", "9876543210.0", "9.876543210e9"])("rejects malformed or absent signup phone %s", phone => {
+  it.each([undefined, "", "98765", "98765432101", "919876543210", "abc9876543210", "9876543210.0", "9.876543210e9"])("rejects malformed or absent signup phone %s", phone => {
     expect(publicSignupInput.safeParse({ ...signup, phone }).success).toBe(false);
   });
-  it.each(["9876543210", "+919876543210", "+91 98765-43210", "+91 (98765) 43210"])("normalizes recognized signup phone %s", phone => {
+  it.each(["9876543210", "09876543210", "+919876543210", "+91 98765-43210", "+91 (98765) 43210"])("normalizes recognized signup phone %s", phone => {
     expect(publicSignupInput.parse({ ...signup, phone }).phone).toBe("+919876543210");
+  });
+  it("accepts and preserves a valid international E.164 signup number", () => {
+    expect(publicSignupInput.parse({ ...signup, phone: "+44 7700 900123" }).phone).toBe("+447700900123");
   });
   it.each([undefined, "", "bad"])("requires valid email %s", email => {
     expect(publicSignupInput.safeParse({ ...signup, email }).success).toBe(false);

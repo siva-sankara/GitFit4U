@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useCurrentUser } from "../../api/hooks";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest, type ApiEnvelope } from "../../services/apiClient";
@@ -9,18 +9,26 @@ import { Avatar } from "../../components/Avatar";
 import { MediaImageEditor } from "../../components/MediaImageEditor";
 import type { MemberRow } from "./OwnerMembersPage";
 import "../../styles/member-management.css";
+import { EmptyState, Pagination, SkeletonTableRows } from "../../components/DataListControls";
 
 export function OwnerTrainersPage() {
   const session = useCurrentUser(),
     canManage = session.data?.data.context.permissions.includes("class:write");
-  const path = "/api/v1/owner/trainers",
+  const basePath = "/api/v1/owner/trainers",
     client = useQueryClient();
+  const [page, setPage] = useState(1), [limit, setLimit] = useState(10);
+  const [q, setQ] = useState(""), [search, setSearch] = useState("");
   const [editing, setEditing] = useState<MemberRow | null>(null);
   const [photo, setPhoto] = useState<{ id: string | null; url?: string }>();
   const [imageBusy, setImageBusy] = useState(false);
   const [availability, setAvailability] = useState<
     Array<{ day: number; from: string; to: string }>
   >([]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => { setSearch(q.trim()); setPage(1); }, 350);
+    return () => window.clearTimeout(timer);
+  }, [q]);
+  const path = `${basePath}?${new URLSearchParams({ page: String(page), limit: String(limit), q: search })}`;
   function openTrainer(row: MemberRow) {
     setPhoto(undefined);
     save.reset();
@@ -40,7 +48,7 @@ export function OwnerTrainersPage() {
   });
   const save = useMutation({
     mutationFn: (body: object) =>
-      apiRequest(path + (editing?.publicId ? "/" + editing.publicId : ""), {
+      apiRequest(basePath + (editing?.publicId ? "/" + editing.publicId : ""), {
         method: editing?.publicId ? "PATCH" : "POST",
         body: JSON.stringify(body),
       }),
@@ -92,8 +100,9 @@ export function OwnerTrainersPage() {
           </button>
         )}
       </header>
+      <label className="search-field"><span className="sr-only">Search trainers</span><input value={q} onChange={(event) => setQ(event.target.value)} placeholder="Search by name, email, or phone" /></label>
       {query.isPending ? (
-        <p role="status">Loading trainers...</p>
+        <SkeletonTableRows columns={6} />
       ) : query.isError ? (
         <div className="panel state-card" role="alert">
           <p>{query.error.message}</p>
@@ -153,9 +162,8 @@ export function OwnerTrainersPage() {
               ))}
             </tbody>
           </table>
-          {!query.data?.data.length && (
-            <p className="state-card">No trainers have been assigned yet.</p>
-          )}
+          {!query.data?.data.length && <EmptyState title="No trainers found" detail="Try another search or add a trainer." />}
+          <Pagination page={page} limit={limit} total={query.data?.meta?.total || 0} loading={query.isFetching} onPageChange={setPage} onLimitChange={(value) => { setLimit(value); setPage(1); }} />
         </section>
       )}
       <Modal

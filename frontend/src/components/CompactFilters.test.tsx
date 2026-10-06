@@ -13,8 +13,8 @@ beforeEach(() => {
   host = document.createElement("div"); document.body.append(host); root = createRoot(host);
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); narrow = true; vi.unstubAllGlobals(); });
-async function render() {
-  await act(async () => root.render(<CompactFilters activeCount={2} onReset={reset} onApply={apply}><label>Maximum price<input name="price" /></label></CompactFilters>));
+async function render(activeCount = 2) {
+  await act(async () => root.render(<CompactFilters activeCount={activeCount} onReset={reset} onApply={apply}><label>Maximum price<input name="price" /></label></CompactFilters>));
 }
 it("collapses mobile fields and exposes a named active count and working Apply/Reset", async () => {
   await render();
@@ -34,4 +34,9 @@ it("keeps desktop filter controls visible without a mobile toggle", async () => 
   narrow = false; await render();
   expect(host.querySelector(".compact-filter-toggle")).toBeNull();
   expect(host.querySelector<HTMLDivElement>(".compact-filter-content")!.hidden).toBe(false);
+  expect(host.querySelector('[aria-label="Reset filters"]')).not.toBeNull();
+});
+it("keeps an unused desktop toolbar clean until a filter is active", async () => {
+  narrow = false; await render(0);
+  expect(host.querySelector('[aria-label="Reset filters"]')).toBeNull();
 });

@@ -355,6 +355,8 @@ const onboardingSchema = new Schema(
       enum: ["PENDING", "EXCHANGING", "READY", "FAILED"],
       default: "PENDING",
     },
+    authorizationLeaseId: String,
+    authorizationLeaseUntil: Date,
     credentialCiphertext: { type: String, select: false },
     credentialFingerprint: { type: String, select: false },
     credentialExpiresAt: Date,

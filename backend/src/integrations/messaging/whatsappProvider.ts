@@ -111,17 +111,29 @@ export class WhatsAppProvider {
         "CONFIGURATION_MISSING",
         "Meta Embedded Signup is not configured.",
       );
-    const result = await graphRequest("oauth/access_token", {
+    const exchange = (includeEmptyRedirectUri: boolean) => graphRequest("oauth/access_token", {
       query: {
         client_id: env.WHATSAPP_APP_ID,
         client_secret: env.WHATSAPP_APP_SECRET,
         code,
-        // Meta's JavaScript SDK Embedded Signup flow expects this parameter to
-        // be present during code exchange even though its value is empty. This
-        // matches Meta's Tech Provider sample and is not browser-controlled.
-        redirect_uri:"http://www.getfit4u.com/api/v1/whatsapp/onboarding/complete",
+        // Meta's JavaScript SDK owns its internal popup callback. The current
+        // Tech Provider sample sends an explicit empty redirect_uri, while
+        // some Meta app configurations reject that value and require the
+        // parameter to be omitted. Never substitute a GETFIT4U API endpoint.
+        redirect_uri: includeEmptyRedirectUri ? "" : undefined,
       },
     });
+    let result: GraphResponse;
+    try {
+      result = await exchange(true);
+    } catch (error) {
+      const redirectMismatch =
+        error instanceof WhatsAppProviderError &&
+        error.providerCode === "100" &&
+        error.message.toLowerCase().includes("redirect_uri");
+      if (!redirectMismatch) throw error;
+      result = await exchange(false);
+    }
     if (!result.access_token)
       throw new WhatsAppProviderError(
         "TOKEN_OR_PERMISSION_INVALID",
@@ -238,6 +250,35 @@ export class WhatsAppProvider {
         true,
       );
     return { providerMessageId: String(providerMessageId), raw };
+  }
+
+  async sendAuthenticationCode(input: {
+    token: string;
+    phoneNumberId: string;
+    to: string;
+    template: string;
+    language: string;
+    code: string;
+  }): Promise<SendResult> {
+    return this.sendTemplate({
+      token: input.token,
+      phoneNumberId: input.phoneNumberId,
+      to: input.to,
+      template: input.template,
+      language: input.language,
+      components: [
+        {
+          type: "body",
+          parameters: [{ type: "text", text: input.code }],
+        },
+        {
+          type: "button",
+          sub_type: "url",
+          index: "0",
+          parameters: [{ type: "text", text: input.code }],
+        },
+      ],
+    });
   }
 
   async sendText(input: {

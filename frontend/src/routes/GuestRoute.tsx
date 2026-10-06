@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { Navigate, useLocation } from "react-router-dom";
-import { getAccessToken } from "../services/apiClient";
+import { getAccessToken, hasPersistedSession } from "../services/apiClient";
 import { useSession } from "../services/session";
 import {
   loginDestination,
@@ -14,10 +14,12 @@ export function GuestRoute({
   children: ReactNode;
   auth?: boolean;
 }) {
-  const session = useSession({ publicPage: true }),
+  const session = useSession({ publicPage: true, recoverSession: auth }),
     location = useLocation();
   // This is a public-page redirect, not an authorization boundary. A slow or
   // unavailable session endpoint must not replace public content with an error.
+  if (auth && !getAccessToken() && hasPersistedSession() && session.isPending)
+    return <main className="state-card" role="status">Restoring your session&hellip;</main>;
   if (!getAccessToken() || !session.data || session.isError)
     return <>{children}</>;
   const identity = session.data.data;

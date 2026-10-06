@@ -26,6 +26,7 @@ import { BackIconLink } from "../../components/BackIconControl";
 import { validCoordinates } from "../../services/location";
 import type { Row } from "../live/LiveData";
 import "../../styles/gym-details.css";
+import { Pagination } from "../../components/DataListControls";
 
 const days = [
   "Sunday",
@@ -87,9 +88,14 @@ export function GymDetailsView({
   joinStatus,
   joinError,
   reviewsState,
+  classesState,
+  mediaState,
+  plansState,
   reviewDisabled,
   offers,
   advertisements,
+  backTo = "/explore",
+  backLabel = "Back to Explore gyms",
 }: {
   data: Row;
   saved: boolean;
@@ -107,9 +113,36 @@ export function GymDetailsView({
     error?: string;
     onPage: (page: number) => void;
   };
+  classesState?: {
+    page: number;
+    limit: number;
+    total: number;
+    loading: boolean;
+    error?: string;
+    onPage: (page: number) => void;
+    onLimit: (limit: number) => void;
+  };
+  mediaState?: {
+    page: number;
+    limit: number;
+    total: number;
+    loading: boolean;
+    onOpen: () => void;
+    onPage: (page: number) => void;
+  };
+  plansState?: {
+    page: number;
+    limit: number;
+    total: number;
+    loading: boolean;
+    onPage: (page: number) => void;
+    onLimit: (limit: number) => void;
+  };
   reviewDisabled?: boolean;
   offers?: ReactNode;
   advertisements?: ReactNode;
+  backTo?: string;
+  backLabel?: string;
 }) {
   const gym = data.gym,
     plans: Row[] = data.plans || [],
@@ -180,6 +213,7 @@ export function GymDetailsView({
     if (galleryIndex === null && dialog.current?.open) dialog.current.close();
   }, [galleryIndex]);
   function openGallery(index: number, trigger: HTMLButtonElement) {
+    mediaState?.onOpen();
     galleryTrigger.current = trigger;
     setGalleryIndex(index);
   }
@@ -190,7 +224,7 @@ export function GymDetailsView({
   return (
     <div className="gd-page container">
       <div className="gd-breadcrumb">
-        <BackIconLink to="/explore" label="Back to Explore gyms" />
+        <BackIconLink to={backTo} label={backLabel} />
       </div>
       <header className="gd-heading">
         <div>
@@ -269,7 +303,7 @@ export function GymDetailsView({
             onClick={(e) => openGallery(0, e.currentTarget)}
           >
             <Images size={17} />
-            View all media <span>{media.length}</span>
+            View all media <span>{mediaState?.total || gym.mediaCount || media.length}</span>
             {media.some((m) => m.type === "video") && (
               <Play size={15} aria-label="Includes videos" />
             )}
@@ -395,7 +429,7 @@ export function GymDetailsView({
                 <h2>Memberships that fit</h2>
               </div>
               <span className="gd-count">
-                {plans.length} {plans.length === 1 ? "plan" : "plans"}
+                {plansState?.total ?? plans.length} {(plansState?.total ?? plans.length) === 1 ? "plan" : "plans"}
               </span>
             </div>
             <p>
@@ -457,6 +491,7 @@ export function GymDetailsView({
                 </article>
               ))}
             </div>
+            {plansState && <Pagination page={plansState.page} limit={plansState.limit} total={plansState.total} loading={plansState.loading} onPageChange={plansState.onPage} onLimitChange={plansState.onLimit} />}
             {!plans.length && (
               <div className="gd-empty">
                 <CalendarDays />
@@ -500,10 +535,21 @@ export function GymDetailsView({
               </Link>
             </div>
             <div className="class-grid">
-              {classes.map((c) => (
-                <ClassCard key={c.publicId} session={{ ...c, gymId: { name: gym.name, timezone } }} />
-              ))}
+              {classes.slice(0, 3).map((c) => (
+  <ClassCard
+    key={c.publicId}
+    session={{
+      ...c,
+      gymId: {
+        name: gym.name,
+        timezone,
+      },
+    }}
+  />
+))}
             </div>
+            {classesState?.error && <p role="alert">{classesState.error}</p>}
+            {/* {classesState && <Pagination page={classesState.page} limit={classesState.limit} total={classesState.total} loading={classesState.loading} onPageChange={classesState.onPage} onLimitChange={classesState.onLimit} />} */}
             {!classes.length && (
               <div className="gd-empty">
                 <Users />
@@ -796,6 +842,9 @@ export function GymDetailsView({
                 <ChevronRight />
               </button>
             </footer>
+            {mediaState && mediaState.total > mediaState.limit && (
+              <Pagination page={mediaState.page} limit={mediaState.limit} total={mediaState.total} loading={mediaState.loading} onPageChange={(page) => { mediaState.onPage(page); setGalleryIndex(0); }} />
+            )}
           </>
         )}
       </dialog>

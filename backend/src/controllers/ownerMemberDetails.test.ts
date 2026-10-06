@@ -24,7 +24,11 @@ it("returns the gym route identifier and bounded payment history only within the
   vi.spyOn(AttendanceEvent, "find").mockReturnValue(query([]));
   const res = { json: vi.fn() };
   await getMember({ params: { id: "member-public" }, auth: { role: "ADMIN", gymId: "gym-internal", permissions: ["admin:platform"] } } as any, res as any);
-  expect(MemberProfile.findOne).toHaveBeenCalledWith({ publicId: "member-public", gymId: "gym-internal" });
+  expect(MemberProfile.findOne).toHaveBeenCalledWith({
+    publicId: "member-public",
+    gymId: "gym-internal",
+    isDeleted: { $ne: true },
+  });
   expect(Payment.find).toHaveBeenCalledWith({ payerId: "payer-internal", gymId: "gym-internal" });
   expect(payments.limit).toHaveBeenCalledWith(50);
   expect(gym.select).toHaveBeenCalledWith(expect.stringContaining("publicId"));
