@@ -5,6 +5,7 @@ import compression from "compression";
 import cookieParser from "cookie-parser";
 import rateLimit from "express-rate-limit";
 import { env } from "./config/env.js";
+import { logger } from "./config/logger.js";
 import { connectDatabase } from "./config/db.js";
 import { httpLogging } from "./middleware/httpLogging.js";
 import { razorpayWebhook } from "./controllers/checkoutController.js";
@@ -15,6 +16,7 @@ import { notFound } from "./middleware/notFound.js";
 import { errorHandler } from "./middleware/errorHandler.js";
 import { rejectUnsafeKeys } from "./middleware/rejectUnsafeKeys.js";
 import { openapi } from "./docs/openapi.js";
+import { AppError } from "./utils/AppError.js";
 
 export const app = express();
 
@@ -36,7 +38,21 @@ app.use(
 );
 app.use(
   cors({
-    origin: env.CLIENT_ORIGIN.split(",").map((origin) => origin.trim()),
+    origin(origin, callback) {
+      const allowedOrigins = env.CLIENT_ORIGIN.split(",").map((value) => value.trim());
+      if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+      logger.warn(
+        { event: "cors_origin_rejected", origin: origin.slice(0, 240) },
+        "CORS rejected an unconfigured browser origin",
+      );
+      return callback(
+        new AppError(
+          403,
+          "CORS_ORIGIN_REJECTED",
+          "This browser origin is not allowed to access GETFIT4U.",
+        ),
+      );
+    },
     credentials: true,
     methods: ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: [

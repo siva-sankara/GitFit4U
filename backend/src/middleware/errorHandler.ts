@@ -74,6 +74,16 @@ export const errorHandler: ErrorRequestHandler = (error, req, res, _next) => {
       { err: error, requestId: req.requestId, path: req.path },
       "request failed",
     );
+  } else if (statusCode === 401) {
+    logger.warn(
+      {
+        event: "authentication_rejected",
+        code,
+        requestId: req.requestId,
+        path: req.path,
+      },
+      "authentication request rejected",
+    );
   }
 
   res.status(statusCode).json({

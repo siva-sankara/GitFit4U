@@ -8,6 +8,7 @@ import bcrypt from "bcrypt";
 import crypto from "node:crypto";
 import { nanoid } from "nanoid";
 import { env } from "../config/env.js";
+import { logger } from "../config/logger.js";
 import {
   AuthIdentity,
   OtpChallenge,
@@ -88,6 +89,16 @@ async function loginResponse(
   user.lastLoginAt = new Date();
   await user.save();
   setRefreshCookie(res, tokens.refreshToken);
+  logger.info(
+    {
+      event: "auth_login_succeeded",
+      userId: String(user._id),
+      role,
+      refreshCookieSet: true,
+      requestId: req.requestId,
+    },
+    "authentication session issued",
+  );
   res.json({
     success: true,
     data: {
@@ -559,10 +570,39 @@ export async function googleLogin(req: Request, res: Response) {
 
 export async function refresh(req: Request, res: Response) {
   const token = req.cookies?.gfu_refresh;
+  logger.info(
+    {
+      event: "auth_refresh_attempted",
+      cookiePresent: typeof token === "string" && token.length > 0,
+      requestId: req.requestId,
+    },
+    "session refresh attempted",
+  );
   if (!token)
     throw new AppError(401, "REFRESH_REQUIRED", "Please sign in again.");
-  const rotated = await rotateRefreshToken(token);
+  let rotated: Awaited<ReturnType<typeof rotateRefreshToken>>;
+  try {
+    rotated = await rotateRefreshToken(token);
+  } catch (error) {
+    logger.warn(
+      {
+        event: "auth_refresh_failed",
+        reason: error instanceof AppError ? error.code : "INTERNAL_ERROR",
+        requestId: req.requestId,
+      },
+      "session refresh failed",
+    );
+    throw error;
+  }
   setRefreshCookie(res, rotated.refreshToken);
+  logger.info(
+    {
+      event: "auth_refresh_succeeded",
+      sessionId: rotated.sessionId,
+      requestId: req.requestId,
+    },
+    "session refresh succeeded",
+  );
   res.json({ success: true, data: { accessToken: rotated.accessToken } });
 }
 
@@ -603,6 +643,15 @@ export async function logoutAll(req: Request, res: Response) {
 }
 
 export async function me(req: Request, res: Response) {
+  logger.info(
+    {
+      event: "auth_session_checked",
+      userId: req.auth!.userId,
+      role: req.auth!.role,
+      requestId: req.requestId,
+    },
+    "authenticated session checked",
+  );
   const [user, assignments] = await Promise.all([
     User.findById(req.auth!.userId).lean(),
     RoleAssignment.find({ userId: req.auth!.userId, status: "ACTIVE" })

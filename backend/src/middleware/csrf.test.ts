@@ -38,10 +38,10 @@ describe("cookie authentication CSRF boundary", () => {
     await request(test.server).post("/session").set("x-csrf-protection", "1").expect(204);
     await request(test.server).get("/session").expect(204);
   });
-  it("protects the real logout route before session revocation", async () => {
+  it("rejects an untrusted logout origin before session revocation", async () => {
     const res = await request(app).post("/api/v1/auth/logout").set("Origin", "https://untrusted.example").set("Sec-Fetch-Site", "cross-site").set("Cookie", "gfu_refresh=synthetic.session").type("form").send({});
     expect(res.status).toBe(403);
-    expect(res.body.error.code).toBe("CSRF_REJECTED");
+    expect(res.body.error.code).toBe("CORS_ORIGIN_REJECTED");
   });
   it("keeps valid logout without a cookie idempotent", async () => {
     await request(app).post("/api/v1/auth/logout").set("x-csrf-protection", "1").expect(204);

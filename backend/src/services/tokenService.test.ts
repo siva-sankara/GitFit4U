@@ -5,7 +5,7 @@ const mocks = vi.hoisted(() => ({ find: vi.fn(), update: vi.fn(), revoke: vi.fn(
 vi.mock("../models/Auth.js", () => ({ Session: { findOne: mocks.find, findOneAndUpdate: mocks.update, updateMany: mocks.revoke } }));
 vi.mock("../models/User.js", () => ({ User: { exists: mocks.active } }));
 vi.mock("../config/env.js", () => ({ env: { JWT_ACCESS_SECRET: "isolated-test-access-secret-not-production", JWT_REFRESH_SECRET: "isolated-test-refresh-secret-not-production", JWT_ACCESS_TTL: "15m", JWT_REFRESH_TTL: "30d" }, isProduction: false }));
-import { rotateRefreshToken } from "./tokenService.js";
+import { buildRefreshCookieOptions, rotateRefreshToken } from "./tokenService.js";
 
 const original = "test-session.original-test-secret";
 let record: any;
@@ -73,4 +73,31 @@ it("rotates again after grace and rejects unknown or malformed credentials", asy
   expect(next.refreshToken).not.toBe(first.refreshToken);
   await expect(rotateRefreshToken("test-session.wrong-secret")).rejects.toMatchObject({ code: "REFRESH_TOKEN_REUSE" });
   await expect(rotateRefreshToken("malformed")).rejects.toMatchObject({ code: "INVALID_REFRESH_TOKEN" });
+});
+
+it("uses a persistent host-only production cookie that survives all application routes", () => {
+  expect(buildRefreshCookieOptions({
+    production: true,
+    maxAge: 30 * 86_400_000,
+  })).toEqual({
+    httpOnly: true,
+    secure: true,
+    sameSite: "none",
+    domain: undefined,
+    path: "/",
+    maxAge: 30 * 86_400_000,
+  });
+});
+
+it("uses a non-secure lax cookie only for local development", () => {
+  expect(buildRefreshCookieOptions({
+    production: false,
+    domain: "localhost",
+  })).toMatchObject({
+    httpOnly: true,
+    secure: false,
+    sameSite: "lax",
+    domain: "localhost",
+    path: "/",
+  });
 });

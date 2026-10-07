@@ -39,6 +39,29 @@ describe("deployment CSP", () => {
       "https://connect.facebook.net",
     );
   });
+  it("supports the VITE_API_BASE_URL deployment alias", () => {
+    const headers = securityHeaders({
+      VITE_API_BASE_URL: "https://api.example.test",
+    });
+    expect(headers).toContain("https://api.example.test");
+    expect(headers).toContain("wss://api.example.test");
+  });
+  it("fails a production build that restores the cross-site Vercel API", () => {
+    expect(() =>
+      securityHeaders(
+        { VITE_API_URL: "https://separate-api.vercel.app" },
+        true,
+      ),
+    ).toThrow(/third-party/);
+  });
+  it("rejects conflicting API variable aliases", () => {
+    expect(() =>
+      securityHeaders({
+        VITE_API_URL: "https://api-one.example",
+        VITE_API_BASE_URL: "https://api-two.example",
+      }),
+    ).toThrow(/cannot point to different APIs/);
+  });
   it.each([
     "https://secret@example.com",
     "javascript:alert(1)",

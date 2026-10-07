@@ -234,6 +234,10 @@ const outboxSchema = new Schema(
     dedupeKey: { type: String, required: true, unique: true },
     businessEvent: { type: String, maxlength: 120 },
     businessEntityId: String,
+    membershipContext: {
+      subscriptionId: String,
+      endsAt: Date,
+    },
     connectionId: {
       type: Schema.Types.ObjectId,
       ref: "WhatsAppConnection",

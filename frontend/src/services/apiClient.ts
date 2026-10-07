@@ -1,4 +1,4 @@
-const API_URL = (import.meta.env.VITE_API_URL || "").replace(/\/$/, "");
+import { API_URL } from "./runtimeConfig";
 let accessToken: string | null = null;
 try { accessToken = sessionStorage.getItem("gfu_access_token"); } catch { /* In-memory sessions still work when browser storage is unavailable. */ }
 let refreshPromise: Promise<void> | null = null;

@@ -39,17 +39,24 @@ async function renderStatus(status: string) {
   ));
 }
 
-const labels = () => [...host.querySelectorAll("button")].map((button) => button.textContent?.trim());
+const labels = () => [...host.querySelectorAll("button")].map(
+  (button) => button.textContent?.trim() || button.getAttribute("aria-label"),
+);
 
 it("shows receipt actions for a paid invoice and hides collection", async () => {
   await renderStatus("CAPTURED");
-  expect(labels()).toEqual(expect.arrayContaining(["View", "Download Invoice", "Send Receipt", "More"]));
+  expect(labels()).toEqual(expect.arrayContaining([
+    "Open payment and invoice details",
+    "Download invoice PDF",
+    "Send receipt to the payer's verified invoice email",
+    "More",
+  ]));
   expect(labels()).not.toContain("Collect");
 });
 
 it("shows collection and reminder actions for a due invoice", async () => {
   await renderStatus("PENDING");
-  expect(labels()).toEqual(expect.arrayContaining(["View", "Collect", "Send Reminder", "More"]));
+  expect(labels()).toEqual(expect.arrayContaining(["Open payment and invoice details", "Collect", "Send Reminder", "More"]));
   const collect = [...host.querySelectorAll("button")].find((button) => button.textContent === "Collect")!;
   expect(collect.title).toBe("Record payment for this invoice");
   collect.focus();
@@ -58,7 +65,7 @@ it("shows collection and reminder actions for a due invoice", async () => {
 
 it("offers a retry request and manual collection after a failed payment", async () => {
   await renderStatus("FAILED");
-  expect(labels()).toEqual(expect.arrayContaining(["View", "Mark manually paid", "Retry", "More"]));
+  expect(labels()).toEqual(expect.arrayContaining(["Open payment and invoice details", "Mark manually paid", "Retry", "More"]));
   expect(labels()).not.toContain("Send Reminder");
   const retry = [...host.querySelectorAll("button")].find((button) => button.textContent === "Retry")!;
   expect(retry.getAttribute("aria-label")).toBe("Ask the payer to retry this failed payment");

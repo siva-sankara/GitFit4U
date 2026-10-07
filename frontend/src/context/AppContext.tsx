@@ -26,6 +26,7 @@ import {
   setNotificationSoundEnabled,
   type InboxNotification,
 } from "../services/notificationAlerts";
+import { API_URL } from "../services/runtimeConfig";
 interface AppContextValue {
   role: Role;
   setRole: (role: Role) => void;
@@ -172,10 +173,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       .then(({ io }) => {
         if (disposed) return;
         const socket = io(
-          (import.meta.env.VITE_API_URL || window.location.origin).replace(
-            /\/$/,
-            "",
-          ),
+          API_URL || window.location.origin,
           {
             auth: (done) => done({ token: getAccessToken() }),
             transports: ["websocket", "polling"],

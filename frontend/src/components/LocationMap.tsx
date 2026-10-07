@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import type * as Leaflet from "leaflet";
 import "leaflet/dist/leaflet.css";
+import { API_URL } from "../services/runtimeConfig";
 import { validCoordinates, type Coordinates } from "../services/location";
-const apiBase = (import.meta.env.VITE_API_URL || "").replace(/\/$/, "");
+const apiBase = API_URL;
 export function LocationMap({
   value,
   onChange,

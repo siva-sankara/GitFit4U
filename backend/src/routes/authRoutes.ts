@@ -9,6 +9,12 @@ import { activateAccount, acceptInvitation } from "../controllers/accountInvitat
 import { accountPassword, publicSignupInput } from "./authSchemas.js";
 
 export const authRoutes = Router();
+authRoutes.use((_req, res, next) => {
+  // Authentication and identity responses must never be reused by a browser,
+  // CDN, or the same-origin Vercel proxy for another request.
+  res.set("Cache-Control", "no-store");
+  next();
+});
 authRoutes.use(requireCsrfProtection);
 
 const otpLimiter = rateLimit({ windowMs: 15 * 60_000, limit: 20, standardHeaders: true, legacyHeaders: false });

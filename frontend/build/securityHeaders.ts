@@ -1,5 +1,6 @@
 type PublicConfiguration = {
   VITE_API_URL?: string;
+  VITE_API_BASE_URL?: string;
   VITE_MEDIA_ORIGINS?: string;
 };
 function origin(value: string) {
@@ -19,10 +20,26 @@ function origin(value: string) {
   return parsed.origin;
 }
 
-export function securityHeaders(config: PublicConfiguration = {}) {
-  const api = config.VITE_API_URL?.trim()
-    ? origin(config.VITE_API_URL.trim())
-    : "";
+export function securityHeaders(
+  config: PublicConfiguration = {},
+  production = false,
+) {
+  const primaryApi = config.VITE_API_URL?.trim();
+  const legacyApi = config.VITE_API_BASE_URL?.trim();
+  if (primaryApi && legacyApi && origin(primaryApi) !== origin(legacyApi))
+    throw new Error(
+      "VITE_API_URL and VITE_API_BASE_URL cannot point to different APIs.",
+    );
+  const configuredApi = primaryApi || legacyApi;
+  if (
+    production &&
+    configuredApi &&
+    new URL(origin(configuredApi)).hostname.endsWith(".vercel.app")
+  )
+    throw new Error(
+      "Production must use the same-origin API proxy or api.getfit4u.in; a separate vercel.app API makes refresh cookies third-party.",
+    );
+  const api = configuredApi ? origin(configuredApi) : "";
   const socket = api ? api.replace(/^http/, "ws") : "";
   // Exact custom S3/CloudFront origins can replace these provider-scoped defaults.
   // Only public origins are consumed; no AWS/Firebase server credential is read.

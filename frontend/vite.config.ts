@@ -8,7 +8,14 @@ export default defineConfig(({ mode }) => ({
   plugins: [react(), {
     name: "getfit4u-deployment-headers",
     generateBundle(_options, bundle) {
-      this.emitFile({ type: "asset", fileName: "_headers", source: securityHeaders(loadEnv(mode, process.cwd(), "VITE_")) });
+      this.emitFile({
+        type: "asset",
+        fileName: "_headers",
+        source: securityHeaders(
+          loadEnv(mode, process.cwd(), "VITE_"),
+          mode === "production",
+        ),
+      });
       const worker = readFileSync(new URL("./public/sw.js", import.meta.url), "utf8");
       const offline = readFileSync(new URL("./public/offline.html", import.meta.url), "utf8");
       const theme = readFileSync(new URL("./public/theme-init.js", import.meta.url), "utf8");

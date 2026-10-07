@@ -1,4 +1,5 @@
 import { getAccessToken } from "./apiClient";
+import { API_URL } from "./runtimeConfig";
 export function validateDocument(file: File) {
   if (!["application/pdf", "image/jpeg", "image/png"].includes(file.type))
     throw new Error("Choose a PDF, JPG or PNG file.");
@@ -22,7 +23,7 @@ export function uploadDocumentBytes(
     xhr.open(
       "PUT",
       internal
-        ? `${(import.meta.env.VITE_API_URL || "").replace(/\/$/, "")}${url}`
+        ? `${API_URL}${url}`
         : url,
     );
     if (internal) {

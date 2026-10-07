@@ -8,7 +8,10 @@ const schema = z
       .enum(["development", "test", "production"])
       .default("development"),
     PORT: z.coerce.number().int().positive().default(5000),
-    MONGO_URI: z.string().min(1).default("mongodb://127.0.0.1:27017/getfit4u"),
+    MONGO_URI: z
+      .string()
+      .regex(/^mongodb(?:\+srv)?:\/\//, "MONGO_URI must be a MongoDB connection URI.")
+      .default("mongodb://127.0.0.1:27017/getfit4u"),
     CLIENT_ORIGIN: z.string().default("http://localhost:5173").transform((value, context) => {
       try {
         return normalizeClientOrigins(value);
@@ -25,8 +28,8 @@ const schema = z
       .string()
       .min(32)
       .default("development-refresh-secret-change-me-12345"),
-    JWT_ACCESS_TTL: z.string().default("15m"),
-    JWT_REFRESH_TTL: z.string().default("30d"),
+    JWT_ACCESS_TTL: z.string().regex(/^\d+[mhd]$/).default("15m"),
+    JWT_REFRESH_TTL: z.string().regex(/^\d+[mhd]$/).default("30d"),
     AUTH_OTP_HMAC_SECRET: z
       .string()
       .min(32)
@@ -35,7 +38,10 @@ const schema = z
       .string()
       .min(32)
       .default("development-attendance-qr-secret-change-me"),
-    COOKIE_DOMAIN: z.string().optional(),
+    COOKIE_DOMAIN: z.preprocess(
+      (value) => value || undefined,
+      z.string().regex(/^(?:\.)?[A-Za-z0-9.-]+$/).optional(),
+    ),
     REDIS_URL: z.string().default("redis://127.0.0.1:6379"),
     RAZORPAY_KEY_ID: z.string().optional(),
     RAZORPAY_KEY_SECRET: z.string().optional(),
@@ -129,12 +135,13 @@ const schema = z
       }
     }
     if (value.NODE_ENV !== "production") return;
-    for (const key of [
+    const secretKeys = [
       "JWT_ACCESS_SECRET",
       "JWT_REFRESH_SECRET",
       "AUTH_OTP_HMAC_SECRET",
       "ATTENDANCE_QR_SECRET",
-    ] as const) {
+    ] as const;
+    for (const key of secretKeys) {
       if (
         value[key].length < 48 ||
         value[key].includes("development") ||
@@ -147,18 +154,47 @@ const schema = z
         });
       }
     }
+    if (new Set(secretKeys.map((key) => value[key])).size !== secretKeys.length) {
+      context.addIssue({
+        code: "custom",
+        path: ["JWT_ACCESS_SECRET"],
+        message: "Production authentication and signing secrets must be independent values.",
+      });
+    }
+    if (/mongodb(?:\+srv)?:\/\/(?:[^@/]+@)?(?:localhost|127\.0\.0\.1|\[::1\])(?::|\/)/i.test(value.MONGO_URI)) {
+      context.addIssue({
+        code: "custom",
+        path: ["MONGO_URI"],
+        message: "MONGO_URI must reference the persistent production database.",
+      });
+    }
+    for (const origin of value.CLIENT_ORIGIN.split(",")) {
+      const url = new URL(origin);
+      if (url.protocol !== "https:" || ["localhost", "127.0.0.1", "::1"].includes(url.hostname)) {
+        context.addIssue({
+          code: "custom",
+          path: ["CLIENT_ORIGIN"],
+          message: "Production CLIENT_ORIGIN entries must use HTTPS public hostnames.",
+        });
+        break;
+      }
+    }
   });
 
-// Existing names retain precedence; standard AWS names are supported server-side.
-const awsRegion = process.env.OBJECT_STORAGE_REGION || process.env.AWS_REGION;
-export const env = schema.parse({
-  ...process.env,
-  OBJECT_STORAGE_REGION: awsRegion,
-  OBJECT_STORAGE_BUCKET: process.env.OBJECT_STORAGE_BUCKET || process.env.AWS_S3_BUCKET_NAME,
-  OBJECT_STORAGE_ACCESS_KEY: process.env.OBJECT_STORAGE_ACCESS_KEY || process.env.AWS_ACCESS_KEY_ID,
-  OBJECT_STORAGE_SECRET_KEY: process.env.OBJECT_STORAGE_SECRET_KEY || process.env.AWS_SECRET_ACCESS_KEY,
-  OBJECT_STORAGE_SESSION_TOKEN: process.env.OBJECT_STORAGE_SESSION_TOKEN || process.env.AWS_SESSION_TOKEN,
-  OBJECT_STORAGE_ENDPOINT: process.env.OBJECT_STORAGE_ENDPOINT ||
-    (process.env.AWS_S3_BUCKET_NAME ? `https://s3.${awsRegion || "ap-south-1"}.amazonaws.com` : undefined),
-});
+export function parseEnvironment(input: NodeJS.ProcessEnv) {
+  // Existing names retain precedence; standard AWS names are supported server-side.
+  const awsRegion = input.OBJECT_STORAGE_REGION || input.AWS_REGION;
+  return schema.parse({
+    ...input,
+    OBJECT_STORAGE_REGION: awsRegion,
+    OBJECT_STORAGE_BUCKET: input.OBJECT_STORAGE_BUCKET || input.AWS_S3_BUCKET_NAME,
+    OBJECT_STORAGE_ACCESS_KEY: input.OBJECT_STORAGE_ACCESS_KEY || input.AWS_ACCESS_KEY_ID,
+    OBJECT_STORAGE_SECRET_KEY: input.OBJECT_STORAGE_SECRET_KEY || input.AWS_SECRET_ACCESS_KEY,
+    OBJECT_STORAGE_SESSION_TOKEN: input.OBJECT_STORAGE_SESSION_TOKEN || input.AWS_SESSION_TOKEN,
+    OBJECT_STORAGE_ENDPOINT: input.OBJECT_STORAGE_ENDPOINT ||
+      (input.AWS_S3_BUCKET_NAME ? `https://s3.${awsRegion || "ap-south-1"}.amazonaws.com` : undefined),
+  });
+}
+
+export const env = parseEnvironment(process.env);
 export const isProduction = env.NODE_ENV === "production";

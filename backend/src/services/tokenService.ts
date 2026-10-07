@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import jwt from "jsonwebtoken";
 import { nanoid } from "nanoid";
-import type { Response } from "express";
+import type { CookieOptions, Response } from "express";
 import { env, isProduction } from "../config/env.js";
 import type { Role } from "../constants/domain.js";
 import { Session } from "../models/Auth.js";
@@ -122,23 +122,41 @@ export async function rotateRefreshToken(refreshToken: string) {
   throw new AppError(503, "REFRESH_BUSY", "Session recovery is busy. Please retry.");
 }
 
-export function setRefreshCookie(res: Response, token: string): void {
-  res.cookie("gfu_refresh", token, {
+export function buildRefreshCookieOptions(input: {
+  production: boolean;
+  domain?: string;
+  maxAge?: number;
+}): CookieOptions {
+  return {
     httpOnly: true,
-    secure: isProduction,
-    sameSite: isProduction ? "none" : "lax",
-    domain: env.COOKIE_DOMAIN || undefined,
-    path: "/api/v1/auth",
-    maxAge: refreshTtlMs()
-  });
+    secure: input.production,
+    sameSite: input.production ? "none" : "lax",
+    domain: input.domain || undefined,
+    // Keep one policy for direct API calls and the same-origin Vercel proxy.
+    // The refresh credential remains HttpOnly and is never read by JavaScript.
+    path: "/",
+    ...(input.maxAge === undefined ? {} : { maxAge: input.maxAge }),
+  };
+}
+
+export function setRefreshCookie(res: Response, token: string): void {
+  res.cookie(
+    "gfu_refresh",
+    token,
+    buildRefreshCookieOptions({
+      production: isProduction,
+      domain: env.COOKIE_DOMAIN,
+      maxAge: refreshTtlMs(),
+    }),
+  );
 }
 
 export function clearRefreshCookie(res: Response): void {
-  res.clearCookie("gfu_refresh", {
-    httpOnly: true,
-    secure: isProduction,
-    sameSite: isProduction ? "none" : "lax",
-    domain: env.COOKIE_DOMAIN || undefined,
-    path: "/api/v1/auth"
-  });
+  res.clearCookie(
+    "gfu_refresh",
+    buildRefreshCookieOptions({
+      production: isProduction,
+      domain: env.COOKIE_DOMAIN,
+    }),
+  );
 }

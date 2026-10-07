@@ -7,17 +7,20 @@ const mocks = vi.hoisted(() => ({
   route: vi.fn(),
   webhook: vi.fn(),
   logError: vi.fn(),
+  logWarn: vi.fn(),
 }));
 
 vi.mock("./config/env.js", () => ({
   env: {
     NODE_ENV: "test",
-    CLIENT_ORIGIN: "https://www.getfit4u.in,https://git-fit4-u.vercel.app",
+    CLIENT_ORIGIN: "https://www.getfit4u.in,https://getfit4u.in,https://git-fit4-u.vercel.app",
     WHATSAPP_VERIFY_TOKEN: "whatsapp-route-test-token",
   },
 }));
 vi.mock("./config/db.js", () => ({ connectDatabase: mocks.connect }));
-vi.mock("./config/logger.js", () => ({ logger: { error: mocks.logError } }));
+vi.mock("./config/logger.js", () => ({
+  logger: { error: mocks.logError, warn: mocks.logWarn },
+}));
 vi.mock("./middleware/httpLogging.js", () => ({
   httpLogging: (_req: unknown, _res: unknown, next: () => void) => next(),
 }));
@@ -46,7 +49,7 @@ beforeEach(() => {
 });
 
 describe("Vercel Express entry point", () => {
-  it.each(["https://www.getfit4u.in", "https://git-fit4-u.vercel.app"])("allows credentialed preflight from %s before connecting to MongoDB", async (origin) => {
+  it.each(["https://www.getfit4u.in", "https://getfit4u.in", "https://git-fit4-u.vercel.app"])("allows credentialed preflight from %s before connecting to MongoDB", async (origin) => {
     const response = await request(app).options("/api/v1/auth/login")
       .set("Origin", origin)
       .set("Access-Control-Request-Method", "POST")
@@ -63,6 +66,10 @@ describe("Vercel Express entry point", () => {
     const response = await request(app).options("/api/v1/auth/login")
       .set("Origin", origin).set("Access-Control-Request-Method", "POST");
     expect(response.headers["access-control-allow-origin"]).toBeUndefined();
+    expect(mocks.logWarn).toHaveBeenCalledWith(
+      { event: "cors_origin_rejected", origin },
+      "CORS rejected an unconfigured browser origin",
+    );
     expect(mocks.connect).not.toHaveBeenCalled();
   });
 

@@ -6,6 +6,10 @@
   "outputDirectory": "dist",
   "rewrites": [
     {
+      "source": "/api/v1/:path*",
+      "destination": "https://git-fit4-u-un7d.vercel.app/api/v1/:path*"
+    },
+    {
       "source": "/((?!api(?:/|$)|assets(?:/|$)|brand(?:/|$)|.*\\.[^/]+$).*)",
       "destination": "/index.html"
     }

@@ -78,7 +78,8 @@ export async function acceptMemberInvitation(input: { token: string; password?: 
     const gymActive = await Gym.exists({ _id: member.gymId, status: "ACTIVE", deletedAt: null }).session(session);
     const paid = subscription?.latestPaymentId && await Payment.findOneAndUpdate({ _id: subscription.latestPaymentId, purpose: "MEMBERSHIP", gymId: member.gymId, payerId: user._id, subscriptionId: subscription._id, status: "CAPTURED", capturedAt: { $ne: null } }, { $inc: { "metadata.accessRevision": 1 } }, { session, returnDocument: "after" });
     const refunded = paid && await Refund.exists({ paymentId: subscription.latestPaymentId, status: { $in: ["REQUESTED", "PROCESSING", "PROCESSED"] } }).session(session);
-    if (member.status === "INACTIVE" && !member.deactivatedAt && subscription && gymActive && paid && !refunded) member.status = "ACTIVE";
+    const membershipActivated = member.status === "INACTIVE" && !member.deactivatedAt && subscription && gymActive && paid && !refunded;
+    if (membershipActivated) member.status = "ACTIVE";
     member.invitation = { ...member.invitation?.toObject?.() || member.invitation, status: "ACCEPTED", acceptedAt: now };
     if (invitation.kind === "LINK" && !user.roles.includes("USER")) {
       user.roles.push("USER");
@@ -86,6 +87,10 @@ export async function acceptMemberInvitation(input: { token: string; password?: 
     }
     await member.save({ session });
     await emitDomainEvent({ event: "account.verified", userId: user._id, gymId: member.gymId, entityId: invitation.publicId, actionUrl: "/app/profile/membership", session });
+    // Owner-created memberships stay on invitation hold until acceptance. Reuse
+    // the subscription activation key so only the now-active membership welcomes.
+    if (membershipActivated)
+      await emitDomainEvent({ event: "membership.activated", userId: user._id, gymId: member.gymId, entityId: subscription.publicId, actionUrl: "/app/subscriptions", session });
     return { activated: invitation.kind === "ACTIVATE", linked: true };
   });
 }
