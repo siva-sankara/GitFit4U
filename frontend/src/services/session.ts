@@ -3,14 +3,12 @@ import { useEffect, useSyncExternalStore } from "react";
 import {
   apiRequest,
   ApiError,
-  flushPendingLogout,
   getAccessToken,
-  hasPendingLogout,
-  hasPersistedSession,
   refreshSession,
   type ApiEnvelope,
 } from "./apiClient";
 import type { Role } from "../types";
+import { trackSessionActivity } from "./sessionActivity";
 
 export type ActiveRole = Role | "GYM_STAFF";
 export interface OwnerOnboarding {
@@ -55,15 +53,8 @@ export interface SessionData {
 }
 
 export async function readSession() {
-  if (!getAccessToken()) await refreshSession();
-  const token = getAccessToken();
-  try {
-    return await apiRequest<ApiEnvelope<SessionData>>("/api/v1/auth/me");
-  } catch (error) {
-    if (!(error instanceof ApiError) || error.status !== 401) throw error;
-    if (getAccessToken() === token) await refreshSession();
-    return apiRequest<ApiEnvelope<SessionData>>("/api/v1/auth/me");
-  }
+  if (!getAccessToken()) await refreshSession({ activity: document.visibilityState === "visible" });
+  return apiRequest<ApiEnvelope<SessionData>>("/api/v1/auth/me");
 }
 function subscribeToAuth(onChange: () => void) {
   window.addEventListener("gfu-auth", onChange);
@@ -82,9 +73,9 @@ export function useSession({
   return useQuery({
     queryKey: ["me"],
     queryFn: readSession,
-    // The non-secret durable hint lets auth entry screens recover a valid
-    // HttpOnly refresh cookie without probing for every anonymous visitor.
-    enabled: !publicPage || Boolean(token) || (recoverSession && hasPersistedSession()),
+    // The app's initial cookie check must work even if local/session storage
+    // was cleared. Persistence belongs to the cookie, never to a JS hint.
+    enabled: !publicPage || Boolean(token) || recoverSession,
     retry: (attempt, error) =>
       attempt < 1 && error instanceof ApiError &&
       (error.status === 0 || error.status === 429 || error.status >= 500),
@@ -99,37 +90,7 @@ export function useSession({
 /** Revalidates an existing session after real browser/PWA resume boundaries. */
 export function useSessionLifecycle() {
   const client = useQueryClient();
-  useEffect(() => {
-    let timer = 0;
-    const reconcile = () => {
-      window.clearTimeout(timer);
-      timer = window.setTimeout(async () => {
-        if (document.visibilityState === "hidden") return;
-        if (hasPendingLogout()) {
-          try { await flushPendingLogout(); } catch { return; }
-          return;
-        }
-        if (!hasPersistedSession()) return;
-        const state = client.getQueryState(["me"]);
-        const lastSettled = Math.max(state?.dataUpdatedAt || 0, state?.errorUpdatedAt || 0);
-        if (Date.now() - lastSettled < 30_000) return;
-        await client.refetchQueries({ queryKey: ["me"], type: "active" });
-      }, 150);
-    };
-    const visible = () => {
-      if (document.visibilityState === "visible") reconcile();
-    };
-    reconcile();
-    window.addEventListener("pageshow", reconcile);
-    window.addEventListener("online", reconcile);
-    window.addEventListener("focus", reconcile);
-    document.addEventListener("visibilitychange", visible);
-    return () => {
-      window.clearTimeout(timer);
-      window.removeEventListener("pageshow", reconcile);
-      window.removeEventListener("online", reconcile);
-      window.removeEventListener("focus", reconcile);
-      document.removeEventListener("visibilitychange", visible);
-    };
-  }, [client]);
+  useEffect(() => trackSessionActivity(() =>
+    client.refetchQueries({ queryKey: ["me"], type: "active" }),
+  ), [client]);
 }

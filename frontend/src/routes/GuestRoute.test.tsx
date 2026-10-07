@@ -161,17 +161,19 @@ it.each([
   await render("/");
   await until(() => host.textContent!.includes(destination));
 });
-it("does not check or refresh an anonymous session while browsing public pages", async () => {
+it("allows anonymous public browsing and checks the cookie when opening login", async () => {
   mocks.token = null;
   mocks.persisted = false;
   await render("/");
   expect(host.textContent).toContain("Public landing");
   await render("/explore");
   expect(host.textContent).toContain("Public discovery");
-  await render("/login");
-  expect(host.textContent).toContain("Guest login");
-  expect(mocks.request).not.toHaveBeenCalled();
   expect(mocks.refresh).not.toHaveBeenCalled();
+  mocks.refresh.mockRejectedValue(new ApiError(401, "REFRESH_REQUIRED", "Sign in"));
+  await render("/login");
+  await until(() => host.textContent!.includes("Guest login"));
+  expect(mocks.request).not.toHaveBeenCalled();
+  expect(mocks.refresh).toHaveBeenCalledOnce();
 });
 it("shows login for an expired session", async () => {
   mocks.request.mockRejectedValue(new ApiError(401, "expired", "expired"));
@@ -265,9 +267,9 @@ it("still restores and validates a refresh-cookie session when opening a protect
   expect(mocks.refresh).toHaveBeenCalledOnce();
   expect(mocks.request).toHaveBeenCalledWith("/api/v1/auth/me");
 });
-it("restores a hinted HttpOnly-cookie session before showing the login screen", async () => {
+it("restores an HttpOnly-cookie session before showing login even without a storage hint", async () => {
   mocks.token = null;
-  mocks.persisted = true;
+  mocks.persisted = false;
   mocks.refresh.mockImplementation(async () => {
     mocks.token = "restored";
   });

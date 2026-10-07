@@ -3,6 +3,7 @@ import { Session, RoleAssignment } from "../models/Auth.js";
 import { User } from "../models/User.js";
 import { Gym } from "../models/Gym.js";
 import { verifyAccessToken } from "../services/tokenService.js";
+import { sessionExpiry } from "../services/sessionPolicy.js";
 import { AppError } from "../utils/AppError.js";
 import type { Permission, Role } from "../constants/domain.js";
 
@@ -23,7 +24,7 @@ export const requireAuth: RequestHandler = async (req, _res, next) => {
     ]);
     if (
       !session ||
-      session.expiresAt <= new Date() ||
+      sessionExpiry(session) <= new Date() ||
       !user ||
       user.status !== "ACTIVE" ||
       !user.roles.includes(session.activeRole)

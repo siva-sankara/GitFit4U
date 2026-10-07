@@ -8,22 +8,9 @@ import { Session } from "../models/Auth.js";
 import { User } from "../models/User.js";
 import { sha256 } from "../utils/crypto.js";
 import { AppError } from "../utils/AppError.js";
+import { sessionExpiry, sessionIdleTtlMs } from "./sessionPolicy.js";
 
 type AccessClaims = { sub: string; sid: string };
-
-function refreshTtlMs(): number {
-  const value = env.JWT_REFRESH_TTL;
-  const match = /^(\d+)([dhm])$/.exec(value);
-  if (!match) return 30 * 86_400_000;
-  const amount = Number(match[1]);
-  const unit = match[2];
-  const multiplier = unit === "d" ? 86_400_000 : unit === "h" ? 3_600_000 : 60_000;
-  return amount * multiplier;
-}
-
-function refreshExpiry(): Date {
-  return new Date(Date.now() + refreshTtlMs());
-}
 
 export function signAccessToken(userId: string, sessionId: string): string {
   return jwt.sign({ sid: sessionId }, env.JWT_ACCESS_SECRET, {
@@ -55,6 +42,8 @@ export async function createSession(input: {
   const publicId = nanoid(24);
   const secret = crypto.randomBytes(48).toString("base64url");
   const refreshToken = `${publicId}.${secret}`;
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + sessionIdleTtlMs());
   await Session.create({
     publicId,
     userId: input.userId,
@@ -67,12 +56,13 @@ export async function createSession(input: {
       userAgent: input.userAgent?.slice(0, 300),
       ipHash: input.ip ? sha256(input.ip) : undefined
     },
-    expiresAt: refreshExpiry()
+    lastUsedAt: now,
+    expiresAt,
   });
-  return { accessToken: signAccessToken(input.userId, publicId), refreshToken, sessionId: publicId };
+  return { accessToken: signAccessToken(input.userId, publicId), refreshToken, sessionId: publicId, expiresAt };
 }
 
-export async function rotateRefreshToken(refreshToken: string) {
+export async function rotateRefreshToken(refreshToken: string, { activity = false }: { activity?: boolean } = {}) {
   if (typeof refreshToken !== "string")
     throw new AppError(401, "INVALID_REFRESH_TOKEN", "Please sign in again.");
   const parts = refreshToken.split(".");
@@ -89,7 +79,7 @@ export async function rotateRefreshToken(refreshToken: string) {
       .select("+refreshTokenHash +previousRefreshTokenHash");
     const active = session && !session.revokedAt && await User.exists({ _id: session.userId, status: "ACTIVE" });
     const now = new Date();
-    if (!active || session.expiresAt <= now)
+    if (!active || sessionExpiry(session) <= now)
       throw new AppError(401, "SESSION_EXPIRED", "Your session has expired. Please sign in again.");
     const inGrace = session.refreshGraceUntil && session.refreshGraceUntil > now;
     const current = session.refreshTokenHash === hash;
@@ -104,11 +94,15 @@ export async function rotateRefreshToken(refreshToken: string) {
     }
     const rotate = current && !inGrace;
     const nextToken = rotate || previous ? successor : refreshToken;
+    const expiresAt = activity ? new Date(now.getTime() + sessionIdleTtlMs()) : sessionExpiry(session);
     const updated = await Session.findOneAndUpdate(
-      { publicId: sessionId, refreshTokenHash: session.refreshTokenHash, revokedAt: null, expiresAt: { $gt: now } },
-      { $set: { lastUsedAt: now, ...(rotate ? {
+      { publicId: sessionId, refreshTokenHash: session.refreshTokenHash, revokedAt: null, expiresAt: { $gt: now },
+        ...(session.lastUsedAt ? { lastUsedAt: session.lastUsedAt } : {}),
+      },
+      { $set: { expiresAt, ...(activity ? { lastUsedAt: now } : {}), ...(rotate ? {
         refreshTokenHash: sha256(nextToken), previousRefreshTokenHash: hash,
-        // Fixed window: retries never extend it or absolute session expiry.
+        // Retries never extend the token-reuse grace window. Only foreground
+        // activity extends the independent session inactivity deadline.
         refreshGraceUntil: new Date(now.getTime() + 10_000),
       } : {}) } },
       { returnDocument: "after" },
@@ -116,6 +110,7 @@ export async function rotateRefreshToken(refreshToken: string) {
     if (updated) return {
       accessToken: signAccessToken(String(session.userId), session.publicId),
       refreshToken: nextToken, sessionId: session.publicId,
+      expiresAt: updated.expiresAt,
     };
     // A refresh or logout won the compare-and-swap; never overwrite its state.
   }
@@ -139,19 +134,21 @@ export function buildRefreshCookieOptions(input: {
   };
 }
 
-export function setRefreshCookie(res: Response, token: string): void {
+export function setRefreshCookie(res: Response, token: string, expiresAt = new Date(Date.now() + sessionIdleTtlMs())): void {
+  clearLegacyRefreshCookies(res);
   res.cookie(
     "gfu_refresh",
     token,
     buildRefreshCookieOptions({
       production: isProduction,
       domain: env.COOKIE_DOMAIN,
-      maxAge: refreshTtlMs(),
+      maxAge: Math.max(0, expiresAt.getTime() - Date.now()),
     }),
   );
 }
 
 export function clearRefreshCookie(res: Response): void {
+  clearLegacyRefreshCookies(res);
   res.clearCookie(
     "gfu_refresh",
     buildRefreshCookieOptions({
@@ -159,4 +156,15 @@ export function clearRefreshCookie(res: Response): void {
       domain: env.COOKIE_DOMAIN,
     }),
   );
+}
+
+function clearLegacyRefreshCookies(res: Response): void {
+  // Remove narrower path variants that can shadow the current root cookie.
+  // Browsers send the more specific (potentially stale) credential first.
+  for (const path of ["/api/v1/auth", "/api/v1/auth/"]) {
+    res.clearCookie("gfu_refresh", {
+      ...buildRefreshCookieOptions({ production: isProduction, domain: env.COOKIE_DOMAIN }),
+      path,
+    });
+  }
 }

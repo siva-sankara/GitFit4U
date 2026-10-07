@@ -18,7 +18,7 @@ describe("production environment validation", () => {
       MONGO_URI: production.MONGO_URI,
       CLIENT_ORIGIN: production.CLIENT_ORIGIN,
       JWT_ACCESS_TTL: "15m",
-      JWT_REFRESH_TTL: "30d",
+      JWT_REFRESH_TTL: "3d",
     });
   });
 
@@ -44,5 +44,9 @@ describe("production environment validation", () => {
       MONGO_URI: "mongodb://127.0.0.1:27017/getfit4u",
       CLIENT_ORIGIN: "http://localhost:5173",
     });
+  });
+
+  it.each(["JWT_ACCESS_TTL", "JWT_REFRESH_TTL"])("rejects zero-duration %s", (key) => {
+    expect(() => parseEnvironment({ NODE_ENV: "test", [key]: "0m" })).toThrow();
   });
 });

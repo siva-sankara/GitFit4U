@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => ({
   verifyOtp: vi.fn(),
   createSession: vi.fn(),
   setRefreshCookie: vi.fn(),
+  rotateRefreshToken: vi.fn(),
   emitEvent: vi.fn(),
   onboarding: vi.fn(),
   googleToken: vi.fn(),
@@ -68,7 +69,7 @@ vi.mock("../services/tokenService.js", () => ({
   createSession: mocks.createSession,
   setRefreshCookie: mocks.setRefreshCookie,
   clearRefreshCookie: mocks.clearCookie,
-  rotateRefreshToken: vi.fn(),
+  rotateRefreshToken: mocks.rotateRefreshToken,
   signAccessToken: vi.fn(),
 }));
 vi.mock("../services/domainEventService.js", () => ({
@@ -77,7 +78,7 @@ vi.mock("../services/domainEventService.js", () => ({
 vi.mock("google-auth-library", () => ({ OAuth2Client: class { verifyIdToken = mocks.googleToken; } }));
 vi.mock("../services/ownerOnboardingService.js", () => ({ getOwnerOnboarding: mocks.onboarding }));
 vi.mock("../models/Collaboration.js", () => ({ DeviceToken: { updateMany: mocks.revokeDevices } }));
-import { register, verifySignupOtp, passwordLogin, otpVerify, googleLogin, switchRole, logout } from "./authController.js";
+import { register, verifySignupOtp, passwordLogin, otpVerify, googleLogin, switchRole, logout, refresh } from "./authController.js";
 import { sha256 } from "../utils/crypto.js";
 import { env } from "../config/env.js";
 import type { Request, Response } from "express";
@@ -105,6 +106,16 @@ beforeEach(() => {
   });
 });
 afterEach(() => vi.restoreAllMocks());
+
+it.each([true, false, undefined])("only marks explicit foreground activity when refreshing (activity=%s)", async (activity) => {
+  const expiresAt = new Date(Date.now() + 3 * 86_400_000);
+  mocks.rotateRefreshToken.mockResolvedValue({ accessToken: "access", refreshToken: "rotated", sessionId: "session", expiresAt });
+  const res = response();
+  await refresh({ cookies: { gfu_refresh: "session.synthetic" }, body: { activity } } as unknown as Request, res);
+  expect(mocks.rotateRefreshToken).toHaveBeenCalledWith("session.synthetic", { activity: activity === true });
+  expect(mocks.setRefreshCookie).toHaveBeenCalledWith(res, "rotated", expiresAt);
+  expect(res.json).toHaveBeenCalledWith({ success: true, data: { accessToken: "access" } });
+});
 
 it("revokes logout using current or grace-bounded previous cookie proof without trusting the public session id", async () => {
   mocks.revokeSession.mockReturnValue({ select: () => ({ lean: async () => ({ publicId:"session", userId:"user" }) }) });

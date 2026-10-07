@@ -28,8 +28,8 @@ const schema = z
       .string()
       .min(32)
       .default("development-refresh-secret-change-me-12345"),
-    JWT_ACCESS_TTL: z.string().regex(/^\d+[mhd]$/).default("15m"),
-    JWT_REFRESH_TTL: z.string().regex(/^\d+[mhd]$/).default("30d"),
+    JWT_ACCESS_TTL: z.string().regex(/^[1-9]\d*[mhd]$/).default("15m"),
+    JWT_REFRESH_TTL: z.string().regex(/^[1-9]\d*[mhd]$/).default("3d"),
     AUTH_OTP_HMAC_SECRET: z
       .string()
       .min(32)

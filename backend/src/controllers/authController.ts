@@ -88,7 +88,7 @@ async function loginResponse(
   user.activeRole = role;
   user.lastLoginAt = new Date();
   await user.save();
-  setRefreshCookie(res, tokens.refreshToken);
+  setRefreshCookie(res, tokens.refreshToken, tokens.expiresAt);
   logger.info(
     {
       event: "auth_login_succeeded",
@@ -582,7 +582,7 @@ export async function refresh(req: Request, res: Response) {
     throw new AppError(401, "REFRESH_REQUIRED", "Please sign in again.");
   let rotated: Awaited<ReturnType<typeof rotateRefreshToken>>;
   try {
-    rotated = await rotateRefreshToken(token);
+    rotated = await rotateRefreshToken(token, { activity: req.body?.activity === true });
   } catch (error) {
     logger.warn(
       {
@@ -594,7 +594,7 @@ export async function refresh(req: Request, res: Response) {
     );
     throw error;
   }
-  setRefreshCookie(res, rotated.refreshToken);
+  setRefreshCookie(res, rotated.refreshToken, rotated.expiresAt);
   logger.info(
     {
       event: "auth_refresh_succeeded",

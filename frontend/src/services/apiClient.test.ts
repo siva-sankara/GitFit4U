@@ -28,6 +28,37 @@ it("shares one refresh among simultaneous protected requests", async () => {
   expect(fetcher.mock.calls.filter(([url]) => String(url).endsWith("/auth/refresh"))).toHaveLength(1);
 });
 
+it("background access-token recovery does not claim foreground activity", async () => {
+  fetcher.mockResolvedValue(ok({ accessToken: "new-access" }));
+  await api.refreshSession();
+  expect(JSON.parse(fetcher.mock.calls[0][1].body)).toEqual({ activity: false });
+});
+
+it("does not lose foreground renewal when a background refresh is already in flight", async () => {
+  const pending = deferred<Response>();
+  fetcher.mockReturnValueOnce(pending.promise).mockResolvedValueOnce(ok({ accessToken: "active-access" }));
+  const background = api.refreshSession();
+  const visit = api.refreshSession({ activity: true });
+  pending.resolve(ok({ accessToken: "background-access" }));
+  await Promise.all([background, visit]);
+  expect(fetcher.mock.calls.map(([, options]) => JSON.parse(options.body))).toEqual([{ activity: false }, { activity: true }]);
+  expect(api.getAccessToken()).toBe("active-access");
+});
+
+it("restores access from the HttpOnly cookie after reopening with empty sessionStorage", async () => {
+  sessionStorage.clear();
+  vi.resetModules();
+  const reopened = await import("./apiClient");
+  expect(reopened.getAccessToken()).toBeNull();
+  expect(reopened.hasPersistedSession()).toBe(true);
+  fetcher.mockResolvedValue(ok({ accessToken: "recovered-access" }));
+  await reopened.refreshSession({ activity: true });
+  expect(fetcher.mock.calls[0][1]).toMatchObject({ credentials: "include", body: '{"activity":true}' });
+  expect(reopened.getAccessToken()).toBe("recovered-access");
+  expect(sessionStorage.getItem("gfu_access_token")).toBeNull();
+  expect(localStorage.getItem("gfu_access_token")).toBeNull();
+});
+
 it("uses an already refreshed access token for a delayed401 without rotating again", async () => {
   const late = deferred<Response>();
   fetcher.mockImplementation(async (url: string, options: RequestInit) => {
@@ -159,4 +190,74 @@ it("emits structured session diagnostics without credentials", async () => {
   ]));
   expect(JSON.stringify(events)).not.toContain("old-access");
   expect(JSON.stringify(events)).not.toContain("new-access");
+});
+
+const token = (sid = "session", version = 1) => `header.${btoa(JSON.stringify({ sub: "user", sid, iat: version }))}.signature`;
+
+it("migrates an old tab token to cookie recovery without retaining the credential in storage", async () => {
+  sessionStorage.setItem("gfu_access_token", "legacy-token");
+  localStorage.removeItem("gfu-has-session");
+  vi.resetModules();
+  const reopened = await import("./apiClient");
+  expect(reopened.getAccessToken()).toBeNull();
+  expect(reopened.hasPersistedSession()).toBe(true);
+  expect(sessionStorage.getItem("gfu_access_token")).toBeNull();
+});
+
+it("finishes login only after a cookie round trip and keeps access credentials out of browser storage", async () => {
+  fetcher.mockResolvedValueOnce(ok({ accessToken: token(), user: { name: "Member" } }))
+    .mockResolvedValueOnce(ok({ accessToken: token("session", 2) }));
+  const result = await api.apiRequest<any>("/api/v1/auth/login", { method: "POST", body: "{}" });
+  expect(result.data.accessToken).toBe(token("session", 2));
+  expect(result.data.user.name).toBe("Member");
+  expect(api.getAccessToken()).toBe(result.data.accessToken);
+  expect(fetcher.mock.calls[1][0]).toBe("/api/v1/auth/refresh");
+  expect(fetcher.mock.calls[1][1]).toMatchObject({ credentials: "include", body: '{"activity":true}' });
+  expect(sessionStorage.getItem("gfu_access_token")).toBeNull();
+  expect(localStorage.getItem("gfu_access_token")).toBeNull();
+});
+
+it.each(["REFRESH_REQUIRED", "SESSION_EXPIRED"])("reports a failed cookie check (%s) at sign-in instead of logging out a minute later", async code => {
+  fetcher.mockResolvedValueOnce(ok({ accessToken: token() })).mockResolvedValueOnce(fail(401, code));
+  await expect(api.apiRequest("/api/v1/auth/login", { method: "POST" }))
+    .rejects.toMatchObject({ code: "SESSION_COOKIE_UNAVAILABLE", status: 503 });
+  expect(api.getAccessToken()).toBeNull();
+});
+
+it("rejects a stale cookie that restores a different session during login", async () => {
+  fetcher.mockResolvedValueOnce(ok({ accessToken: token() }))
+    .mockResolvedValueOnce(ok({ accessToken: token("another-session") }));
+  await expect(api.apiRequest("/api/v1/auth/google", { method: "POST" }))
+    .rejects.toMatchObject({ code: "SESSION_COOKIE_UNAVAILABLE" });
+  expect(api.getAccessToken()).toBeNull();
+});
+
+it("does not race an activity refresh against login", async () => {
+  const pending = deferred<Response>();
+  fetcher.mockReturnValueOnce(pending.promise).mockResolvedValueOnce(ok({ accessToken: token() }));
+  const login = api.apiRequest("/api/v1/auth/login", { method: "POST" });
+  const activity = api.refreshSession({ activity: true });
+  pending.resolve(ok({ accessToken: token() }));
+  await Promise.all([login, activity]);
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  expect(api.getAccessToken()).toBe(token());
+});
+
+it("revokes cookies after a login response when explicit logout wins the race", async () => {
+  const pending = deferred<Response>();
+  fetcher.mockReturnValueOnce(pending.promise).mockResolvedValueOnce(new Response(null, { status: 204 }));
+  const login = api.apiRequest("/api/v1/auth/login", { method: "POST" }).catch(() => undefined);
+  const logout = api.logoutSession();
+  pending.resolve(ok({ accessToken: token() }));
+  await Promise.all([login, logout]);
+  expect(fetcher.mock.calls.map(([url]) => url)).toEqual(["/api/v1/auth/login", "/api/v1/auth/logout"]);
+  expect(api.getAccessToken()).toBeNull();
+});
+
+it("silently renews expired access for protected auth endpoints too", async () => {
+  fetcher.mockImplementation(async (url: string, options: RequestInit) => url.endsWith("/auth/refresh")
+    ? ok({ accessToken: "new-access" })
+    : (options.headers as Record<string, string>).authorization === "Bearer old-access" ? fail() : ok({ user: "member" }));
+  await expect(api.apiRequest("/api/v1/auth/me")).resolves.toMatchObject({ data: { user: "member" } });
+  expect(api.getAccessToken()).toBe("new-access");
 });

@@ -50,7 +50,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [toast, setToast] = useState<string | null>(null),
     [toastActionUrl, setToastActionUrl] = useState<string | undefined>(),
     [authenticated, setAuthenticated] = useState(!!getAccessToken());
-  const session = useSession({ publicPage: true });
+  const session = useSession({ publicPage: true, recoverSession: true });
   const theme = themePreference;
   useEffect(() => {
     const preference = session.data?.data.user.preferences?.theme;

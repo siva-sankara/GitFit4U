@@ -30,9 +30,14 @@ JWT_REFRESH_SECRET=<different-random-value-at-least-48-characters>
 AUTH_OTP_HMAC_SECRET=<different-random-value-at-least-48-characters>
 ATTENDANCE_QR_SECRET=<different-random-value-at-least-48-characters>
 JWT_ACCESS_TTL=15m
-JWT_REFRESH_TTL=30d
+JWT_REFRESH_TTL=3d
 LOG_LEVEL=info
 ```
+
+`JWT_REFRESH_TTL=3d` is the rolling inactivity window. A visible visit or user
+interaction renews it for another 72 hours. Background token renewal does not
+extend this deadline. Update an existing Vercel `30d` value to `3d` and redeploy
+both frontend and backend; the local `.env` change does not update Vercel.
 
 Do not add `COOKIE_DOMAIN`; a host-only cookie is correct for both the
 same-origin frontend proxy and `api.getfit4u.in`. Keep `www.getfit4u.in` first in
@@ -76,8 +81,8 @@ deploying.
 `VITE_API_BASE_URL` is accepted as a backward-compatible alias, but never set
 both names. Vite embeds either value at build time, so a stale Vercel value takes
 precedence over the checked-in same-origin setting and must be removed before
-redeploying. Local development can continue to use
-`VITE_API_URL=http://localhost:5001`.
+redeploying. Local development uses `VITE_DEV_API_TARGET=http://localhost:5001`
+(match the backend port) and Vite proxies browser requests through localhost:5173.
 
 The client sends `credentials: "include"` and the `x-csrf-protection` header.
 The backend permits those credentials and headers for configured origins; do
@@ -133,10 +138,12 @@ In browser DevTools:
 2. **Application > Cookies**: `gfu_refresh` must be HttpOnly, Secure,
    SameSite=None, Path `/`, and have a future expiry. It must not appear in local
    or session storage.
-3. **Application > Storage**: `gfu-has-session` is only a non-secret recovery
-   hint. `gfu_access_token` is a short-lived access token in session storage.
-4. **Network**: after removing only `gfu_access_token` and refreshing a protected
-   route, `POST /api/v1/auth/refresh` must send the cookie, return 200, and be
+3. **Application > Storage**: `gfu-has-session` is only a non-secret activity
+   hint. Access tokens live in memory; neither local nor session storage should
+   contain `gfu_access_token`.
+4. **Network**: after reloading or reopening a protected route (also after clearing
+   local/session storage while keeping cookies), `POST /api/v1/auth/refresh`
+   must send the cookie, return 200, and be
    followed by `GET /api/v1/auth/me`.
 5. Repeat refresh, navigation, new-tab, browser-reopen, and 20-minute idle tests
    for USER, GYM_OWNER, TRAINER, and ADMIN. A 500 or offline request must show an

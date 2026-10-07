@@ -10,10 +10,17 @@ npm ci
 npm run dev
 ```
 
-Set `VITE_API_URL` to the Express API origin for local development. Production
-leaves it empty and uses the same-origin `/api/v1` proxy in `vercel.json`, which
-keeps the refresh cookie first-party. `VITE_API_BASE_URL` is a supported legacy
-alias; set only one name. Vercel project variables override the checked-in file;
+Set `VITE_DEV_API_TARGET` to the Express API origin for local development
+(for example, `http://localhost:5001` when the backend uses `PORT=5001`). Open
+`http://localhost:5173`. Vite proxies `/api` and `/socket.io` to that target;
+the browser uses its own origin for API calls and refresh cookies. Restart Vite
+after changing these settings. The backend must allow that frontend address in
+`CLIENT_ORIGIN`; the proxy preserves Origin and CSRF checks.
+
+Production leaves `VITE_API_URL` empty and uses the same-origin `/api/v1` proxy
+in `vercel.json`. `VITE_API_BASE_URL` is a supported legacy alias. In development,
+these variables are accepted as proxy targets if `VITE_DEV_API_TARGET` is unset.
+Vercel project variables override the checked-in file;
 see
 [production domain setup](../docs/vercel-production.md) for the exact settings.
 
