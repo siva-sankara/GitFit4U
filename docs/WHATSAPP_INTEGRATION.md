@@ -1,6 +1,6 @@
 # GETFIT4U WhatsApp Cloud API integration
 
-Status date: 2026-09-29
+Status date: 2026-10-07
 
 This integration is an additive business-communication channel and the authoritative transport for phone OTP verification. Internal chat, in-app notifications, Firebase push, email, payment, booking, membership, attendance and media remain independent. Business-event WhatsApp failures are recorded in a durable outbox; authentication OTPs use a separate short-lived challenge lifecycle.
 
@@ -11,7 +11,7 @@ This integration is an additive business-communication channel and the authorita
 | Code and schema | Implemented | Tenant-bound connections, consent, conversations, messages, outbox, webhook receipts, templates, campaigns and onboarding sessions |
 | Local configuration | Operator action required | Populate server-only environment values and run the dry-run migration |
 | Meta account eligibility | External action required | Meta business/app verification, app review, WABA/phone eligibility, display name, billing and Embedded Signup configuration |
-| Templates | External action required | Submit the catalog below in each applicable WABA; approval is not implied |
+| Templates | Three approved templates integrated | Business supplied approvals for `welcome_msg_template`, `appointment_reminder`, and `platform_renewal` in `en_US`; sync them in each sending WABA. Other catalog entries remain proposals. |
 | Live provider verification | Not performed | Requires approved assets, credentials and explicitly authorised test recipients |
 | Real-device certification | Not performed | Complete the checklist in “Live certification” for platform and at least one gym sender |
 
@@ -173,17 +173,75 @@ WhatsApp is proposed only for the events below. All existing notification channe
 
 Operators can disable individual automated events per sender. Enabling WhatsApp does not replay historical events.
 
-The member-list reminder action queues an official message only when the gym
-sender is connected, outbound delivery is enabled, service consent exists, and
-the matching approved template is a server-controlled zero-variable Utility
-template. Otherwise the API returns the manual `wa.me` hand-off while still
-creating the in-app message, notification, and audit record. Personalized
-membership details and single-use activation links are never injected into an
-unreviewed Meta template.
+The member-list reminder action queues an official message when the gym sender
+is connected, outbound delivery is enabled, service consent exists, and the
+matching approved Utility template is available. Renewal reminders use the
+four variables of `appointment_reminder`; other member-list reminder types
+retain their existing zero-variable templates. Otherwise the API returns the
+manual `wa.me` hand-off while still creating the in-app message, notification,
+and audit record. Single-use activation links are not injected into templates.
+
+## Approved membership templates
+
+These exact Meta template names use **English (US), `en_US`**, independently of
+the default language for other messages. The approved body, welcome footer, and
+static **Visit website** button are rendered by Meta; the API sends the template
+name and ordered body parameters, not a replacement message body. See the
+[Meta template request example](https://www.postman.com/meta/whatsapp-business-platform/request/lwtlz1k/send-message-template-interactive).
+
+| Template | Trigger and sender | Body parameters in order |
+| --- | --- | --- |
+| `welcome_msg_template` | `membership.activated`, connected gym sender | Member name, gym name, plan name, start date, expiry date, gym contact phone (WhatsApp contact if phone is absent) |
+| `appointment_reminder` | Scheduled `membership.renewal_reminder`, `membership.expiring`, or owner member-list renewal action; connected gym sender | Member name, gym name, expiry date, membership amount in rupees |
+| `platform_renewal` | Scheduled `platform.expiring`, GETFIT4U platform/admin sender | Owner name, platform plan name, expiry date, renewal amount in rupees |
+
+Dates are `DD-MM-YYYY` in the gym's configured timezone. Amounts come from the
+subscription's stored plan snapshot (`totalMinor` when available; otherwise
+price minus plan discount plus plan tax), converted from paise to rupees without
+another currency symbol. These approved bodies contain a literal rupee symbol,
+so non-INR data is not queued. They describe the existing subscription amount;
+a subsequent renewal checkout may quote a different plan, price or offer.
+
+The welcome event runs after successful membership activation, including online
+capture and recorded offline payment. Invited members receive it when accepting
+their invitation activates their paid membership; the initial invitation hold
+does not send a welcome. `membership.created` does not trigger a second welcome.
+Direct-access members without subscription dates/plan details
+do not receive this subscription-specific template. Missing required data skips
+WhatsApp without failing activation or other notification channels.
+
+The existing daily scheduler remains in place. These templates say **will
+expire**, so WhatsApp renewal reminders run only before the actual expiry
+timestamp; the existing in-app/push follow-up schedule still covers expired
+subscriptions. Queued messages expire by that timestamp, and the worker checks
+that the subscription is still current, active, and has the same expiry before
+sending. Renewal, cancellation, freezing or member deactivation suppress stale
+messages. Existing deduplication, consent, quiet hours and delivery caps apply.
+
+To enable delivery:
+
+1. Connect the gym sender for welcome/member reminders and the platform sender
+   for platform subscription reminders. Approval in one WABA does not configure
+   the other senders; there is no cross-business sender fallback.
+2. In each sender's WhatsApp settings, use **Sync templates**, then **Enable
+   outbound**. Sync after editing templates in Meta. Each required template must
+   be returned as `APPROVED`, `UTILITY`, `en_US` with the matching body variables.
+3. Keep recipient service consent enabled for that sender. Configure the server
+   for `WHATSAPP_MODE=live` and run the durable worker with
+   `WHATSAPP_WORKER_ENABLED=true` (`npm run worker:whatsapp` for development or
+   `npm run start:whatsapp-worker` after building). The API alone does not drain
+   this queue. Keep the existing maintenance scheduler running for daily reminders.
+
+No additional template environment variables or template IDs are required.
+Dynamic URL buttons, media headers, named placeholders, and changed variable
+counts are rejected by this integration's template contract; the supplied
+renewal screenshot's Visit website button is treated as a static approved URL.
+Automated tests mock Meta and database calls; they do not send live messages or
+prove delivery to a device.
 
 ## Submission-ready template catalog
 
-These are proposals, not approvals. Create each only in the WABA that will send it. Use `en_US` initially and add reviewed translations separately. Sensitive details stay behind authenticated GETFIT4U links.
+These are legacy proposals, not approvals. The approved templates above replace `gfu_membership_activated`, `gfu_membership_expiring`, `gfu_membership_renewal_reminder`, and `gfu_platform_subscription_expiring` in the automatic event mapping. Create other templates only in the WABA that will send them. Use `en_US` initially and add reviewed translations separately.
 
 | Name | Candidate category | Purpose and sample | Variables/buttons |
 | --- | --- | --- | --- |

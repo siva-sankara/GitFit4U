@@ -419,6 +419,7 @@ export async function prepareMemberWhatsAppReminder(input: {
           userId: user._id,
           gymId: gym._id,
           entityId: member.publicId,
+          subscriptionId: subscription?.publicId,
           occurrenceId: communication.publicId,
           actionUrl: `/messages/${conversation.publicId}`,
           session,

@@ -65,7 +65,7 @@ it("selects only visible members and exports their exact public IDs", async () =
       await act(async () => { await new Promise((resolve) => { setTimeout(resolve, 10); }); });
     await act(async () => host.querySelector<HTMLInputElement>('[aria-label="Select all members on this page"]')!.click());
     expect(host.textContent).toContain("2 selected");
-    await act(async () => [...host.querySelectorAll("button")].find((button) => button.textContent?.includes("Download csv"))!.click());
+    await act(async () => [...host.querySelectorAll("button")].find((button) => button.textContent?.includes("Download selected"))!.click());
     expect(network.download).toHaveBeenCalledOnce();
     const [path, options] = network.download.mock.calls[0];
     expect(path).toBe("/api/v1/owner/members/export");

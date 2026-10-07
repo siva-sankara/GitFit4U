@@ -26,6 +26,7 @@ import {
   setNotificationSoundEnabled,
   type InboxNotification,
 } from "../services/notificationAlerts";
+import { API_URL } from "../services/runtimeConfig";
 interface AppContextValue {
   role: Role;
   setRole: (role: Role) => void;
@@ -49,7 +50,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [toast, setToast] = useState<string | null>(null),
     [toastActionUrl, setToastActionUrl] = useState<string | undefined>(),
     [authenticated, setAuthenticated] = useState(!!getAccessToken());
-  const session = useSession({ publicPage: true });
+  const session = useSession({ publicPage: true, recoverSession: true });
   const theme = themePreference;
   useEffect(() => {
     const preference = session.data?.data.user.preferences?.theme;
@@ -172,10 +173,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       .then(({ io }) => {
         if (disposed) return;
         const socket = io(
-          (import.meta.env.VITE_API_URL || window.location.origin).replace(
-            /\/$/,
-            "",
-          ),
+          API_URL || window.location.origin,
           {
             auth: (done) => done({ token: getAccessToken() }),
             transports: ["websocket", "polling"],

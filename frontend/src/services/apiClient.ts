@@ -1,7 +1,10 @@
-const API_URL = (import.meta.env.VITE_API_URL || "").replace(/\/$/, "");
+import { API_URL } from "./runtimeConfig";
 let accessToken: string | null = null;
-try { accessToken = sessionStorage.getItem("gfu_access_token"); } catch { /* In-memory sessions still work when browser storage is unavailable. */ }
+// Access credentials live only in memory. The persistent HttpOnly cookie is
+// the source of truth on reload, new tabs and subsequent browser visits.
 let refreshPromise: Promise<void> | null = null;
+let loginPromise: Promise<unknown> | null = null;
+let refreshIncludesActivity = false;
 let pendingLogoutPromise: Promise<void> | null = null;
 let authEpoch = 0;
 const sessionChangeKey = "gfu-session-change";
@@ -29,7 +32,11 @@ function emitSessionDiagnostic(event: string, error?: unknown) {
   window.dispatchEvent(new CustomEvent("gfu-session-diagnostic", { detail }));
   if (import.meta.env.DEV) console.info("[GETFIT4U session]", detail);
 }
-if (accessToken) writeLocal(durableSessionKey, "1");
+try {
+  if (sessionStorage.getItem("gfu_access_token")) writeLocal(durableSessionKey, "1");
+  sessionStorage.removeItem("gfu_access_token");
+  localStorage.removeItem("gfu_access_token");
+} catch { /* Cookie recovery also works when browser storage is unavailable. */ }
 function tokenIdentity(token: string | null) {
   if (!token) return null;
   try { const body = JSON.parse(atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/"))); return `${body.sub}:${body.sid}`; }
@@ -43,9 +50,6 @@ function applyAccessToken(token: string | null) {
   if (token === accessToken) return;
   const changedSession = tokenIdentity(token) !== tokenIdentity(accessToken);
   accessToken = token;
-  try { token
-    ? sessionStorage.setItem("gfu_access_token", token)
-    : sessionStorage.removeItem("gfu_access_token"); } catch { /* Keep the current in-memory session. */ }
   window.dispatchEvent(
     new CustomEvent("gfu-auth", { detail: { token, changedSession } }),
   );
@@ -137,7 +141,8 @@ async function send<T>(
       );
     }
     if (!response.ok) {
-      if (response.status === 401 && retry && !path.startsWith("/api/v1/auth/") &&
+      const protectedAuthPath = /^\/api\/v1\/auth\/(?:me|sessions(?:\/[^/]+)?|switch-role|logout-all|accept-invitation)$/.test(path);
+      if (response.status === 401 && retry && (!path.startsWith("/api/v1/auth/") || protectedAuthPath) &&
         ["AUTH_REQUIRED", "SESSION_EXPIRED", "INVALID_TOKEN"].includes(payload?.error?.code)) {
         if (accessToken === tokenAtSend) await refreshSession();
         if (epoch !== authEpoch || !accessToken)
@@ -174,19 +179,30 @@ async function send<T>(
     window.clearTimeout(timeout);
   }
 }
-export async function refreshSession() {
+export async function refreshSession({ activity = false }: { activity?: boolean } = {}): Promise<void> {
+  // Login includes its own cookie round trip; an activity callback must not
+  // race it with the previous account's refresh credential.
+  if (loginPromise) { await loginPromise; return; }
   if (hasPendingLogout()) {
     await flushPendingLogout();
     throw new ApiError(401, "LOGOUT_PENDING", "You signed out on this device.");
   }
+  // A background refresh already in flight must not swallow a real visit.
+  if (activity && refreshPromise && !refreshIncludesActivity) {
+    await refreshPromise;
+    return refreshSession({ activity: true });
+  }
   if (!refreshPromise) {
+    refreshIncludesActivity = activity;
     emitSessionDiagnostic("refresh_started");
     const epoch = authEpoch;
     const marker = sessionMarker();
     const changed = () => epoch !== authEpoch || marker !== sessionMarker();
     const refresh = async () => {
       if (changed()) throw new ApiError(409, "SESSION_CHANGED", "Your account session changed. Please retry.");
-      const result = await send<ApiEnvelope<{ accessToken: string }>>("/api/v1/auth/refresh", { method: "POST" }, false);
+      const result = await send<ApiEnvelope<{ accessToken: string }>>("/api/v1/auth/refresh", {
+        method: "POST", body: JSON.stringify({ activity }),
+      }, false);
       if (changed()) throw new ApiError(409, "SESSION_CHANGED", "Your account session changed. Please retry.");
       if (!result?.data?.accessToken || typeof result.data.accessToken !== "string")
         throw new ApiError(502, "INVALID_RESPONSE", "Session recovery returned an unexpected response. Please retry.");
@@ -202,12 +218,15 @@ export async function refreshSession() {
         if (!changed() && error instanceof ApiError && error.status === 401 &&
           ["REFRESH_REQUIRED", "INVALID_REFRESH_TOKEN", "SESSION_EXPIRED", "REFRESH_TOKEN_REUSE"].includes(error.code)) setAccessToken(null);
         throw error;
-      }).finally(() => { refreshPromise = null; });
+      }).finally(() => { refreshPromise = null; refreshIncludesActivity = false; });
   }
   await refreshPromise;
 }
 export async function flushPendingLogout() {
   if (!hasPendingLogout()) return;
+  // A login response can still set a cookie even when its JS result is stale.
+  // Revoke it after that response arrives if logout won the race.
+  if (loginPromise) await loginPromise.catch(() => undefined);
   if (!pendingLogoutPromise) {
     pendingLogoutPromise = send<void>("/api/v1/auth/logout", { method: "POST" }, false)
       .then(() => {
@@ -239,9 +258,40 @@ const sessionIssuingPaths = new Set([
   "/api/v1/auth/activate-account",
 ]);
 export const apiRequest = async <T>(path: string, options: Options = {}) => {
+  if (!sessionIssuingPaths.has(path)) return send<T>(path, options, true);
+  if (loginPromise) throw new ApiError(409, "LOGIN_PENDING", "Sign-in is already in progress.");
   // Never let a delayed offline logout clear a newly-created session cookie.
-  if (hasPendingLogout() && sessionIssuingPaths.has(path)) await flushPendingLogout();
-  return send<T>(path, options, true);
+  if (hasPendingLogout()) await flushPendingLogout();
+  if (refreshPromise) await refreshPromise.catch(() => undefined);
+  const login = async () => {
+    const result = await send<T>(path, options, false);
+    const data = (result as ApiEnvelope<{ accessToken?: string }> | null)?.data;
+    if (!data?.accessToken) return result;
+    const epoch = authEpoch;
+    try {
+      // Do not report a successful login until the browser has sent back the
+      // new cookie. Otherwise the first activity refresh can log it out.
+      const verified = await send<ApiEnvelope<{ accessToken: string }>>("/api/v1/auth/refresh", {
+        method: "POST", body: JSON.stringify({ activity: true }),
+        headers: { authorization: `Bearer ${data.accessToken}` },
+      }, false);
+      if (typeof verified?.data?.accessToken !== "string" ||
+        tokenIdentity(verified.data.accessToken) !== tokenIdentity(data.accessToken))
+        throw new ApiError(503, "SESSION_COOKIE_UNAVAILABLE", "Your sign-in could not be saved. Allow cookies for this site, then sign in again.");
+      data.accessToken = verified.data.accessToken;
+      setAccessToken(data.accessToken);
+      return result;
+    } catch (error) {
+      emitSessionDiagnostic("login_cookie_check_failed", error);
+      if (epoch === authEpoch) setAccessToken(null);
+      if (error instanceof ApiError && error.status === 401)
+        throw new ApiError(503, "SESSION_COOKIE_UNAVAILABLE", "Your sign-in could not be saved. Allow cookies for this site, then sign in again.", error.requestId);
+      throw error;
+    }
+  };
+  loginPromise = navigator.locks?.request ? navigator.locks.request("gfu-session-refresh", login) : login();
+  try { return await loginPromise as T; }
+  finally { loginPromise = null; }
 };
 export const apiDownload = (path: string) => send<Blob>(path, { responseType: "blob" }, true);
 export const apiFileDownload = (path: string, options: Omit<Options, "responseType"> = {}) =>

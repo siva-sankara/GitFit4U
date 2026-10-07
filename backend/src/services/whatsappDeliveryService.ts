@@ -22,6 +22,13 @@ import { logger } from "../config/logger.js";
 import { AppError } from "../utils/AppError.js";
 import { sha256 } from "../utils/crypto.js";
 import {
+  membershipWhatsAppTemplates,
+  membershipWhatsAppTemplate,
+  membershipTemplateMatches,
+  resolveMembershipWhatsAppTemplate,
+  membershipWhatsAppStillCurrent,
+} from "./whatsappMembershipTemplateService.js";
+import {
   bindingKey,
   communicationScope,
   maskedWhatsAppPhone,
@@ -36,7 +43,6 @@ const provider = new WhatsAppProvider();
 export const whatsappEventMatrix = {
   "invoice.ready": { scope: "GYM", template: "gfu_invoice_available" },
   "membership.renewed": { scope: "GYM", template: "gfu_membership_renewed" },
-  "membership.renewal_reminder": { scope: "GYM", template: "gfu_membership_renewal_reminder" },
   "member.activation_invitation": { scope: "GYM", template: "gfu_member_invitation" },
   "membership.payment_reminder": { scope: "GYM", template: "gfu_payment_reminder" },
   "member.general_followup": { scope: "GYM", template: "gfu_member_followup" },
@@ -48,11 +54,9 @@ export const whatsappEventMatrix = {
   "account.registered": { scope: "PLATFORM", template: "gfu_account_welcome" },
   "account.verified": { scope: "GYM", template: "gfu_member_invitation" },
   "membership.created": { scope: "GYM", template: "gfu_membership_created" },
-  "membership.activated": { scope: "GYM", template: "gfu_membership_activated" },
   "membership.frozen": { scope: "GYM", template: "gfu_membership_frozen" },
   "membership.reactivated": { scope: "GYM", template: "gfu_membership_reactivated" },
   "membership.deactivated": { scope: "GYM", template: "gfu_membership_deactivated" },
-  "membership.expiring": { scope: "GYM", template: "gfu_membership_expiring" },
   "membership.expired": { scope: "GYM", template: "gfu_membership_expired" },
   "membership.cancelled": { scope: "GYM", template: "gfu_membership_cancelled" },
   "payment.successful": { scope: "GYM", template: "gfu_payment_confirmed" },
@@ -60,7 +64,7 @@ export const whatsappEventMatrix = {
   "payment.refunded": { scope: "GYM", template: "gfu_refund_updated" },
   "trainer.assigned": { scope: "GYM", template: "gfu_trainer_assigned" },
   "support.updated": { scope: "DYNAMIC", template: "gfu_support_updated" },
-  "platform.expiring": { scope: "PLATFORM", template: "gfu_platform_subscription_expiring" },
+  ...membershipWhatsAppTemplates,
   "gym.activated": { scope: "PLATFORM", template: "gfu_gym_status_updated" },
   "gym.suspended": { scope: "PLATFORM", template: "gfu_gym_status_updated" },
   "gym.archived": { scope: "PLATFORM", template: "gfu_gym_status_updated" },
@@ -71,6 +75,7 @@ type DomainEventForWhatsApp = {
   userId: string | Types.ObjectId;
   gymId?: string | Types.ObjectId;
   entityId: string;
+  subscriptionId?: string;
   occurrenceId?: string;
   actionUrl?: string;
   session?: ClientSession;
@@ -141,20 +146,29 @@ export async function enqueueWhatsAppDomainEvent(
     }).session(input.session || null);
     if (!connection) return;
     if (connection.eventPreferences?.disabledEvents?.includes(input.event)) return;
+    const membershipTemplate = membershipWhatsAppTemplate(input.event);
+    const language = membershipTemplate?.language || env.WHATSAPP_DEFAULT_LANGUAGE;
     const approvedTemplate = await WhatsAppTemplate.findOne({
       connectionId: connection._id,
       name: configured.template,
-      language: env.WHATSAPP_DEFAULT_LANGUAGE,
+      language,
       status: "APPROVED",
+      category: "UTILITY",
     })
       .select("components")
       .session(input.session || null)
       .lean();
-    if (
-      !approvedTemplate ||
-      JSON.stringify(approvedTemplate.components || []).includes("{{")
-    )
+    if (!approvedTemplate) return;
+    if (membershipTemplate
+      ? !membershipTemplateMatches(approvedTemplate.components, membershipTemplate.bodyParameters)
+      : JSON.stringify(approvedTemplate.components || []).includes("{{")) {
+      logger.warn({ event: input.event, template: configured.template }, "WhatsApp template components do not match the configured event");
       return;
+    }
+    const membershipPayload = membershipTemplate
+      ? await resolveMembershipWhatsAppTemplate(input, user)
+      : undefined;
+    if (membershipTemplate && !membershipPayload) return;
     const phoneHash = sha256(phone);
     const consent = await WhatsAppConsent.findOne({
       connectionId: connection._id,
@@ -172,7 +186,7 @@ export async function enqueueWhatsAppDomainEvent(
     const dedupeKey = [
       input.event,
       input.entityId,
-      input.occurrenceId || "once",
+      input.event === "membership.activated" ? "once" : input.occurrenceId || "once",
       connection.publicId,
       phoneHash,
       "WHATSAPP",
@@ -198,14 +212,15 @@ export async function enqueueWhatsAppDomainEvent(
           contentType: "TEMPLATE",
           template: {
             name: configured.template,
-            language: env.WHATSAPP_DEFAULT_LANGUAGE,
-            parameters: [],
+            language,
+            parameters: membershipPayload?.parameters || [],
           },
+          membershipContext: membershipPayload?.membershipContext,
           actionUrl: input.actionUrl,
           status: allowed ? "QUEUED" : "SUPPRESSED",
           policyDecision: allowed ? "PENDING_DISPATCH_RECHECK" : "CONSENT_MISSING",
           availableAt: now,
-          expiresAt: new Date(now.getTime() + 48 * 60 * 60_000),
+          expiresAt: membershipPayload?.expiresAt || new Date(now.getTime() + 48 * 60 * 60_000),
           completedAt: allowed ? undefined : now,
           correlationId: nanoid(16),
         },
@@ -303,6 +318,17 @@ export async function evaluateWhatsAppDeliveryPolicy(outbox: any, connection: an
       status: "APPROVED",
     }).lean();
     if (!template) return { allowed: false, final: true, reason: "TEMPLATE_UNAVAILABLE" };
+    const membershipTemplate = membershipWhatsAppTemplate(outbox.businessEvent);
+    if (membershipTemplate) {
+      if (template.category !== "UTILITY")
+        return { allowed: false, final: true, reason: "TEMPLATE_CATEGORY_MISMATCH" };
+      if (outbox.template?.name !== membershipTemplate.template ||
+          outbox.template?.language !== membershipTemplate.language ||
+          !membershipTemplateMatches(template.components, membershipTemplate.bodyParameters))
+        return { allowed: false, final: true, reason: "TEMPLATE_PARAMETERS_MISMATCH" };
+      if (!(await membershipWhatsAppStillCurrent(outbox, now)))
+        return { allowed: false, final: true, reason: "MEMBERSHIP_CHANGED" };
+    }
     if (outbox.purpose === "MARKETING" && template.category !== "MARKETING")
       return { allowed: false, final: true, reason: "TEMPLATE_CATEGORY_MISMATCH" };
   }

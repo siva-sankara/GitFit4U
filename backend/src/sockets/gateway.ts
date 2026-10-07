@@ -2,6 +2,7 @@ import type { Server as HttpServer } from "node:http";
 import { Server, type Socket } from "socket.io";
 import { env } from "../config/env.js";
 import { verifyAccessToken } from "../services/tokenService.js";
+import { sessionExpiry } from "../services/sessionPolicy.js";
 import { Session, RoleAssignment } from "../models/Auth.js";
 import { User } from "../models/User.js";
 import { authorizedConversation } from "../controllers/messagingController.js";
@@ -18,7 +19,7 @@ async function authenticate(socket: Socket) {
   ]);
   if (
     !session ||
-    session.expiresAt <= new Date() ||
+    sessionExpiry(session) <= new Date() ||
     !user ||
     user.status !== "ACTIVE" ||
     !user.roles.includes(session.activeRole)
