@@ -79,9 +79,15 @@ changes, update the API rewrite destination in `frontend/vercel.json` before
 deploying.
 
 `VITE_API_BASE_URL` is accepted as a backward-compatible alias, but never set
-both names. Vite embeds either value at build time, so a stale Vercel value takes
-precedence over the checked-in same-origin setting and must be removed before
-redeploying. Local development uses `VITE_DEV_API_TARGET=http://localhost:5001`
+both names. Vite environment settings take precedence over `.env.production`.
+For compatibility, a production API value whose hostname ends in `.vercel.app`
+now resolves to the same-origin proxy in both the browser client and generated
+security headers. An old Vercel setting therefore no longer fails the build or
+restores direct cross-site API requests. Removing those obsolete values is still
+recommended; the proxy destination remains defined in `frontend/vercel.json`.
+Explicit custom API domains such as `https://api.getfit4u.in` remain supported,
+and conflicting aliases or unsafe CSP origins still fail validation.
+Local development uses `VITE_DEV_API_TARGET=http://localhost:5001`
 (match the backend port) and Vite proxies browser requests through localhost:5173.
 
 The client sends `credentials: "include"` and the `x-csrf-protection` header.

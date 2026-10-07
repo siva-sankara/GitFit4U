@@ -21,7 +21,8 @@ Production leaves `VITE_API_URL` empty and uses the same-origin `/api/v1` proxy
 in `vercel.json`. `VITE_API_BASE_URL` is a supported legacy alias. In development,
 these variables are accepted as proxy targets if `VITE_DEV_API_TARGET` is unset.
 Vercel project variables override the checked-in file;
-see
+legacy production `*.vercel.app` API URLs automatically use the same-origin
+proxy in both the browser and generated headers. See
 [production domain setup](../docs/vercel-production.md) for the exact settings.
 
 ## Verify

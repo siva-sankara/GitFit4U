@@ -46,13 +46,15 @@ describe("deployment CSP", () => {
     expect(headers).toContain("https://api.example.test");
     expect(headers).toContain("wss://api.example.test");
   });
-  it("fails a production build that restores the cross-site Vercel API", () => {
-    expect(() =>
-      securityHeaders(
-        { VITE_API_URL: "https://separate-api.vercel.app" },
-        true,
-      ),
-    ).toThrow(/third-party/);
+  it.each(["VITE_API_URL", "VITE_API_BASE_URL"])("uses the same-origin production CSP for a legacy Vercel %s setting", key => {
+    const headers = securityHeaders({ [key]: "https://git-fit4-u-un7d.vercel.app" }, true);
+    expect(headers).toBe(securityHeaders({}, true));
+    expect(headers).not.toContain("vercel.app");
+  });
+  it("preserves an explicit same-site production API domain", () => {
+    const headers = securityHeaders({ VITE_API_URL: "https://api.getfit4u.in" }, true);
+    expect(headers).toContain("https://api.getfit4u.in");
+    expect(headers).toContain("wss://api.getfit4u.in");
   });
   it("rejects conflicting API variable aliases", () => {
     expect(() =>
