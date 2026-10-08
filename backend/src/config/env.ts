@@ -38,6 +38,25 @@ const schema = z
       .string()
       .min(32)
       .default("development-auth-otp-secret-change-me-1234"),
+    AUTH_OTP_DUAL_DELIVERY_ENABLED: z
+      .enum(["true", "false"])
+      .default("false")
+      .transform((value) => value === "true"),
+    AUTH_OTP_EMAIL_PROVIDER: z.enum(["microsoft_graph"]).default("microsoft_graph"),
+    AUTH_OTP_TTL_SECONDS: z.coerce.number().int().min(60).max(900).default(300),
+    AUTH_OTP_RESEND_COOLDOWN_SECONDS: z.coerce.number().int().min(30).max(300).default(60),
+    AUTH_OTP_MAX_ATTEMPTS: z.coerce.number().int().min(3).max(10).default(5),
+    AUTH_OTP_DELIVERY_ENCRYPTION_KEY: z.preprocess(
+      (value) => value || undefined,
+      z.string().min(32).optional(),
+    ),
+    M365_TENANT_ID: z.preprocess((value) => value || undefined, z.string().min(3).optional()),
+    M365_CLIENT_ID: z.preprocess((value) => value || undefined, z.string().min(3).optional()),
+    M365_CLIENT_SECRET: z.preprocess((value) => value || undefined, z.string().min(16).optional()),
+    M365_SENDER_MAILBOX: z.string().email().default("support@getfit4u.in"),
+    M365_FROM_EMAIL: z.string().email().default("support@getfit4u.in"),
+    M365_FROM_NAME: z.string().trim().min(1).max(120).default("GETFIT4U"),
+    M365_REPLY_TO: z.string().email().default("support@getfit4u.in"),
     ATTENDANCE_QR_SECRET: z
       .string()
       .min(32)
@@ -121,6 +140,26 @@ const schema = z
     LOG_LEVEL: z.string().default("info"),
   })
   .superRefine((value, context) => {
+    if (value.AUTH_OTP_DUAL_DELIVERY_ENABLED) {
+      for (const key of [
+        "AUTH_OTP_DELIVERY_ENCRYPTION_KEY",
+        "M365_TENANT_ID",
+        "M365_CLIENT_ID",
+        "M365_CLIENT_SECRET",
+      ] as const) {
+        if (!value[key]) context.addIssue({
+          code: "custom",
+          path: [key],
+          message: `${key} is required when AUTH_OTP_DUAL_DELIVERY_ENABLED=true.`,
+        });
+      }
+      if (value.M365_SENDER_MAILBOX.toLowerCase() !== value.M365_FROM_EMAIL.toLowerCase())
+        context.addIssue({
+          code: "custom",
+          path: ["M365_FROM_EMAIL"],
+          message: "M365_FROM_EMAIL must match the mailbox authorized for OTP sending.",
+        });
+    }
     if (value.WHATSAPP_MODE === "live") {
       for (const key of [
         "WHATSAPP_APP_ID",

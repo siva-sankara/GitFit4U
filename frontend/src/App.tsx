@@ -2,18 +2,21 @@ import { GuestRoute } from "./routes/GuestRoute";
 import { LegacyAuthRedirect } from "./routes/LegacyAuthRedirect";
 import { NotificationInboxRedirect } from "./pages/shared/NotificationInboxRedirect";
 import { NotificationOpenPage } from "./pages/shared/NotificationOpenPage";
-import { lazy, Suspense, useEffect } from "react";
+import { Suspense, useEffect } from "react";
 import { safeReturnTo } from "./services/authRedirect";
 import {
   createBrowserRouter,
   Navigate,
+  Outlet,
   RouterProvider,
 } from "react-router-dom";
 import { PublicLayout } from "./layouts/PublicLayout";
 import { WorkspaceLayout } from "./layouts/WorkspaceLayout";
 import { ProtectedRoute } from "./routes/ProtectedRoute";
 import { profileSections, ProfileSectionRedirect } from "./routes/ProfileSectionRedirect";
-const LiveWorkspace = lazy(() =>
+import { lazyWithRetry } from "./services/lazyWithRetry";
+import { RouteErrorPage } from "./components/RouteErrorPage";
+const LiveWorkspace = lazyWithRetry("live-workspace", () =>
   import("./pages/live/LiveWorkspace").then((m) => ({
     default: m.LiveWorkspace,
   })),
@@ -28,13 +31,16 @@ import { RegisterGymPage } from "./pages/public/RegisterGymPage";
 import { ActivateAccountPage } from "./pages/public/ActivateAccountPage";
 import { BackIconLink } from "./components/BackIconControl";
 import { publicPolicyRoutes } from "./routes/publicPolicyRoutes";
-const Auth = lazy(() =>
+const Auth = lazyWithRetry("authentication", () =>
   import("./pages/public/AuthDesktopPage").then((m) => ({
     default: m.AuthDesktopPage,
   })),
 );
-const PlatformSubscription = lazy(() => import("./pages/owner/PlatformSubscriptionPage").then(module => ({ default: module.PlatformSubscriptionPage })));
-const router = createBrowserRouter([
+const PlatformSubscription = lazyWithRetry("platform-subscription", () => import("./pages/owner/PlatformSubscriptionPage").then(module => ({ default: module.PlatformSubscriptionPage })));
+const router = createBrowserRouter([{
+  element: <Outlet />,
+  errorElement: <RouteErrorPage />,
+  children: [
   { path: "/notification-open/:id", element: <ProtectedRoute><NotificationOpenPage /></ProtectedRoute> },
   { path: "/activate-account", element: <ActivateAccountPage /> },
   ...publicPolicyRoutes,
@@ -157,7 +163,11 @@ const router = createBrowserRouter([
           <Navigate to={role === "USER" ? "home" : "dashboard"} replace />
         ),
       },
-      { path: "explore", element: <LiveExplore /> },
+      ...(role === "USER"
+        ? [{ path: "explore", element: <LiveExplore /> }]
+        : role === "GYM_OWNER"
+          ? [{ path: "explore", element: <Navigate to="/owner/dashboard" replace /> }]
+          : []),
       ...(role === "USER" ? profileSections.map(section => ({ path: `profile/${section}`, element: <ProfileSectionRedirect section={section} /> })) : []),
       { path: "gyms/:slug", element: <LiveGymDetails /> },
       { path: "help", element: <InfoPage type="help" /> },
@@ -177,7 +187,8 @@ const router = createBrowserRouter([
       </main>
     ),
   },
-]);
+  ],
+}]);
 export function App() {
   useEffect(() => {
     if (!("serviceWorker" in navigator)) return;

@@ -1,6 +1,6 @@
 import { PageHeader } from "../../components/PageHeader";
 import { BackIconLink } from "../../components/BackIconControl";
-import { lazy, Suspense, useState } from "react";
+import { Suspense, useState } from "react";
 import { Link, Navigate, useLocation } from "react-router-dom";
 import { QrCode } from "lucide-react";
 import {
@@ -64,34 +64,35 @@ import {
   GymStatusAction,
 } from "../admin/AdminManagement";
 import { StatusBadge } from "../../components/StatusBadge";
+import { lazyWithRetry } from "../../services/lazyWithRetry";
 import "../../styles/member-workspace.css";
 
-const OwnerDashboardPage = lazy(() =>
+const OwnerDashboardPage = lazyWithRetry("owner-dashboard", () =>
   import("../owner/OwnerDashboardPage").then((module) => ({
     default: module.OwnerDashboardPage,
   })),
 );
-const RevenuePage = lazy(() =>
+const RevenuePage = lazyWithRetry("owner-revenue", () =>
   import("../owner/RevenuePage").then((module) => ({
     default: module.RevenuePage,
   })),
 );
-const AdminBroadcastPage = lazy(() =>
+const AdminBroadcastPage = lazyWithRetry("admin-broadcast", () =>
   import("../shared/AdminBroadcastPage").then((module) => ({
     default: module.AdminBroadcastPage,
   })),
 );
-const OwnerScannerPage = lazy(() =>
+const OwnerScannerPage = lazyWithRetry("owner-gym-qr", () =>
   import("../owner/OwnerScannerPage").then((module) => ({
     default: module.OwnerScannerPage,
   })),
 );
-const SocialProfilePage = lazy(() =>
+const SocialProfilePage = lazyWithRetry("social-profile", () =>
   import("../user/SocialProfilePage").then((module) => ({
     default: module.SocialProfilePage,
   })),
 );
-const AttendanceQrPage = lazy(() =>
+const AttendanceQrPage = lazyWithRetry("attendance-scanner", () =>
   import("../user/AttendanceQrPage").then((module) => ({
     default: module.AttendanceQrPage,
   })),

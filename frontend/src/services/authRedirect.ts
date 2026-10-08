@@ -96,6 +96,10 @@ export function workspacePath(identity: AuthIdentity, path: string) {
   const role = account(identity).activeRole || "USER";
   const prefix = workspacePrefix(role);
   if (publicPolicyDestination.test(path)) return path;
+  // Public discovery is a member capability. Owners preview only their own
+  // public gym page from Gym Profile Settings and return to that screen.
+  if (/^\/explore(?:[?#]|$)/.test(path) && role === "GYM_OWNER")
+    return loginDestination(identity);
   if (
     /^\/(explore(?:[?#]|$)|gyms\/|help(?:[?#]|$)|contact(?:[?#]|$)|legal\/)/.test(
       path,

@@ -20,6 +20,8 @@ import {
 import { User } from "../models/User.js";
 import {
   normalizePhone,
+  maskEmail,
+  maskPhone,
   invalidateOtpOperation,
   requestOtp,
   verifyOtp,
@@ -33,7 +35,7 @@ import {
 } from "../services/tokenService.js";
 import { AppError } from "../utils/AppError.js";
 import { ROLES, type Role } from "../constants/domain.js";
-import { sha256 } from "../utils/crypto.js";
+import { hashOtpContext, sha256 } from "../utils/crypto.js";
 import { publicSignupInput } from "../routes/authSchemas.js";
 import { duplicateAccountError, isDuplicateKey, normalizeEmail } from "../utils/accountIdentity.js";
 import { getOwnerOnboarding } from "../services/ownerOnboardingService.js";
@@ -50,6 +52,7 @@ async function loginResponse(
   let role = (user.activeRole || "USER") as Role;
   let hasAccess = ROLES.includes(role) && user.roles?.includes(role);
   let activeGymId: string | undefined;
+  let activePermissions: string[] = [];
   // Prefer an established active gym over an old incomplete draft when the
   // account has multiple owner assignments and no explicit tenant selection.
   const onboarding = await getOwnerOnboarding(user);
@@ -62,6 +65,7 @@ async function loginResponse(
         ? onboarding.gymId : { $ne: null },
     });
     activeGymId = assignment?.gymId ? String(assignment.gymId) : undefined;
+    activePermissions = assignment?.permissions?.map(String) || [];
     if (role === "GYM_OWNER" && onboarding?.state === "ACTIVE" && !activeGymId)
       throw new AppError(403, "ROLE_ACCESS_UNAVAILABLE", "Your gym access is unavailable. Contact support to restore access.");
     // A self-registered owner may hold an onboarding session without a gym.
@@ -79,7 +83,9 @@ async function loginResponse(
     }
     role = "USER";
     activeGymId = undefined;
+    activePermissions = [];
   }
+  if (role === "ADMIN") activePermissions = ["admin:platform"];
   const tokens = await createSession({
     userId: String(user._id),
     activeRole: role,
@@ -91,6 +97,9 @@ async function loginResponse(
   user.lastLoginAt = new Date();
   await user.save();
   setRefreshCookie(res, tokens.refreshToken, tokens.expiresAt);
+  const responseOnboarding = role === "GYM_OWNER"
+    ? await getOwnerOnboarding(user, activeGymId)
+    : onboarding;
   logger.info(
     {
       event: "auth_login_succeeded",
@@ -114,7 +123,33 @@ async function loginResponse(
         roles: user.roles,
         activeRole: role,
         activeGymId,
-        onboarding: role === "GYM_OWNER" ? await getOwnerOnboarding(user, activeGymId) : onboarding,
+        onboarding: responseOnboarding,
+      },
+      // Seed the protected route with the session that was just issued. The
+      // complete /auth/me representation is refreshed in the background, but
+      // navigation never depends on a racing second request.
+      session: {
+        user: {
+          _id: String(user._id),
+          publicId: user.publicId,
+          name: user.name,
+          phone: user.phone,
+          email: user.email,
+          avatarUrl: user.avatarUrl,
+          preferences: user.preferences,
+          notificationPreferences: user.notificationPreferences,
+          roles: user.roles,
+          activeRole: role,
+          onboarding: responseOnboarding,
+        },
+        context: {
+          userId: String(user._id),
+          role,
+          ...(activeGymId ? { gymId: activeGymId } : {}),
+          permissions: activePermissions,
+          sessionId: tokens.sessionId,
+        },
+        assignments: [],
       },
     },
   });
@@ -152,10 +187,15 @@ export async function register(req: Request, res: Response) {
     const challenge = await requestOtp(phone, "SIGNUP", {
       ipAddress: req.ip,
       pendingOperationId: operation._id,
+      email,
     });
     res.status(202).json({
       success: true,
-      message: challenge.deliveryStatus === "SIMULATED" ? "Simulated local test verification. No WhatsApp message was sent." : "The verification code was submitted to Meta for WhatsApp delivery.",
+      message: challenge.deliveryStatus === "SIMULATED"
+        ? "Simulated local test verification. No WhatsApp message or email was sent."
+        : challenge.dualDelivery
+          ? "The same verification code was requested for WhatsApp and the signup email. Provider acceptance is not delivery confirmation."
+          : "The verification code was requested through the configured mobile channel.",
       data: { ...challenge, operationId: operation.publicId, purpose: "SIGNUP" },
     });
   } catch (error) {
@@ -186,10 +226,15 @@ export async function resendSignupOtp(req: Request, res: Response) {
   const challenge = await requestOtp(operation.phone, "SIGNUP", {
     ipAddress: req.ip,
     pendingOperationId: operation._id,
+    email: operation.email,
   });
   res.status(202).json({
     success: true,
-    message: challenge.deliveryStatus === "SIMULATED" ? "Simulated local test verification. No WhatsApp message was sent." : "A new verification code was submitted to Meta for WhatsApp delivery.",
+    message: challenge.deliveryStatus === "SIMULATED"
+      ? "Simulated local test verification. No WhatsApp message or email was sent."
+      : challenge.dualDelivery
+        ? "A new shared code was requested for WhatsApp and the signup email."
+        : "A new code was requested through the configured mobile channel.",
     data: { ...challenge, operationId: operation.publicId, purpose: "SIGNUP" },
   });
 }
@@ -257,8 +302,7 @@ export async function verifySignupOtp(req: Request, res: Response) {
         ],
         { session },
       );
-      await AuthIdentity.create(
-        [
+      const identities = [
           {
             userId: created._id,
             provider: "PASSWORD",
@@ -266,17 +310,25 @@ export async function verifySignupOtp(req: Request, res: Response) {
             verifiedAt: new Date(),
             passwordHash: operation.passwordHash,
           },
-          {
-            userId: created._id,
-            provider: "PHONE",
-            providerSubject: operation.phone,
-            verifiedAt: verified.simulated ? undefined : new Date(),
-            verificationSource: verified.simulated ? "DEVELOPMENT_SIMULATION" : "PROVIDER",
-            simulatedAt: verified.simulated ? new Date() : undefined,
-          },
-        ],
+          ...(!verified.dualDelivery
+            ? [{
+                userId: created._id,
+                provider: "PHONE",
+                providerSubject: operation.phone,
+                verifiedAt: verified.simulated ? undefined : new Date(),
+                verificationSource: verified.simulated ? "DEVELOPMENT_SIMULATION" : "PROVIDER",
+                simulatedAt: verified.simulated ? new Date() : undefined,
+              }]
+            : []),
+        ];
+      await AuthIdentity.create(
+        identities,
         { session },
       );
+      if (!verified.dualDelivery && !verified.simulated) {
+        created.phoneVerifiedAt = new Date();
+        await created.save({ session });
+      }
       await emitDomainEvent({
         event: "account.registered",
         userId: created._id,
@@ -327,10 +379,107 @@ export async function passwordLogin(req: Request, res: Response) {
   await loginResponse(req, res, user);
 }
 
+function parseOtpIdentifier(value: string) {
+  const identifier = String(value || "").trim();
+  return identifier.includes("@")
+    ? { kind: "EMAIL" as const, email: normalizeEmail(identifier) }
+    : { kind: "PHONE" as const, phone: normalizePhone(identifier) };
+}
+
+async function accountHasTrustedPhone(account: any) {
+  if (!account?.phone) return false;
+  return Boolean(
+    account.phoneVerifiedAt ||
+      (await AuthIdentity.exists({
+        userId: account._id,
+        provider: "PHONE",
+        providerSubject: account.phone,
+        verificationSource: "PROVIDER",
+      })),
+  );
+}
+
+async function requestAccountOtp(
+  req: Request,
+  purpose: "LOGIN" | "ACCOUNT_RECOVERY",
+) {
+  const parsed = parseOtpIdentifier(req.body.identifier || req.body.phone);
+  const destinationAccount = await User.findOne(
+    parsed.kind === "EMAIL" ? { email: parsed.email } : { phone: parsed.phone },
+  );
+  if (env.OTP_MODE === "development_preview" && purpose === "LOGIN") {
+    if (!destinationAccount)
+      throw new AppError(
+        403,
+        "SIGNUP_REQUIRED",
+        "Create a local test account before using a test login code.",
+      );
+    if (
+      !destinationAccount.developmentTestAccount ||
+      destinationAccount.status !== "ACTIVE" ||
+      destinationAccount.roles?.includes("ADMIN")
+    )
+      throw new AppError(
+        403,
+        "PREVIEW_ACCOUNT_FORBIDDEN",
+        "Test login codes are available only for active, non-admin local test accounts.",
+      );
+  }
+  const trustedPhone = await accountHasTrustedPhone(destinationAccount);
+  const trustedEmail = Boolean(
+    destinationAccount?.email && destinationAccount.emailVerifiedAt,
+  );
+  const emailNeedsProof = Boolean(
+    destinationAccount?.email &&
+      parsed.kind === "EMAIL" &&
+      !destinationAccount.emailVerifiedAt,
+  );
+  const identifierTrusted =
+    parsed.kind === "EMAIL" ? Boolean(destinationAccount?.email) : trustedPhone;
+  const eligible = Boolean(
+    destinationAccount &&
+      destinationAccount.status === "ACTIVE" &&
+      identifierTrusted &&
+      (purpose !== "LOGIN" || !destinationAccount.roles?.includes("ADMIN")),
+  );
+  const result = await requestOtp(
+    eligible && trustedPhone && !emailNeedsProof
+      ? destinationAccount!.phone
+      : parsed.kind === "PHONE"
+        ? parsed.phone
+        : undefined,
+    purpose,
+    {
+      ipAddress: req.ip,
+      ...(eligible ? { userId: destinationAccount!._id } : {}),
+      ...(eligible && (trustedEmail || emailNeedsProof)
+        ? { email: destinationAccount!.email }
+        : parsed.kind === "EMAIL"
+          ? { email: parsed.email }
+          : {}),
+      sendMobile: eligible && trustedPhone && !emailNeedsProof,
+      ...(!eligible && env.OTP_MODE !== "development_preview"
+        ? { suppressDelivery: true }
+        : {}),
+    },
+  );
+  const {
+    maskedPhone: _maskedPhone,
+    maskedEmail: _maskedEmail,
+    dualDelivery: _dualDelivery,
+    channelDelivery: _channelDelivery,
+    ...safeResult
+  } = result;
+  return {
+    ...safeResult,
+    ...(parsed.kind === "EMAIL"
+      ? { maskedEmail: maskEmail(parsed.email) }
+      : { maskedPhone: maskPhone(parsed.phone) }),
+  };
+}
+
 export async function forgotPassword(req: Request, res: Response) {
-  const result = await requestOtp(req.body.phone, "ACCOUNT_RECOVERY", {
-    ipAddress: req.ip,
-  });
+  const result = await requestAccountOtp(req, "ACCOUNT_RECOVERY");
   res.status(202).json({
     success: true,
     message: "If the account exists, a verification code was sent.",
@@ -346,19 +495,41 @@ export async function verifyRecoveryOtp(req: Request, res: Response) {
   const publicId = nanoid(20);
   const token = `${publicId}.${secret}`;
   await mongoose.connection.transaction(async (session) => {
-    // Recheck the verified phone while taking the same account write lock as
-    // contact edits. An old phone cannot mint a grant after it was replaced.
+    // Recheck the challenged contact while taking the same account write lock
+    // as contact edits. A replaced phone/email cannot mint a reset grant.
     const user = await User.findOneAndUpdate(
-      { phone: verified.phone, status: "ACTIVE" },
+      verified.userId
+        ? {
+            _id: verified.userId,
+            status: "ACTIVE",
+            ...(verified.phone ? { phone: verified.phone } : {}),
+          }
+        : verified.phone
+          ? { phone: verified.phone, status: "ACTIVE" }
+          : { _id: null, status: "ACTIVE" },
       { $inc: { version: 1 } },
       { session, returnDocument: "after" },
     );
-    if (!user)
+    if (
+      !user ||
+      (verified.emailDelivery &&
+        (!verified.emailHash ||
+          hashOtpContext("otp-email", String(user.email || "")) !==
+            verified.emailHash))
+    )
       throw new AppError(
         400,
         "RECOVERY_FAILED",
         "Account recovery could not be completed.",
       );
+    if (
+      verified.emailDelivery &&
+      !verified.mobileDelivery &&
+      !user.emailVerifiedAt
+    ) {
+      user.emailVerifiedAt = new Date();
+      await user.save({ session });
+    }
     await PasswordResetGrant.create(
       [
         {
@@ -443,21 +614,12 @@ export async function resetPassword(req: Request, res: Response) {
 }
 
 export async function otpRequest(req: Request, res: Response) {
-  if (env.OTP_MODE === "development_preview") {
-    const account = await User.findOne({ phone: normalizePhone(req.body.phone) });
-    if (!account)
-      throw new AppError(403, "SIGNUP_REQUIRED", "Create a local test account before using a test login code.");
-    if (!account.developmentTestAccount || account.status !== "ACTIVE" || account.roles?.includes("ADMIN"))
-      throw new AppError(403, "PREVIEW_ACCOUNT_FORBIDDEN", "Test login codes are available only for active, non-admin local test accounts.");
-  }
-  const result = await requestOtp(req.body.phone, "LOGIN", {
-    ipAddress: req.ip,
-  });
+  const result = await requestAccountOtp(req, "LOGIN");
   res.status(202).json({
     success: true,
     message: result.deliveryStatus === "SIMULATED"
       ? "Local test verification code. No WhatsApp message or email was sent."
-      : "If eligible, the verification code was submitted to Meta for WhatsApp delivery.",
+      : "If this active account is eligible, a verification code was requested through its authorized delivery channels.",
     data: { ...result, purpose: "LOGIN" },
   });
 }
@@ -466,7 +628,7 @@ export async function otpStatus(req: Request, res: Response) {
   const challenge = await OtpChallenge.findOne({
     publicId: req.params.challengeId,
   })
-    .select("deliveryStatus expiresAt")
+    .select("deliveryStatus expiresAt purpose channelDelivery")
     .lean();
   const expired = !challenge || challenge.expiresAt <= new Date();
   res.json({
@@ -476,6 +638,9 @@ export async function otpStatus(req: Request, res: Response) {
         ? "EXPIRED"
         : challenge.deliveryStatus || "SUBMITTED",
       expired,
+      ...(challenge?.purpose === "SIGNUP"
+        ? { channelDelivery: challenge.channelDelivery }
+        : {}),
     },
   });
 }
@@ -484,14 +649,19 @@ export async function otpVerify(req: Request, res: Response) {
   const verified = await verifyOtp(req.body.challengeId, req.body.code, {
     expectedPurpose: "LOGIN",
   });
-  const accountCount = await User.countDocuments({ phone: verified.phone });
+  const accountFilter = verified.userId
+    ? { _id: verified.userId, ...(verified.phone ? { phone: verified.phone } : {}) }
+    : verified.phone
+      ? { phone: verified.phone }
+      : { _id: null };
+  const accountCount = await User.countDocuments(accountFilter);
   if (accountCount > 1)
     throw new AppError(
       409,
       "PHONE_ACCOUNT_CONFLICT",
       "This verified phone number is linked to multiple legacy accounts. Contact support; accounts are never merged automatically.",
     );
-  const user = await User.findOne({ phone: verified.phone });
+  const user = await User.findOne(accountFilter);
   if (!user) {
     throw new AppError(409, "SIGNUP_REQUIRED", "Complete sign up with your account type, email and mobile number before signing in.");
   }
@@ -503,12 +673,32 @@ export async function otpVerify(req: Request, res: Response) {
       "ADMIN_OTP_LOGIN_FORBIDDEN",
       "Administrator accounts must use the existing privileged sign-in and MFA flow.",
     );
+  if (
+    verified.emailDelivery &&
+    (!verified.emailHash ||
+      hashOtpContext("otp-email", String(user.email || "")) !== verified.emailHash)
+  )
+    throw new AppError(
+      400,
+      "OTP_IDENTITY_CHANGED",
+      "The verified account contact changed. Request a new code.",
+    );
+  if (
+    verified.emailDelivery &&
+    !verified.mobileDelivery &&
+    !user.emailVerifiedAt
+  ) {
+    user.emailVerifiedAt = new Date();
+    await user.save();
+  }
   if (verified.simulated && (!user.developmentTestAccount || env.OTP_MODE !== "development_preview" || !env.OTP_DEV_PREVIEW_ENABLED))
     throw new AppError(403, "PREVIEW_ACCOUNT_FORBIDDEN", "Test login codes are available only for local test accounts.");
-  const existingPhoneIdentity = await AuthIdentity.findOne({
-    provider: "PHONE",
-    providerSubject: verified.phone,
-  });
+  const existingPhoneIdentity = verified.phone
+    ? await AuthIdentity.findOne({
+        provider: "PHONE",
+        providerSubject: verified.phone,
+      })
+    : null;
   if (
     existingPhoneIdentity &&
     String(existingPhoneIdentity.userId) !== String(user._id)
@@ -523,17 +713,26 @@ export async function otpVerify(req: Request, res: Response) {
     await loginResponse(req, res, user);
     return;
   }
-  await AuthIdentity.findOneAndUpdate(
-    { userId: user._id, provider: "PHONE" },
-    {
-      $set: {
-        providerSubject: verified.phone,
-        verifiedAt: new Date(),
+  if (verified.mobileDelivery && !verified.emailDelivery && verified.phone) {
+    const verifiedAt = new Date();
+    await AuthIdentity.findOneAndUpdate(
+      { userId: user._id, provider: "PHONE" },
+      {
+        $set: {
+          providerSubject: verified.phone,
+          verifiedAt,
+        },
       },
-    },
-    { upsert: true, returnDocument: "after", runValidators: true },
-  );
-  if (!existingPhoneIdentity)
+      { upsert: true, returnDocument: "after", runValidators: true },
+    );
+    user.phoneVerifiedAt = verifiedAt;
+    await user.save();
+  }
+  if (
+    verified.mobileDelivery &&
+    !verified.emailDelivery &&
+    !existingPhoneIdentity
+  )
     await emitDomainEvent({
       event: "account.verified",
       userId: user._id,
@@ -581,6 +780,13 @@ export async function googleLogin(req: Request, res: Response) {
   }
   if (user.status !== "ACTIVE")
     throw new AppError(403, "ACCOUNT_DISABLED", "This account is not active.");
+  if (
+    user.email === normalizeEmail(payload.email) &&
+    !user.emailVerifiedAt
+  ) {
+    user.emailVerifiedAt = new Date();
+    await user.save();
+  }
   await emitDomainEvent({
     event: "account.verified",
     userId: user._id,

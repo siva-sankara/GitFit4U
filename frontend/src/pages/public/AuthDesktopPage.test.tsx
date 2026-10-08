@@ -2,6 +2,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   request: vi.fn(),
@@ -18,7 +19,7 @@ vi.mock("../../context/AppContext", () => ({
 }));
 import { AuthDesktopPage } from "./AuthDesktopPage";
 import { ApiError } from "../../services/apiClient";
-let host: HTMLDivElement, root: Root;
+let host: HTMLDivElement, root: Root, queryClient: QueryClient;
 beforeEach(() => {
   vi.resetAllMocks();
   sessionStorage.clear();
@@ -26,9 +27,13 @@ beforeEach(() => {
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
+  queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
 });
 afterEach(async () => {
   await act(async () => root.unmount());
+  queryClient.clear();
   host.remove();
   vi.unstubAllEnvs();
 });
@@ -45,8 +50,9 @@ function GymDestination() {
 async function render(path: string) {
   await act(async () =>
     root.render(
-      <MemoryRouter initialEntries={[path]}>
-        <Routes>
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={[path]}>
+          <Routes>
           <Route path="/auth/*" element={<AuthDesktopPage />} />
           <Route path="/login" element={<AuthDesktopPage />} />
           <Route path="/register" element={<AuthDesktopPage />} />
@@ -56,8 +62,9 @@ async function render(path: string) {
           <Route path="/register-gym" element={<p>Register gym onboarding</p>} />
           <Route path="/admin/dashboard" element={<p>Admin home</p>} />
           <Route path="/trainer/dashboard" element={<p>Trainer home</p>} />
-        </Routes>
-      </MemoryRouter>,
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
     ),
   );
 }
@@ -117,8 +124,8 @@ describe("account screens", () => {
       ? { data: { ...submittedOtp.data, deliveryStatus: "SIMULATED", developmentPreview: { code: "135790", simulated: true } } }
       : path.includes("/status") ? { data: { deliveryStatus: "SIMULATED", expired: false } }
         : { data: { accessToken: "token", user: { activeRole: "USER" } } });
-    await render("/login"); await clickLink("Login with WhatsApp OTP");
-    await fill("phone", "9876543210"); await submit();
+    await render("/login"); await clickLink("Login with email or phone OTP");
+    await fill("identifier", "member@example.com"); await submit();
     expect(host.textContent).toContain("Verify test login");
     expect(host.querySelector("output")?.textContent).toBe("135790");
     expect(host.textContent).toContain("No email was sent");
@@ -130,7 +137,7 @@ describe("account screens", () => {
   });
   it("never exposes a preview attached to a normal delivery response", async () => {
     mocks.request.mockResolvedValue({ data: { ...submittedOtp.data, developmentPreview: { code: "135790", simulated: true } } });
-    await render("/auth/phone"); await fill("phone", "9876543210"); await submit();
+    await render("/auth/phone"); await fill("identifier", "9876543210"); await submit();
     expect(host.querySelector("output")).toBeNull();
     expect(host.textContent).not.toContain("135790");
     expect(sessionStorage.getItem("gfu_auth_challenge")).not.toContain("135790");
@@ -138,7 +145,7 @@ describe("account screens", () => {
   it("does not render a supplied simulated code in a production frontend", async () => {
     vi.stubEnv("DEV", false);
     mocks.request.mockResolvedValue({ data: { ...submittedOtp.data, deliveryStatus: "SIMULATED", developmentPreview: { code: "135790", simulated: true } } });
-    await render("/auth/phone"); await fill("phone", "9876543210"); await submit();
+    await render("/auth/phone"); await fill("identifier", "9876543210"); await submit();
     expect(host.querySelector("output")).toBeNull();
     expect(host.textContent).not.toContain("135790");
     expect(sessionStorage.getItem("gfu_auth_challenge")).not.toContain("135790");
@@ -177,7 +184,7 @@ describe("account screens", () => {
         password: "StrongPass123",
         phone: "+919876543210",
       });
-      expect(host.textContent).toContain("Check WhatsApp");
+      expect(host.textContent).toContain("Enter verification code");
       expect(host.textContent).toContain("+91••••••3210");
       expect(mocks.setToken).not.toHaveBeenCalled();
       await verifySignup();
@@ -193,6 +200,80 @@ describe("account screens", () => {
       expect(host.textContent).toContain("Member home");
     },
   );
+  it("shows one shared signup code destination summary without storing the OTP", async () => {
+    mocks.request.mockImplementation(async (path) =>
+      path === "/api/v1/auth/register"
+        ? {
+            data: {
+              ...submittedOtp.data,
+              maskedEmail: "m•••••@example.com",
+              dualDelivery: true,
+              channelDelivery: {
+                mobile: { status: "SUBMITTED" },
+                email: { status: "SUBMITTED" },
+              },
+            },
+          }
+        : path.includes("/status")
+          ? {
+              data: {
+                deliveryStatus: "SUBMITTED",
+                expired: false,
+                channelDelivery: {
+                  mobile: { status: "SUBMITTED" },
+                  email: { status: "SUBMITTED" },
+                },
+              },
+            }
+          : { data: { accessToken: "token", user: { activeRole: "USER" } } },
+    );
+    await render("/register");
+    await signupFields();
+    await submit();
+    expect(host.textContent).toContain("same six-digit code");
+    expect(host.textContent).toContain("+91••••••3210");
+    expect(host.textContent).toContain("m•••••@example.com");
+    expect(host.textContent).toContain("Mobile request: submitted");
+    expect(host.textContent).toContain("Email request: submitted");
+    expect(sessionStorage.getItem("gfu_auth_challenge")).not.toContain("123456");
+  });
+  it("shows email fallback without a blocking error when WhatsApp fails", async () => {
+    mocks.request.mockImplementation(async (path) =>
+      path === "/api/v1/auth/register"
+        ? {
+            data: {
+              ...submittedOtp.data,
+              maskedEmail: "m•••••@example.com",
+              dualDelivery: true,
+              channelDelivery: {
+                mobile: { status: "FAILED" },
+                email: { status: "SUBMITTED" },
+              },
+            },
+          }
+        : path.includes("/status")
+          ? {
+              data: {
+                deliveryStatus: "SUBMITTED",
+                expired: false,
+                channelDelivery: {
+                  mobile: { status: "FAILED" },
+                  email: { status: "SUBMITTED" },
+                },
+              },
+            }
+          : { data: { accessToken: "token", user: { activeRole: "USER" } } },
+    );
+    await render("/register");
+    await signupFields();
+    await submit();
+    expect(host.textContent).toContain(
+      "WhatsApp could not accept this request, so your six-digit code was submitted by email.",
+    );
+    expect(host.textContent).toContain("Mobile request: failed");
+    expect(host.textContent).toContain("Email request: submitted");
+    expect(host.querySelector('[role="alert"]')).toBeNull();
+  });
   it.each(["/login", "/auth/login"])(
     "logs in from %s and follows the role returned by the backend",
     async (path) => {
@@ -210,9 +291,39 @@ describe("account screens", () => {
       expect(host.textContent).toContain("Owner home");
     },
   );
-  it("returns a direct OTP visit without a challenge to the phone form", async () => {
+  it("seeds the newly issued session before navigating to the dashboard", async () => {
+    const session = {
+      user: { _id: "owner-id", activeRole: "GYM_OWNER", roles: ["GYM_OWNER"] },
+      context: {
+        userId: "owner-id",
+        role: "GYM_OWNER",
+        gymId: "gym-id",
+        permissions: [],
+        sessionId: "session-id",
+      },
+      assignments: [],
+    };
+    mocks.request.mockResolvedValue({
+      data: {
+        accessToken: "owner-token",
+        user: { activeRole: "GYM_OWNER" },
+        session,
+      },
+    });
+    await render("/login");
+    await fill("identifier", "owner@example.com");
+    await fill("password", "StrongPass123");
+    await submit();
+    expect(queryClient.getQueryData(["me"])).toEqual({
+      success: true,
+      data: session,
+    });
+    expect(host.textContent).toContain("Owner home");
+    expect(host.textContent).not.toContain("Retry");
+  });
+  it("returns a direct OTP visit without a challenge to the email-or-phone form", async () => {
     await render("/auth/otp");
-    expect(host.querySelector('input[name="phone"]')).not.toBeNull();
+    expect(host.querySelector('input[name="identifier"]')).not.toBeNull();
     expect(mocks.request).not.toHaveBeenCalled();
   });
 });
@@ -249,16 +360,19 @@ it("keeps the selected gym when switching from login to signup", async () => {
   await verifySignup();
   expect(host.textContent).toContain("Selected gym: " + selectedGym);
 });
-it("keeps the selected gym through the phone OTP flow", async () => {
+it("keeps the selected gym through the email-or-phone OTP flow", async () => {
   mocks.request.mockImplementation(async (path) =>
     path.endsWith("/request")
-      ? { data: { challengeId: "challenge", maskedPhone: "+91••••••3210", expiresInSeconds: 300, resendInSeconds: 60, deliveryStatus: "SUBMITTED" } }
+      ? { data: { challengeId: "challenge", maskedEmail: "m•••••@example.com", expiresInSeconds: 300, resendInSeconds: 60, deliveryStatus: "SUBMITTED" } }
       : { data: { accessToken: "token", user: { activeRole: "USER" } } },
   );
   await render(loginUrl);
-  await clickLink("Login with WhatsApp OTP");
-  await fill("phone", "+919876543210");
+  await clickLink("Login with email or phone OTP");
+  await fill("identifier", "member@example.com");
   await submit();
+  expect(JSON.parse(mocks.request.mock.calls[0][1].body)).toEqual({
+    identifier: "member@example.com",
+  });
   await fill("code", "123456");
   await submit();
   expect(host.textContent).toContain("Selected gym: " + selectedGym);
@@ -266,15 +380,18 @@ it("keeps the selected gym through the phone OTP flow", async () => {
 it("keeps the gym through password recovery and a subsequent login", async () => {
   mocks.request.mockImplementation(async (path) => {
     if (path.endsWith("/forgot-password"))
-      return { data: { challengeId: "recovery", maskedPhone: "+91••••••3210", expiresInSeconds: 300, resendInSeconds: 60, deliveryStatus: "SUBMITTED" } };
+      return { data: { challengeId: "recovery", maskedEmail: "m•••••@example.com", expiresInSeconds: 300, resendInSeconds: 60, deliveryStatus: "SUBMITTED" } };
     if (path.endsWith("/recovery/verify"))
       return { data: { resetToken: "reset" } };
     return { data: { accessToken: "token", user: { activeRole: "USER" } } };
   });
   await render(loginUrl);
   await clickLink("Forgot password?");
-  await fill("phone", "+919876543210");
+  await fill("identifier", "member@example.com");
   await submit();
+  expect(JSON.parse(mocks.request.mock.calls[0][1].body)).toEqual({
+    identifier: "member@example.com",
+  });
   await fill("code", "123456");
   await submit();
   await fill("password", "NewStrongPass123");
@@ -409,7 +526,7 @@ it("keeps non-sensitive values and blocks repeated signup requests while pending
 it("offers intentional signup when an unknown phone cannot log in", async () => {
   mocks.request.mockRejectedValue(new ApiError(403, "SIGNUP_REQUIRED", "Create an account to continue."));
   await render("/auth/phone");
-  await fill("phone", "9876543210");
+  await fill("identifier", "9876543210");
   await submit();
   expect(host.querySelector('.form-alert a')?.textContent).toBe("Create an account");
   expect(host.querySelector('.form-alert a')?.getAttribute("href")).toBe("/register");
@@ -431,10 +548,10 @@ it("shows an asynchronous Meta delivery failure and disables verification", asyn
     throw new Error("Unexpected request");
   });
   await render("/auth/phone");
-  await fill("phone", "9876543210");
+  await fill("identifier", "9876543210");
   await submit();
   await act(async () => Promise.resolve());
-  expect(host.textContent).toContain("WhatsApp could not deliver this verification message");
+  expect(host.textContent).toContain("authorized delivery channel could not accept this verification message");
   const verify = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
     (button) => button.textContent?.trim() === "Verify",
   );

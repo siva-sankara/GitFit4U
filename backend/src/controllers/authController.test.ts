@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   countUsers: vi.fn(),
   findById: vi.fn(),
   findIdentity: vi.fn(),
+  identityExists: vi.fn(),
   updateIdentity: vi.fn(),
   createIdentity: vi.fn(),
   pendingUpdateMany: vi.fn(),
@@ -43,7 +44,12 @@ vi.mock("../models/User.js", () => ({
   },
 }));
 vi.mock("../models/Auth.js", () => ({
-  AuthIdentity: { findOne: mocks.findIdentity, findOneAndUpdate: mocks.updateIdentity, create: mocks.createIdentity },
+  AuthIdentity: {
+    findOne: mocks.findIdentity,
+    exists: mocks.identityExists,
+    findOneAndUpdate: mocks.updateIdentity,
+    create: mocks.createIdentity,
+  },
   PendingAuthOperation: {
     updateMany: mocks.pendingUpdateMany,
     create: mocks.pendingCreate,
@@ -78,7 +84,7 @@ vi.mock("../services/domainEventService.js", () => ({
 vi.mock("google-auth-library", () => ({ OAuth2Client: class { verifyIdToken = mocks.googleToken; } }));
 vi.mock("../services/ownerOnboardingService.js", () => ({ getOwnerOnboarding: mocks.onboarding }));
 vi.mock("../models/Collaboration.js", () => ({ DeviceToken: { updateMany: mocks.revokeDevices } }));
-import { register, verifySignupOtp, passwordLogin, otpRequest, otpVerify, googleLogin, switchRole, logout, refresh } from "./authController.js";
+import { register, verifySignupOtp, passwordLogin, forgotPassword, otpRequest, otpVerify, googleLogin, switchRole, logout, refresh } from "./authController.js";
 import { sha256 } from "../utils/crypto.js";
 import { env } from "../config/env.js";
 import type { Request, Response } from "express";
@@ -97,6 +103,7 @@ beforeEach(() => {
     _id: "pending-operation-id",
     publicId: "pending-operation-public-id",
   });
+  mocks.identityExists.mockResolvedValue(null);
   mocks.requestOtp.mockResolvedValue({
     challengeId: "signup-challenge-public-id",
     maskedPhone: "+91••••••3210",
@@ -387,6 +394,110 @@ describe("local test login previews", () => {
     mocks.findUser.mockResolvedValue({ ...account(), developmentTestAccount: false });
     await expect(otpVerify(request({ challengeId: "test-challenge", code: "246810" }), response())).rejects.toMatchObject({ code: "PREVIEW_ACCOUNT_FORBIDDEN" });
     expect(mocks.createSession).not.toHaveBeenCalled(); expect(mocks.updateIdentity).not.toHaveBeenCalled();
+  });
+});
+
+describe("login OTP destination authorization", () => {
+  const account = (overrides: Record<string, unknown> = {}) => ({
+    _id: "account-id",
+    email: "member@example.com",
+    phone: "+919876543210",
+    emailVerifiedAt: new Date("2026-01-01T00:00:00Z"),
+    status: "ACTIVE",
+    roles: ["USER"],
+    ...overrides,
+  });
+
+  it("resolves both destinations from the same account and never from request fields", async () => {
+    mocks.findUser.mockResolvedValue(account());
+    mocks.identityExists.mockResolvedValue({ _id: "phone-identity" });
+    await otpRequest(
+      request({ phone: "9876543210", email: "attacker@example.test" }),
+      response(),
+    );
+    expect(mocks.requestOtp).toHaveBeenCalledWith(
+      "+919876543210",
+      "LOGIN",
+      expect.objectContaining({
+        userId: "account-id",
+        email: "member@example.com",
+      }),
+    );
+    expect(JSON.stringify(mocks.requestOtp.mock.calls[0])).not.toContain(
+      "attacker@example.test",
+    );
+  });
+
+  it("accepts a verified email identifier and resolves both destinations from that account", async () => {
+    mocks.findUser.mockResolvedValue(
+      account({ phoneVerifiedAt: new Date("2026-01-01T00:00:00Z") }),
+    );
+    await otpRequest(
+      request({ identifier: "Member@Example.com" }),
+      response(),
+    );
+    expect(mocks.findUser).toHaveBeenCalledWith({
+      email: "member@example.com",
+    });
+    expect(mocks.requestOtp).toHaveBeenCalledWith(
+      "+919876543210",
+      "LOGIN",
+      expect.objectContaining({
+        userId: "account-id",
+        email: "member@example.com",
+        sendMobile: true,
+      }),
+    );
+  });
+
+  it("supports verified email-only password recovery without inventing a phone destination", async () => {
+    mocks.findUser.mockResolvedValue(
+      account({ phone: undefined, roles: ["USER"] }),
+    );
+    await forgotPassword(
+      request({ identifier: "member@example.com" }),
+      response(),
+    );
+    expect(mocks.requestOtp).toHaveBeenCalledWith(
+      undefined,
+      "ACCOUNT_RECOVERY",
+      expect.objectContaining({
+        userId: "account-id",
+        email: "member@example.com",
+        sendMobile: false,
+      }),
+    );
+  });
+
+  it("sends only to the exact stored email when that email still needs OTP proof", async () => {
+    mocks.findUser.mockResolvedValue(account({ emailVerifiedAt: undefined }));
+    await otpRequest(
+      request({ identifier: "member@example.com" }),
+      response(),
+    );
+    expect(mocks.requestOtp).toHaveBeenCalledWith(
+      undefined,
+      "LOGIN",
+      expect.objectContaining({
+        userId: "account-id",
+        email: "member@example.com",
+        sendMobile: false,
+      }),
+    );
+    expect(mocks.requestOtp.mock.calls[0][2]).not.toHaveProperty(
+      "suppressDelivery",
+    );
+  });
+
+  it("does not send to stored contacts that were never independently authorized", async () => {
+    mocks.findUser.mockResolvedValue(account({ emailVerifiedAt: undefined }));
+    mocks.identityExists.mockResolvedValue(null);
+    await otpRequest(request({ phone: "9876543210" }), response());
+    expect(mocks.requestOtp).toHaveBeenCalledWith(
+      "+919876543210",
+      "LOGIN",
+      expect.objectContaining({ suppressDelivery: true }),
+    );
   });
 });
 

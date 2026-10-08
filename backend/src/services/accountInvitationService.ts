@@ -68,6 +68,7 @@ export async function acceptMemberInvitation(input: { token: string; password?: 
       if (!passwordHash || user.status !== "PENDING_VERIFICATION" || await AuthIdentity.exists({ userId: user._id }).session(session)) throw invitationError();
       await AuthIdentity.create([{ userId: user._id, provider: "PASSWORD", providerSubject: user.email, verifiedAt: now, passwordHash }], { session });
       user.status = "ACTIVE";
+      user.emailVerifiedAt = now;
       await user.save({ session });
     } else if (!input.userId || String(user._id) !== input.userId || user.status !== "ACTIVE") {
       throw new AppError(403, "INVITATION_ACCOUNT_REQUIRED", "Sign in to the account that received this invitation before accepting it.");

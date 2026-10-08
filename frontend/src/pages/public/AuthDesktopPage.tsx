@@ -2,6 +2,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { ArrowRight, Eye, EyeOff, LockKeyhole } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Controller, useForm } from "react-hook-form";
+import { useQueryClient } from "@tanstack/react-query";
 import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { z } from "zod";
 import { Brand } from "../../components/Brand";
@@ -18,32 +19,48 @@ import {
   loginSchema,
   signupSchema,
   resetSchema,
-  phoneSchema,
+  otpIdentifierSchema,
 } from "../../services/authValidation";
 import {
   authPath,
   safeReturnTo,
   loginDestination,
 } from "../../services/authRedirect";
-import type { ActiveRole, OwnerOnboarding } from "../../services/session";
+import type { ActiveRole, OwnerOnboarding, SessionData } from "../../services/session";
 
-const phoneForm = z.object({ phone: phoneSchema });
+const identifierForm = z.object({ identifier: otpIdentifierSchema });
 const otpForm = z.object({
   code: z.string().regex(/^\d{6}$/, "Enter the six-digit code"),
 });
 type Challenge = {
   challengeId: string;
   operationId?: string;
-  phone: string;
-  maskedPhone: string;
+  identifier?: string;
+  phone?: string;
+  maskedPhone?: string;
+  maskedEmail?: string;
+  dualDelivery?: boolean;
+  channelDelivery?: {
+    mobile?: { status: string };
+    email?: { status: string };
+  };
   purpose: "SIGNUP" | "LOGIN" | "ACCOUNT_RECOVERY";
   expiresAt: number;
   resendAt: number;
-  deliveryStatus: "SUBMITTED" | "SENT" | "DELIVERED" | "READ" | "FAILED" | "SIMULATED";
+  deliveryStatus:
+    | "PENDING"
+    | "SUBMITTED"
+    | "SENT"
+    | "DELIVERED"
+    | "READ"
+    | "FAILED"
+    | "UNKNOWN"
+    | "SIMULATED";
 };
 type AuthResponse = ApiEnvelope<{
   accessToken: string;
   user: { activeRole: ActiveRole; roles?: ActiveRole[]; onboarding?: OwnerOnboarding };
+  session?: SessionData;
 }>;
 function readChallenge(): Challenge | null {
   try {
@@ -53,10 +70,22 @@ function readChallenge(): Challenge | null {
   }
 }
 
+const acceptedOtpChannelStatuses = new Set([
+  "SUBMITTED",
+  "SENT",
+  "DELIVERED",
+  "READ",
+]);
+
+function otpChannelAccepted(status?: string) {
+  return acceptedOtpChannelStatuses.has(String(status || "").toUpperCase());
+}
+
 export function AuthDesktopPage() {
   const location = useLocation(),
     path = location.pathname,
     navigate = useNavigate(),
+    queryClient = useQueryClient(),
     { setRole } = useApp();
   const returnTo =
     safeReturnTo(new URLSearchParams(location.search).get("returnTo")) ||
@@ -109,9 +138,9 @@ export function AuthDesktopPage() {
     resolver: zodResolver(signupSchema),
     defaultValues: { phone: "" },
   });
-  const phone = useForm<z.infer<typeof phoneForm>>({
-    resolver: zodResolver(phoneForm),
-    defaultValues: { phone: challenge?.phone || "" },
+  const accountIdentifier = useForm<z.infer<typeof identifierForm>>({
+    resolver: zodResolver(identifierForm),
+    defaultValues: { identifier: challenge?.identifier || challenge?.phone || "" },
   });
   const otp = useForm<z.infer<typeof otpForm>>({
     resolver: zodResolver(otpForm),
@@ -126,10 +155,10 @@ export function AuthDesktopPage() {
     setShow(false);
     login.clearErrors();
     registration.clearErrors();
-    phone.clearErrors();
+    accountIdentifier.clearErrors();
     otp.clearErrors();
     reset.clearErrors();
-  }, [path, login.clearErrors, registration.clearErrors, phone.clearErrors, otp.clearErrors, reset.clearErrors]);
+  }, [path, login.clearErrors, registration.clearErrors, accountIdentifier.clearErrors, otp.clearErrors, reset.clearErrors]);
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
@@ -143,15 +172,28 @@ export function AuthDesktopPage() {
           ApiEnvelope<{
             deliveryStatus: Challenge["deliveryStatus"] | "EXPIRED";
             expired: boolean;
+            channelDelivery?: Challenge["channelDelivery"];
           }>
         >(`/api/v1/auth/otp/${challenge.challengeId}/status`);
         if (!active) return;
-        if (result.data.deliveryStatus === "FAILED") {
+        if (result.data.deliveryStatus !== "EXPIRED") {
           setChallenge((current) =>
-            current ? { ...current, deliveryStatus: "FAILED" } : current,
+            current
+              ? {
+                  ...current,
+                  deliveryStatus: result.data.deliveryStatus as Challenge["deliveryStatus"],
+                  ...(result.data.channelDelivery
+                    ? { channelDelivery: result.data.channelDelivery }
+                    : {}),
+                }
+              : current,
           );
+        }
+        if (result.data.deliveryStatus === "FAILED") {
           setError(
-            "WhatsApp could not deliver this verification message. Request a new code or use another login method.",
+            signupOtp
+              ? "Neither verification channel accepted this code. Request a new code."
+              : "The authorized delivery channel could not accept this verification message. Request a new code or use another login method.",
           );
         }
       } catch {
@@ -165,7 +207,7 @@ export function AuthDesktopPage() {
       active = false;
       window.clearInterval(timer);
     };
-  }, [otpView, challenge?.challengeId]);
+  }, [otpView, signupOtp, challenge?.challengeId]);
   function clearChallenge(resetState = true) {
     setPreview(null);
     sessionStorage.removeItem("gfu_auth_challenge");
@@ -174,6 +216,15 @@ export function AuthDesktopPage() {
   }
   function finish(response: AuthResponse, fromSignup = false) {
     setAccessToken(response.data.accessToken);
+    if (response.data.session) {
+      queryClient.setQueryData(["me"], {
+        success: true,
+        data: response.data.session,
+      });
+      // Populate assignments/media from the canonical endpoint without making
+      // the first dashboard render wait for that network round trip.
+      void queryClient.invalidateQueries({ queryKey: ["me"] });
+    }
     setRole(
       response.data.user.activeRole === "GYM_STAFF"
         ? "GYM_OWNER"
@@ -206,15 +257,18 @@ export function AuthDesktopPage() {
       setBusy(false);
     }
   }
-  async function requestCode(number: string, purpose: Challenge["purpose"]) {
+  async function requestCode(identifier: string, purpose: Challenge["purpose"]) {
     await run(async () => {
       const r = await apiRequest<
         ApiEnvelope<{
           challengeId: string;
           maskedPhone: string;
+          maskedEmail?: string;
+          dualDelivery?: boolean;
+          channelDelivery?: Challenge["channelDelivery"];
           expiresInSeconds: number;
           resendInSeconds: number;
-          deliveryStatus: "SUBMITTED" | "SIMULATED";
+          deliveryStatus: Challenge["deliveryStatus"];
           developmentPreview?: { code: string; simulated: true };
         }>
       >(
@@ -224,14 +278,17 @@ export function AuthDesktopPage() {
         {
           method: "POST",
           body: JSON.stringify({
-            phone: number,
+            identifier,
           }),
         },
       );
       const next: Challenge = {
         challengeId: r.data.challengeId,
-        phone: number,
+        identifier,
         maskedPhone: r.data.maskedPhone,
+        maskedEmail: r.data.maskedEmail,
+        dualDelivery: r.data.dualDelivery,
+        channelDelivery: r.data.channelDelivery,
         purpose,
         expiresAt: Date.now() + r.data.expiresInSeconds * 1000,
         resendAt: Date.now() + r.data.resendInSeconds * 1000,
@@ -252,9 +309,12 @@ export function AuthDesktopPage() {
           challengeId: string;
           operationId: string;
           maskedPhone: string;
+          maskedEmail?: string;
+          dualDelivery?: boolean;
+          channelDelivery?: Challenge["channelDelivery"];
           expiresInSeconds: number;
           resendInSeconds: number;
-          deliveryStatus: "SUBMITTED" | "SIMULATED";
+          deliveryStatus: Challenge["deliveryStatus"];
           developmentPreview?: { code: string; simulated: true };
         }>
       >("/api/v1/auth/signup/resend", {
@@ -266,6 +326,9 @@ export function AuthDesktopPage() {
         operationId: r.data.operationId,
         phone: challenge!.phone,
         maskedPhone: r.data.maskedPhone,
+        maskedEmail: r.data.maskedEmail,
+        dualDelivery: r.data.dualDelivery,
+        channelDelivery: r.data.channelDelivery,
         purpose: "SIGNUP",
         expiresAt: Date.now() + r.data.expiresInSeconds * 1000,
         resendAt: Date.now() + r.data.resendInSeconds * 1000,
@@ -389,10 +452,13 @@ export function AuthDesktopPage() {
                     challengeId: string;
                     operationId: string;
                     maskedPhone: string;
+                    maskedEmail?: string;
+                    dualDelivery?: boolean;
+                    channelDelivery?: Challenge["channelDelivery"];
                     expiresInSeconds: number;
                     resendInSeconds: number;
-                    deliveryStatus: "SUBMITTED" | "SIMULATED";
-          developmentPreview?: { code: string; simulated: true };
+                    deliveryStatus: Challenge["deliveryStatus"];
+                    developmentPreview?: { code: string; simulated: true };
                   }>
                 >("/api/v1/auth/register", {
                     method: "POST",
@@ -403,6 +469,9 @@ export function AuthDesktopPage() {
                   operationId: r.data.operationId,
                   phone: values.phone,
                   maskedPhone: r.data.maskedPhone,
+                  maskedEmail: r.data.maskedEmail,
+                  dualDelivery: r.data.dualDelivery,
+                  channelDelivery: r.data.channelDelivery,
                   purpose: "SIGNUP",
                   expiresAt: Date.now() + r.data.expiresInSeconds * 1000,
                   resendAt: Date.now() + r.data.resendInSeconds * 1000,
@@ -458,7 +527,7 @@ export function AuthDesktopPage() {
               <small id="signup-phone-error" role={registration.formState.errors.phone ? "alert" : undefined}>{registration.formState.errors.phone?.message}</small>
             </label>
             <p className="auth-hint">
-              India (+91) is selected by default. Choose another country format when needed. We will send a six-digit verification code to this WhatsApp number.
+              India (+91) is selected by default. Choose another country when needed. GETFIT4U requests one six-digit code for this WhatsApp number and your signup email when secure dual delivery is enabled.
             </p>
             <label className="field">
               <span>Password</span>
@@ -485,7 +554,7 @@ export function AuthDesktopPage() {
               <small>{registration.formState.errors.confirm?.message}</small>
             </label>
             <button className="btn btn-primary auth-submit" disabled={busy}>
-              {busy ? "Submitting to WhatsApp…" : "Send WhatsApp OTP"}
+              {busy ? "Requesting code…" : "Send verification code"}
             </button>
             <p className="auth-switch">
               Already have an account?{" "}
@@ -606,12 +675,49 @@ export function AuthDesktopPage() {
                 label="Back to change phone number"
               />
             )}
-            <h1>{challenge!.deliveryStatus === "SIMULATED" ? (signupOtp ? "Verify test signup" : "Verify test login") : "Check WhatsApp"}</h1>
+            <h1>{challenge!.deliveryStatus === "SIMULATED" ? (signupOtp ? "Verify test signup" : "Verify test login") : "Enter verification code"}</h1>
             {challenge!.deliveryStatus === "SIMULATED" ? <section className="state-card" aria-label="Development verification">
               <strong>Development only — test verification code</strong>
               <p>No WhatsApp message was sent. No email was sent. Enter the test code below to continue.</p>
               {preview?.challengeId === challenge!.challengeId && remaining > 0 ? <><output>{preview.code}</output><p>Expires in: {remaining}s</p></> : <p>The preview is unavailable after reloading. Request a new code when the resend timer allows.</p>}
-            </section> : <p>Enter the six-digit verification code for <strong>{challenge!.maskedPhone}</strong>. Meta accepted the request; delivery is tracked separately.</p>}
+            </section> : signupOtp && challenge!.dualDelivery ? (
+              <div className="auth-otp-destinations">
+                <p>
+                  {challenge!.channelDelivery?.mobile?.status === "FAILED" &&
+                  otpChannelAccepted(challenge!.channelDelivery?.email?.status)
+                    ? "WhatsApp could not accept this request, so your six-digit code was submitted by email."
+                    : challenge!.channelDelivery?.email?.status === "FAILED" &&
+                        otpChannelAccepted(challenge!.channelDelivery?.mobile?.status)
+                      ? "Email could not accept this request, so your six-digit code was submitted by WhatsApp."
+                      : "We requested the same six-digit code for both signup contacts:"}
+                </p>
+                <p><strong>Mobile:</strong> {challenge!.maskedPhone}</p>
+                <p><strong>Email:</strong> {challenge!.maskedEmail}</p>
+                <p>Use the code from either eligible channel. A submitted request is not a delivery confirmation.</p>
+              </div>
+            ) : (
+              <p>
+                Enter the six-digit verification code requested for{" "}
+                <strong>
+                  {challenge!.maskedEmail ||
+                    challenge!.maskedPhone ||
+                    "your verified account contact"}
+                </strong>
+                .
+                {recovery
+                  ? " Check your verified email and WhatsApp channels. After verification, you can create a new password."
+                  : signupOtp
+                    ? " Check the configured mobile channel."
+                    : " Check your verified email and WhatsApp channels. GETFIT4U uses only contacts already enrolled for this account."}
+              </p>
+            )}
+            {signupOtp && challenge!.dualDelivery && challenge!.channelDelivery && (
+              <p className="auth-hint" role="status">
+                Mobile request: {challenge!.channelDelivery.mobile?.status?.toLowerCase() || "pending"}
+                {" · "}
+                Email request: {challenge!.channelDelivery.email?.status?.toLowerCase() || "pending"}
+              </p>
+            )}
             <label className="field">
               <span>Verification code</span>
               <input
@@ -634,7 +740,10 @@ export function AuthDesktopPage() {
                 disabled={busy || resend > 0}
                 onClick={() => signupOtp
                   ? resendSignupCode()
-                  : requestCode(challenge!.phone, challenge!.purpose)}
+                  : requestCode(
+                      challenge!.identifier || challenge!.phone || "",
+                      challenge!.purpose,
+                    )}
               >
                 {resend ? `Resend OTP in ${resend}s` : "Resend OTP"}
               </button>
@@ -650,36 +759,36 @@ export function AuthDesktopPage() {
           <form
             key="phone"
             noValidate
-            onSubmit={phone.handleSubmit((values) => {
-              if (invalidPhoneInput.current) {
-                phone.setError("phone", { message: "Enter a valid mobile number." }, { shouldFocus: true });
-                return;
-              }
-              return requestCode(values.phone, forgot ? "ACCOUNT_RECOVERY" : "LOGIN");
-            })}
+            onSubmit={accountIdentifier.handleSubmit((values) =>
+              requestCode(
+                values.identifier,
+                forgot ? "ACCOUNT_RECOVERY" : "LOGIN",
+              ),
+            )}
           >
             <BackIconLink
               className="auth-step-back"
               to={authLink("/auth/login")}
               label="Back to login"
             />
-            <h1>{forgot ? "Recover your account" : "Continue with phone"}</h1>
+            <h1>{forgot ? "Recover your account" : "Continue with OTP"}</h1>
             <p>
               {forgot
-                ? "Use the phone number saved on your account. Accounts without a phone number need support assistance."
-                : "Enter the WhatsApp number on your existing active account. GETFIT4U will send a six-digit code from its platform sender."}
+                ? "Enter the verified email address or mobile number saved on your account. We will send one recovery code through its eligible channels."
+                : "Enter the verified email address or mobile number on your active account. GETFIT4U will request one six-digit code through its eligible email and WhatsApp channels."}
             </p>
             <label className="field">
-              <span>Phone number</span>
-              <Controller name="phone" control={phone.control} render={({ field }) =>
-                <PhoneInput name={field.name} ref={field.ref} value={field.value} onBlur={field.onBlur} required
-                  onValidityChange={invalid => { invalidPhoneInput.current = invalid; }}
-                  onValueChange={value => { phone.clearErrors("phone"); field.onChange(value); }} />
-              } />
-              <small>{phone.formState.errors.phone?.message}</small>
+              <span>Email or phone number</span>
+              <input
+                autoComplete="username"
+                inputMode="email"
+                placeholder="you@example.com or +91 98765 43210"
+                {...accountIdentifier.register("identifier")}
+              />
+              <small>{accountIdentifier.formState.errors.identifier?.message}</small>
             </label>
             <button className="btn btn-primary auth-submit" disabled={busy}>
-              {busy ? "Submitting to WhatsApp…" : "Send WhatsApp OTP"}
+              {busy ? "Requesting code…" : forgot ? "Send recovery code" : "Send login code"}
             </button>
             {forgot && (
               <Link className="auth-switch" to="/contact">
@@ -746,7 +855,7 @@ export function AuthDesktopPage() {
               to={authLink("/auth/phone")}
               state={location.state}
             >
-              Login with WhatsApp OTP
+              Login with email or phone OTP
             </Link>
             <p className="auth-switch">
               New to GETFIT4U?{" "}

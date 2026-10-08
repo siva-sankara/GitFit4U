@@ -24,6 +24,10 @@
 | `WHATSAPP_CREDENTIAL_ENCRYPTION_KEY` | WhatsApp | Independent server-only key used to encrypt tenant access tokens at rest |
 | `WHATSAPP_API_VERSION`, `WHATSAPP_DEFAULT_LANGUAGE`, `WHATSAPP_WEBHOOK_RETENTION_DAYS`, `WHATSAPP_WORKER_ENABLED` | WhatsApp operations | Version pin, defaults, retention and dedicated-worker controls |
 | `WHATSAPP_AUTH_TEMPLATE_NAME`, `WHATSAPP_AUTH_TEMPLATE_LANGUAGE` | WhatsApp authentication | Approved platform `AUTHENTICATION` template name and exact language code for signup/login/recovery OTPs |
+| `AUTH_OTP_DUAL_DELIVERY_ENABLED` | Authentication OTP | Feature flag for the shared signup/login code sent through authorized mobile and Microsoft 365 channels; default `false` |
+| `AUTH_OTP_DELIVERY_ENCRYPTION_KEY` | Authentication OTP | Backend-only key, independent from `AUTH_OTP_HMAC_SECRET`, for short-lived delivery envelopes |
+| `M365_TENANT_ID`, `M365_CLIENT_ID`, `M365_CLIENT_SECRET` | Authentication OTP email | Microsoft Entra app-only credential for `GETFIT4U OTP Mailer`; the secret variable contains the secret value, never its ID |
+| `M365_SENDER_MAILBOX`, `M365_FROM_EMAIL`, `M365_FROM_NAME`, `M365_REPLY_TO` | Authentication OTP email | Fixed Exchange Online sender identity; mailbox/from are `support@getfit4u.in` |
 | `OBJECT_STORAGE_ENDPOINT`, `OBJECT_STORAGE_BUCKET`, `OBJECT_STORAGE_ACCESS_KEY`, `OBJECT_STORAGE_SECRET_KEY`, `OBJECT_STORAGE_REGION` | Uploads | S3-compatible storage |
 | `LOG_LEVEL` | Yes | Structured log threshold |
 

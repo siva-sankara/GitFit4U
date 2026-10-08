@@ -10,6 +10,7 @@ import { deliverCampaignBatch } from "./campaignDeliveryService.js";
 import { scheduleMembershipReminders } from "./membershipReminderService.js";
 import { scheduleClassReminders } from "./classReminderService.js";
 import { cleanupUnusedClassImages } from "./classMediaCleanupService.js";
+import { deliverAuthOtpDeliveries } from "./authOtpDeliveryService.js";
 let running = false;
 let followCleanupCursor: string | undefined;
 export async function maintainRecords() {
@@ -17,6 +18,7 @@ export async function maintainRecords() {
   running = true;
   try {
     const now = new Date();
+    await deliverAuthOtpDeliveries(20, now);
     await deliverTransactionalEmails();
     await WorkoutAssignment.updateMany(
       { status: "SCHEDULED", startsAt: { $lte: now } },

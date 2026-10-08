@@ -67,15 +67,24 @@ sessionSchema.index({ userId: 1, revokedAt: 1 });
 const otpChallengeSchema = new Schema(
   {
     publicId: { type: String, required: true, unique: true },
-    phone: { type: String, required: true, index: true },
+    phone: { type: String, index: true },
+    subjectHash: { type: String, select: false, index: true },
     purpose: { type: String, enum: ["SIGNUP", "LOGIN", "STEP_UP", "ACCOUNT_RECOVERY"], default: "LOGIN" },
     pendingOperationId: { type: Schema.Types.ObjectId, ref: "PendingAuthOperation", index: true },
+    userId: { type: Schema.Types.ObjectId, ref: "User", index: true },
+    emailHash: { type: String, select: false, index: true },
+    dualDelivery: { type: Boolean, default: false },
+    mobileDelivery: { type: Boolean, default: true },
+    emailDelivery: { type: Boolean, default: false },
+    deliveryVersion: { type: Number, default: 1 },
     codeHash: { type: String, required: true, select: false },
     requestIpHash: { type: String, required: true, select: false },
     attempts: { type: Number, default: 0 },
     maxAttempts: { type: Number, default: 5 },
     expiresAt: { type: Date, required: true },
     resendAvailableAt: { type: Date, required: true },
+    resendLeaseId: String,
+    resendLeaseUntil: Date,
     consumedAt: Date,
     providerMessageId: { type: String, unique: true, sparse: true, index: true },
     deliveryStatus: {
@@ -87,13 +96,58 @@ const otpChallengeSchema = new Schema(
     providerErrorCode: String,
     submittedAt: Date,
     failedAt: Date,
+    channelDelivery: {
+      mobile: { status: String, providerReference: String, lastErrorCode: String, acceptedAt: Date },
+      email: { status: String, providerReference: String, lastErrorCode: String, acceptedAt: Date },
+    },
     purgeAt: { type: Date, required: true },
   },
   { timestamps: true }
 );
 otpChallengeSchema.index({ purgeAt: 1 }, { expireAfterSeconds: 0 });
 otpChallengeSchema.index({ phone: 1, purpose: 1, createdAt: -1 });
+otpChallengeSchema.index({ subjectHash: 1, purpose: 1, createdAt: -1 });
 otpChallengeSchema.index({ requestIpHash: 1, createdAt: -1 });
+
+const authOtpDeliverySchema = new Schema(
+  {
+    publicId: { type: String, required: true, unique: true },
+    challengeId: { type: Schema.Types.ObjectId, ref: "OtpChallenge", required: true, index: true },
+    challengePublicId: { type: String, required: true, index: true },
+    channel: { type: String, enum: ["MOBILE", "EMAIL"], required: true },
+    destinationHash: { type: String, required: true, select: false },
+    encryptedPayload: { type: String, required: true, select: false },
+    status: {
+      type: String,
+      enum: [
+        "QUEUED",
+        "SENDING",
+        "SUBMITTED",
+        "SENT",
+        "DELIVERED",
+        "READ",
+        "FAILED",
+        "UNKNOWN",
+        "CANCELLED",
+      ],
+      default: "QUEUED",
+      index: true,
+    },
+    attempts: { type: Number, default: 0 },
+    nextAttemptAt: { type: Date, default: Date.now },
+    leaseUntil: Date,
+    leaseToken: String,
+    providerReference: String,
+    lastErrorCode: String,
+    acceptedAt: Date,
+    expiresAt: { type: Date, required: true },
+    purgeAt: { type: Date, required: true },
+  },
+  { timestamps: true },
+);
+authOtpDeliverySchema.index({ challengeId: 1, channel: 1 }, { unique: true });
+authOtpDeliverySchema.index({ status: 1, nextAttemptAt: 1, leaseUntil: 1 });
+authOtpDeliverySchema.index({ purgeAt: 1 }, { expireAfterSeconds: 0 });
 
 const pendingAuthOperationSchema = new Schema(
   {
@@ -132,5 +186,6 @@ export const AuthIdentity = models.AuthIdentity || model("AuthIdentity", authIde
 export const RoleAssignment = models.RoleAssignment || model("RoleAssignment", roleAssignmentSchema);
 export const Session = models.Session || model("Session", sessionSchema);
 export const OtpChallenge = models.OtpChallenge || model("OtpChallenge", otpChallengeSchema);
+export const AuthOtpDelivery = models.AuthOtpDelivery || model("AuthOtpDelivery", authOtpDeliverySchema);
 export const PendingAuthOperation = models.PendingAuthOperation || model("PendingAuthOperation", pendingAuthOperationSchema);
 export const PasswordResetGrant = models.PasswordResetGrant || model("PasswordResetGrant", passwordResetGrantSchema);

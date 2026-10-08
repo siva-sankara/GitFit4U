@@ -305,6 +305,15 @@
 .otp-input { width: 100%; min-height: 58px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-muted); padding: 0 16px; outline: 0; text-align: center; font-size: 1.35rem; font-weight: 800; letter-spacing: .35em; }
 .otp-resend { display: flex; align-items: center; justify-content: space-between; margin-top: 10px; color: var(--text-muted); font-size: var(--text-size-small); }
 .otp-resend button { display: flex; align-items: center; gap: 5px; background: transparent; color: var(--brand-text); cursor: pointer; }
+.auth-otp-destinations {
+  display: grid;
+  gap: 6px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--surface) 88%, var(--brand) 12%);
+}
+.auth-otp-destinations p { margin: 0; overflow-wrap: anywhere; }
 .role-cards { display: grid; gap: 4px; }
 .auth-footer { display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 30px; border-top: 1px solid var(--border); padding-top: 18px; color: var(--text-muted); font-size: var(--text-size-caption); }
 
@@ -1214,3 +1223,15 @@ section.location-picker { grid-template-columns:minmax(0,1fr); color:var(--text)
   .landing-owner-cta { grid-template-columns: minmax(0,1fr); gap: 20px; }
   .landing-owner-cta > .btn { grid-column: auto; justify-self: stretch; white-space: normal; }
 }
+
+/* Branded recovery surface for route/chunk failures. */
+.route-error-shell { display: grid; min-height: 100vh; place-items: center; padding: 24px; background: radial-gradient(circle at 50% 0%,color-mix(in srgb,var(--brand) 16%,transparent),transparent 34rem),var(--bg); }
+.route-error-card { display: grid; width: min(560px,100%); justify-items: center; gap: 14px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface-solid); box-shadow: var(--shadow-lg); padding: clamp(32px,6vw,56px); text-align: center; }
+.route-error-card h1,.route-error-card p { margin: 0; }
+.route-error-card h1 { font-size: var(--text-size-page); line-height: 1.2; }
+.route-error-card > p:not(.eyebrow) { max-width: 440px; color: var(--text-secondary); }
+.route-error-icon { display: grid; width: 58px; height: 58px; place-items: center; border-radius: 18px; background: color-mix(in srgb,var(--warning) 14%,transparent); color: var(--warning); }
+.route-error-card .eyebrow { color: var(--brand-text); font-size: var(--text-size-caption); font-weight: 800; letter-spacing: .14em; }
+.route-error-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: 8px; }
+.route-error-actions .btn { display: inline-flex; min-width: 160px; align-items: center; justify-content: center; gap: 8px; }
+@media (max-width: 520px) { .route-error-actions { width: 100%; } .route-error-actions .btn { width: 100%; } }

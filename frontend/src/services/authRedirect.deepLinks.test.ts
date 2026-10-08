@@ -62,3 +62,11 @@ it("keeps every published policy public for every role, including owner onboardi
     expect(safeReturnTo(path)).toBe(path);
   }
 });
+it("keeps gym discovery in the member workspace and returns owners to their dashboard", () => {
+  expect(workspacePath("USER", "/explore?q=Hyderabad")).toBe(
+    "/app/explore?q=Hyderabad",
+  );
+  expect(workspacePath("GYM_OWNER", "/explore?q=Hyderabad")).toBe(
+    "/owner/dashboard",
+  );
+});

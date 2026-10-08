@@ -689,7 +689,7 @@ export function OwnerMembersPage() {
                   />
                 </th>
                 <th>Member</th>
-                {/* <th>Trainer</th> */}
+                <th>Trainer</th>
                 <th>Contact</th>
                 <th>Plan / Access</th>
                 <th>Attendance</th>
@@ -738,7 +738,7 @@ export function OwnerMembersPage() {
                         </div>
                       </div>
                     </td>
-                    {/* <td data-label="Trainer">
+                    <td data-label="Trainer">
                       <strong>{row.assignedTrainerId?.name || "Not assigned"}</strong>
                       {row.assignedTrainerId && (
                         <small className="member-trainer-phone">
@@ -753,7 +753,7 @@ export function OwnerMembersPage() {
                           {canManage ? row.assignedTrainerId ? "View / Edit" : "Assign trainer" : "View member"}
                         </Link>
                       </small>
-                    </td> */}
+                    </td>
                     <td data-label="Contact">
                       <span className="member-contact-line">
                         <Phone size={15} aria-hidden="true" />

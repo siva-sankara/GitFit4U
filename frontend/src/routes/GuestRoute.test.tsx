@@ -267,6 +267,13 @@ it("still restores and validates a refresh-cookie session when opening a protect
   expect(mocks.refresh).toHaveBeenCalledOnce();
   expect(mocks.request).toHaveBeenCalledWith("/api/v1/auth/me");
 });
+it("redirects an authenticated gym owner away from public gym discovery", async () => {
+  mocks.request.mockResolvedValue({ data: { context: { role: "GYM_OWNER" } } });
+  await render("/explore?q=nearby");
+  await until(() => host.textContent!.includes("/owner/dashboard"));
+  expect(host.textContent).not.toContain("Public discovery");
+  expect(host.textContent).not.toContain("/owner/explore");
+});
 it("restores an HttpOnly-cookie session before showing login even without a storage hint", async () => {
   mocks.token = null;
   mocks.persisted = false;

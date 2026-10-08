@@ -1,6 +1,6 @@
 import { PageHeader } from "../../components/PageHeader";
 import { PageNavigationContext } from "../../components/pageNavigation";
-import { lazy, Suspense, type ReactNode } from "react";
+import { Suspense, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { Activity, CalendarDays, CreditCard, Dumbbell, Flame, Gift, Heart, IdCard, Settings, UserRound, Users } from "lucide-react";
 import { Avatar } from "../../components/Avatar";
@@ -15,9 +15,10 @@ import { ProfileEditor } from "./ProfileEditor";
 import { MemberSubscriptions } from "./MemberSubscriptions";
 import { AttendancePage, type AttendanceSummary } from "./AttendancePage";
 import { UserClassesPage } from "./UserClassesPage";
+import { lazyWithRetry } from "../../services/lazyWithRetry";
 import "../../styles/account-hub.css";
 
-const SocialProfilePage = lazy(() => import("./SocialProfilePage").then(module => ({ default: module.SocialProfilePage })));
+const SocialProfilePage = lazyWithRetry("profile-social", () => import("./SocialProfilePage").then(module => ({ default: module.SocialProfilePage })));
 const sections = [
   { id: "overview", label: "Overview", Icon: UserRound },
   { id: "membership", label: "Membership", Icon: IdCard },

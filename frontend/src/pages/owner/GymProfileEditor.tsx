@@ -84,7 +84,7 @@ export function GymProfileEditor({
             gym.data.data.platformSubscriptionStatus === "ACTIVE" && (
             <Link
               className="btn btn-secondary"
-              to={`/gyms/${gym.data.data.slug}?from=settings`}
+              to={`/owner/gyms/${gym.data.data.slug}?from=settings`}
               state={{ from: "gym-profile-settings" }}
             >
               View public gym page

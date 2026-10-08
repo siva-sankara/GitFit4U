@@ -26,6 +26,8 @@ const userSchema = new Schema(
       sparse: true,
       index: true,
     },
+    phoneVerifiedAt: Date,
+    emailVerifiedAt: Date,
     avatarUrl: { type: String },
     avatarAttachmentId: { type: Schema.Types.ObjectId, ref: "Attachment" },
     social: {
