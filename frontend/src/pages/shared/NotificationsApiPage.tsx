@@ -142,7 +142,7 @@ export function NotificationsApiPage() {
           </button>
         </div>
       </PageHeader>
-      {/* <PushNotificationSettings /> */}
+      <PushNotificationSettings />
       {(read.isError || unread.isError || readAll.isError || remove.isError) && (
         <p className="form-alert" role="alert">
           {read.error?.message ||

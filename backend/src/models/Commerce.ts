@@ -151,6 +151,14 @@ const subscriptionSchema = new Schema(
       },
     ],
     latestPaymentId: { type: Schema.Types.ObjectId, ref: "Payment" },
+    adminAuthorization: {
+      authorizedBy: { type: Schema.Types.ObjectId, ref: "User" },
+      authorizedAt: Date,
+      reason: String,
+      paymentStatus: { type: String, enum: ["PENDING", "PAID_OFFLINE", "PAID_ONLINE"] },
+      dueAt: Date,
+      settledAt: Date,
+    },
   },
   { timestamps: true, versionKey: "version", optimisticConcurrency: true },
 );

@@ -55,6 +55,9 @@ function applyAccessToken(token: string | null) {
   );
 }
 export function setAccessToken(token: string | null) {
+  // Completing login can confirm the token already published by its cookie
+  // handshake. Do not invalidate the profile request started by that event.
+  if (token && token === accessToken) return;
   const changedSession = tokenIdentity(token) !== tokenIdentity(accessToken);
   authEpoch++;
   writeLocal(durableSessionKey, token ? "1" : null);

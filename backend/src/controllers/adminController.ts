@@ -19,9 +19,9 @@ import { AppError } from "../utils/AppError.js";
 import {
   registrationStatus,
   editableRegistrationStates,
-  registrationPayment,
 } from "../services/registrationService.js";
 import { env } from "../config/env.js";
+import { registrationActivationEligibility } from "../services/gymActivationService.js";
 
 export async function dashboard(req: Request, res: Response) {
   const now = new Date();
@@ -166,12 +166,12 @@ export async function setGymStatus(req: Request, res: Response) {
     }).session(session);
     if (
       status === "ACTIVE" &&
-      (!registration || !(await registrationPayment(registration, session)))
+      (!registration || !(await registrationActivationEligibility(registration, session)))
     )
       throw new AppError(
         409,
         "GYM_NOT_ELIGIBLE",
-        "A verified captured registration payment and active platform subscription are required.",
+        "Choose an active paid subscription, Activate & Record Payment, or Activate — Payment Pending with an authorized access term.",
       );
     target.status = status;
     target.suspendedAt = status === "SUSPENDED" ? new Date() : undefined;

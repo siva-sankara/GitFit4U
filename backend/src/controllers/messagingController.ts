@@ -16,6 +16,7 @@ import { withGymMedia } from "../services/gymMediaService.js";
 import { withUserMedia } from "../services/userMediaService.js";
 import { lockAttachments } from "../services/mediaBindingService.js";
 import { Gym } from "../models/Gym.js";
+import { z } from "zod";
 
 export async function authorizedConversation(
   publicId: string,
@@ -26,7 +27,7 @@ export async function authorizedConversation(
   if (session) query.session(session);
   const conversation = await query.populate(
     "supportTicketId",
-    "requesterId status subject",
+    "requesterId status subject assignedTo",
   );
   if (!conversation)
     throw new AppError(
@@ -56,11 +57,17 @@ export async function listConversations(req: Request, res: Response) {
   const regex = q ? new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i") : null;
   let migratedIds: any[] = [];
   let supportTotal = 0;
+  let supportSummary: Record<string, number> | undefined;
   if (supportOnly) {
+    const filters = z.object({ status: z.enum(["OPEN", "IN_PROGRESS", "WAITING_FOR_USER", "RESOLVED", "CLOSED"]).optional(),
+      category: z.string().max(60).optional() }).parse({ status: req.query.status || undefined, category: req.query.category || undefined });
     const ticketFilter: any = {
       ...(req.auth!.role === "ADMIN" ? {} : { requesterId: req.auth!.userId }),
-      ...(regex ? { subject: regex } : {}),
+      ...(regex ? { $or: [{ subject: regex }, { publicId: regex }] } : {}),
+      ...(filters.category ? { category: filters.category } : {}),
     };
+    supportSummary = Object.fromEntries(await Promise.all(["OPEN", "IN_PROGRESS", "WAITING_FOR_USER", "RESOLVED", "CLOSED"].map(async status => [status, await SupportTicket.countDocuments({ ...ticketFilter, status })])));
+    if (filters.status) ticketFilter.status = filters.status;
     const tickets = await SupportTicket.find(ticketFilter)
       .sort({ updatedAt: -1, _id: -1 })
       .skip(skip)
@@ -115,7 +122,7 @@ export async function listConversations(req: Request, res: Response) {
     Conversation.find(filter)
       .populate("participants", "publicId name avatarUrl avatarAttachmentId")
       .populate("gymId", "publicId name logoUrl logoAttachmentId")
-      .populate("supportTicketId", "publicId subject status priority requesterId createdAt updatedAt")
+      .populate({ path: "supportTicketId", select: "publicId subject category status priority requesterId assignedTo createdAt updatedAt", populate: { path: "assignedTo", select: "name publicId" } })
       .populate("lastMessageId", "text createdAt deletedAt senderId")
       .sort({ lastMessageAt: -1, _id: -1 })
       .skip(supportOnly ? 0 : skip)
@@ -159,7 +166,7 @@ export async function listConversations(req: Request, res: Response) {
         row.gymId,
       unreadCount: unread.get(String(row._id)) || 0,
     })),
-    meta: pageMeta(page, limit, total),
+    meta: { ...pageMeta(page, limit, total), ...(supportSummary ? { statusCounts: supportSummary } : {}) },
   });
 }
 
@@ -220,6 +227,9 @@ export async function conversationDetails(req: Request, res: Response) {
     String(req.params.id),
     req.auth!,
   );
+  if (conversation.type === "SUPPORT") await conversation.populate({ path: "supportTicketId",
+    select: "publicId requesterId subject category priority status related activity assignedTo createdAt updatedAt",
+    populate: [{ path: "assignedTo", select: "name publicId" }, { path: "activity.actorId", select: "name publicId" }] });
   await conversation.populate(
     "participants",
     "publicId name avatarUrl avatarAttachmentId",
@@ -366,6 +376,15 @@ export async function sendMessage(req: Request, res: Response) {
     if (conversation.type === "SUPPORT" && ["RESOLVED", "CLOSED"].includes(conversation.supportTicketId?.status))
       throw new AppError(409, "SUPPORT_CLOSED", "Reopen this support conversation before replying.");
   }
+  if (conversation.type === "SUPPORT" && session) {
+    const ticket = await SupportTicket.findOneAndUpdate({ _id: conversation.supportTicketId._id,
+      status: { $nin: ["CLOSED", "RESOLVED"] } }, { $inc: { revision: 1 } }, { session, returnDocument: "after" });
+    if (!ticket) throw new AppError(409, "SUPPORT_CLOSED", "Reopen this ticket before replying.");
+    const nextStatus = req.auth!.role === "ADMIN" ? "WAITING_FOR_USER" : "IN_PROGRESS";
+    if (ticket.status !== nextStatus) ticket.activity.push({ type: "STATUS", actorId: req.auth!.userId, from: ticket.status, to: nextStatus, at: new Date() });
+    ticket.status = nextStatus;
+    await ticket.save({ session });
+  }
   const mediaQuery = attachmentKeys.length
     ? Attachment.find({
         ownerId: req.auth!.userId,
@@ -403,12 +422,22 @@ export async function sendMessage(req: Request, res: Response) {
     attachments,
     readBy: [{ userId: req.auth!.userId, at: new Date() }],
   };
-  return session ? (await Message.create([input], { session }))[0] : await Message.create(input);
+  const saved = session ? (await Message.create([input], { session }))[0] : await Message.create(input);
+  if (conversation.type === "SUPPORT" && session) {
+    await Conversation.updateOne({ _id: conversation._id }, { $addToSet: { participants: req.auth!.userId } }, { session });
+    const ticket = conversation.supportTicketId;
+    const recipients = req.auth!.role === "ADMIN" ? [ticket.requesterId] : ticket.assignedTo ? [ticket.assignedTo] :
+      (await User.find({ roles: "ADMIN", status: "ACTIVE" }).select("_id").limit(100).session(session)).map(user => user._id);
+    for (const userId of recipients) if (String(userId) !== req.auth!.userId)
+      await emitDomainEvent({ event: "support.updated", userId, gymId: conversation.gymId, entityId: String(ticket._id),
+        occurrenceId: `reply:${saved.publicId}`, actionUrl: "/notifications", session });
+  }
+  return saved;
   };
   let message,
     created = true;
   try {
-    message = attachmentKeys.length
+    message = attachmentKeys.length || conversation.type === "SUPPORT"
       ? await mongoose.connection.transaction((session) => persist(session))
       : await persist();
   } catch (error: any) {
@@ -448,33 +477,9 @@ export async function sendMessage(req: Request, res: Response) {
       },
     },
   );
-  if (conversation.type === "SUPPORT" && conversation.supportTicketId) {
-    await Conversation.updateOne(
-      { _id: conversation._id },
-      { $addToSet: { participants: req.auth!.userId } },
-    );
-    await SupportTicket.updateOne(
-      { _id: conversation.supportTicketId._id },
-      {
-        $set: {
-          updatedAt: new Date(),
-          status:
-            req.auth!.role === "ADMIN" ? "WAITING_FOR_USER" : "IN_PROGRESS",
-        },
-      },
-    );
-  }
-  const recipients =
-    conversation.type === "SUPPORT" && conversation.supportTicketId
-      ? req.auth!.role === "ADMIN"
-        ? [conversation.supportTicketId.requesterId]
-        : (
-            await User.find({ roles: "ADMIN", status: "ACTIVE" })
-              .select("_id")
-              .limit(100)
-              .lean()
-          ).map((user) => user._id)
-      : conversation.participants;
+  // Support replies and notifications commit together above; ordinary chat
+  // retains its existing sender/client-message dedupe path.
+  const recipients = conversation.type === "SUPPORT" ? [] : conversation.participants;
   await Promise.all(
     recipients
       .filter((id: any) => String(id) !== req.auth!.userId)
@@ -486,7 +491,8 @@ export async function sendMessage(req: Request, res: Response) {
               : "message.received",
           userId,
           gymId: conversation.gymId,
-          entityId: message!.publicId,
+          entityId: conversation.type === "SUPPORT" ? String(conversation.supportTicketId._id) : message!.publicId,
+          occurrenceId: conversation.type === "SUPPORT" ? `reply:${message!.publicId}` : undefined,
           actionUrl: `/messages/${conversation.publicId}`,
         }),
       ),
@@ -580,52 +586,6 @@ export async function deleteMessage(req: Request, res: Response) {
     ?.to(`conversation:${conversation.publicId}`)
     .emit("message.deleted", { publicId: data.publicId });
   res.json({ success: true, data });
-}
-
-export async function updateSupportStatus(req: Request, res: Response) {
-  const conversation = await authorizedConversation(
-    String(req.params.id),
-    req.auth!,
-  );
-  const ticket = conversation.supportTicketId;
-  if (!ticket)
-    throw new AppError(
-      400,
-      "NOT_SUPPORT",
-      "This is not a support conversation.",
-    );
-  if (ticket.status === req.body.status)
-    return res.json({ success: true, data: { status: ticket.status } });
-  if (
-    req.auth!.role !== "ADMIN" &&
-    !(
-      req.body.status === "OPEN" &&
-      ["CLOSED", "RESOLVED"].includes(ticket.status)
-    )
-  )
-    throw new AppError(
-      403,
-      "STATUS_FORBIDDEN",
-      "Only support staff can set that status.",
-    );
-  await SupportTicket.updateOne(
-    { _id: ticket._id },
-    { $set: { status: req.body.status } },
-  );
-  await writeAudit(req, {
-    action: "SUPPORT_STATUS_UPDATED",
-    entityType: "SupportTicket",
-    entityId: String(ticket._id),
-    after: { status: req.body.status },
-  });
-  await emitDomainEvent({
-    event: "support.updated",
-    userId: ticket.requesterId,
-    entityId: String(ticket._id),
-    occurrenceId: `${ticket.status}:${req.body.status}:${Date.now()}`,
-    actionUrl: `/messages/${conversation.publicId}`,
-  });
-  res.json({ success: true, data: { status: req.body.status } });
 }
 
 export async function listBroadcasts(req: Request, res: Response) {

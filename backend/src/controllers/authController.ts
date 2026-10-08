@@ -45,6 +45,8 @@ async function loginResponse(
   res: Response,
   user: InstanceType<typeof User>,
 ) {
+  if (user.developmentTestAccount && env.OTP_MODE !== "development_preview")
+    throw new AppError(403, "TEST_ACCOUNT_DISABLED", "Development test accounts are disabled outside the isolated preview server.");
   let role = (user.activeRole || "USER") as Role;
   let hasAccess = ROLES.includes(role) && user.roles?.includes(role);
   let activeGymId: string | undefined;
@@ -153,7 +155,7 @@ export async function register(req: Request, res: Response) {
     });
     res.status(202).json({
       success: true,
-      message: "The verification code was submitted to Meta for WhatsApp delivery.",
+      message: challenge.deliveryStatus === "SIMULATED" ? "Simulated local test verification. No WhatsApp message was sent." : "The verification code was submitted to Meta for WhatsApp delivery.",
       data: { ...challenge, operationId: operation.publicId, purpose: "SIGNUP" },
     });
   } catch (error) {
@@ -187,7 +189,7 @@ export async function resendSignupOtp(req: Request, res: Response) {
   });
   res.status(202).json({
     success: true,
-    message: "A new verification code was submitted to Meta for WhatsApp delivery.",
+    message: challenge.deliveryStatus === "SIMULATED" ? "Simulated local test verification. No WhatsApp message was sent." : "A new verification code was submitted to Meta for WhatsApp delivery.",
     data: { ...challenge, operationId: operation.publicId, purpose: "SIGNUP" },
   });
 }
@@ -245,6 +247,7 @@ export async function verifySignupOtp(req: Request, res: Response) {
           {
             publicId: nanoid(18),
             name: operation.name,
+            developmentTestAccount: verified.simulated === true,
             email: operation.email,
             phone: operation.phone,
             roles: [operation.role],
@@ -267,7 +270,9 @@ export async function verifySignupOtp(req: Request, res: Response) {
             userId: created._id,
             provider: "PHONE",
             providerSubject: operation.phone,
-            verifiedAt: new Date(),
+            verifiedAt: verified.simulated ? undefined : new Date(),
+            verificationSource: verified.simulated ? "DEVELOPMENT_SIMULATION" : "PROVIDER",
+            simulatedAt: verified.simulated ? new Date() : undefined,
           },
         ],
         { session },
@@ -438,12 +443,21 @@ export async function resetPassword(req: Request, res: Response) {
 }
 
 export async function otpRequest(req: Request, res: Response) {
+  if (env.OTP_MODE === "development_preview") {
+    const account = await User.findOne({ phone: normalizePhone(req.body.phone) });
+    if (!account)
+      throw new AppError(403, "SIGNUP_REQUIRED", "Create a local test account before using a test login code.");
+    if (!account.developmentTestAccount || account.status !== "ACTIVE" || account.roles?.includes("ADMIN"))
+      throw new AppError(403, "PREVIEW_ACCOUNT_FORBIDDEN", "Test login codes are available only for active, non-admin local test accounts.");
+  }
   const result = await requestOtp(req.body.phone, "LOGIN", {
     ipAddress: req.ip,
   });
   res.status(202).json({
     success: true,
-    message: "If eligible, the verification code was submitted to Meta for WhatsApp delivery.",
+    message: result.deliveryStatus === "SIMULATED"
+      ? "Local test verification code. No WhatsApp message or email was sent."
+      : "If eligible, the verification code was submitted to Meta for WhatsApp delivery.",
     data: { ...result, purpose: "LOGIN" },
   });
 }
@@ -489,6 +503,8 @@ export async function otpVerify(req: Request, res: Response) {
       "ADMIN_OTP_LOGIN_FORBIDDEN",
       "Administrator accounts must use the existing privileged sign-in and MFA flow.",
     );
+  if (verified.simulated && (!user.developmentTestAccount || env.OTP_MODE !== "development_preview" || !env.OTP_DEV_PREVIEW_ENABLED))
+    throw new AppError(403, "PREVIEW_ACCOUNT_FORBIDDEN", "Test login codes are available only for local test accounts.");
   const existingPhoneIdentity = await AuthIdentity.findOne({
     provider: "PHONE",
     providerSubject: verified.phone,
@@ -502,6 +518,11 @@ export async function otpVerify(req: Request, res: Response) {
       "PHONE_ACCOUNT_CONFLICT",
       "This verified phone identity is linked to another account. Contact support; accounts are never merged automatically.",
     );
+  // The signup-created test identity remains a simulation, never provider proof.
+  if (verified.simulated) {
+    await loginResponse(req, res, user);
+    return;
+  }
   await AuthIdentity.findOneAndUpdate(
     { userId: user._id, provider: "PHONE" },
     {

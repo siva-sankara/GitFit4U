@@ -11,6 +11,7 @@ function fire(type: string, event = new Event(type)) {
 beforeEach(async () => {
   vi.resetModules(); vi.useFakeTimers(); vi.setSystemTime(new Date("2026-09-28T10:00:00Z"));
   sessionStorage.clear(); localStorage.clear(); callbacks = new Map();
+  delete window.__gfuInstallCapture;
   Object.defineProperty(window, "isSecureContext", { configurable: true, value: true });
   Object.defineProperty(navigator, "serviceWorker", { configurable: true, value: {} });
   Object.defineProperty(navigator, "userAgent", { configurable: true, value: "Mozilla Android Chrome" });
@@ -21,7 +22,7 @@ beforeEach(async () => {
   }) as any);
   service = await import("./pwa");
 });
-afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); vi.restoreAllMocks(); });
+afterEach(() => { delete window.__gfuInstallCapture; vi.clearAllTimers(); vi.useRealTimers(); vi.restoreAllMocks(); });
 it("starts one 120-second window on eligible display, not lifecycle startup or route remount", () => {
   service.startPwaLifecycle(false); expect(service.getPwaSnapshot().bannerStartedAt).toBeNull();
   service.beginInstallBanner(); const start = service.getPwaSnapshot().bannerStartedAt;
@@ -80,4 +81,20 @@ it("still expires while in background and allows install instructions on iPhone"
   vi.setSystemTime(Date.now() + 180_000); fire("visibilitychange");
   expect(service.getPwaSnapshot().bannerExpired).toBe(true);
   expect(service.installInstructions("iPhone", 1)).toContain("Open as Web App");
+});
+it("adopts an event captured before the app mounts and retains it after banner expiry", async () => {
+  const prompt = vi.fn().mockResolvedValue(undefined);
+  const captured = Object.assign(new Event("beforeinstallprompt", { cancelable: true }), { prompt, userChoice: Promise.resolve({ outcome: "accepted" as const }) });
+  window.__gfuInstallCapture = { prompt: captured, installed: false };
+  service.startPwaLifecycle(false); service.beginInstallBanner();
+  expect(service.getPwaSnapshot()).toMatchObject({ installState: "ready", installAvailable: true });
+  vi.advanceTimersByTime(120_000); service.startPwaLifecycle(false);
+  expect(service.getPwaSnapshot().bannerExpired).toBe(true);
+  const pending = service.installApp();
+  expect(prompt).toHaveBeenCalledOnce(); // Invoked synchronously in the click gesture.
+  await Promise.all([pending, service.installApp()]);
+  expect(prompt).toHaveBeenCalledOnce(); expect(window.__gfuInstallCapture.prompt).toBeNull();
+  expect(service.getPwaSnapshot().installed).toBe(false);
+  window.__gfuInstallCapture.installed = true; fire("gfu-install-capture");
+  expect(service.getPwaSnapshot()).toMatchObject({ installed: true, installState: "installed" });
 });

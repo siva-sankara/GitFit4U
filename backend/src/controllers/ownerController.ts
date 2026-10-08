@@ -120,6 +120,7 @@ export async function dashboard(req: Request, res: Response) {
             publicId: platform.publicId,
             planId: platform.planId,
             status: platform.status,
+            adminAuthorization: platform.adminAuthorization,
             plan: platform.planSnapshot,
             startsAt: platform.startsAt,
             endsAt: platform.endsAt,

@@ -10,6 +10,7 @@ import {
 import { AppError } from "../utils/AppError.js";
 import { normalizeAccountPhone } from "../utils/accountIdentity.js";
 import { sendWhatsAppAuthenticationOtp } from "./whatsappAuthOtpService.js";
+import { env } from "../config/env.js";
 
 export type OtpPurpose = "SIGNUP" | "LOGIN" | "STEP_UP" | "ACCOUNT_RECOVERY";
 
@@ -47,6 +48,9 @@ export async function requestOtp(
   purpose: OtpPurpose = "LOGIN",
   options: RequestOtpOptions = {},
 ) {
+  const preview = env.OTP_MODE === "development_preview" && env.OTP_DEV_PREVIEW_ENABLED;
+  if (preview && purpose !== "SIGNUP" && purpose !== "LOGIN")
+    throw new AppError(403, "PREVIEW_PURPOSE_FORBIDDEN", "Local test codes are available for signup and login only.");
   const phone = normalizePhone(phoneInput);
   const now = new Date();
   const windowStart = new Date(now.getTime() - OTP_ABUSE_WINDOW_MS);
@@ -84,16 +88,6 @@ export async function requestOtp(
       "Too many verification requests. Please try again later.",
     );
 
-  await OtpChallenge.updateMany(
-    {
-      phone,
-      purpose,
-      ...operationFilter(options.pendingOperationId),
-      consumedAt: null,
-    },
-    { $set: { consumedAt: now } },
-  );
-
   const publicId = nanoid(24);
   const code = randomDigits(6);
   const expiresAt = new Date(now.getTime() + OTP_EXPIRY_MS);
@@ -112,13 +106,13 @@ export async function requestOtp(
   });
 
   try {
-    const sent = await sendWhatsAppAuthenticationOtp(phone, code);
+    const sent = preview ? undefined : await sendWhatsAppAuthenticationOtp(phone, code);
     await OtpChallenge.updateOne(
       { publicId, consumedAt: null },
       {
         $set: {
-          providerMessageId: sent.providerMessageId,
-          deliveryStatus: "SUBMITTED",
+          ...(sent ? { providerMessageId: sent.providerMessageId } : {}),
+          deliveryStatus: preview ? "SIMULATED" : "SUBMITTED",
           submittedAt: new Date(),
         },
       },
@@ -143,12 +137,17 @@ export async function requestOtp(
     throw error;
   }
 
+  // Failed replacements leave the earlier usable code intact. Invalidate only
+  // older challenges for this phone, purpose and signup operation after acceptance.
+  await OtpChallenge.updateMany({ phone, purpose, ...operationFilter(options.pendingOperationId),
+    publicId: { $ne: publicId }, createdAt: { $lte: now }, consumedAt: null }, { $set: { consumedAt: new Date() } });
   return {
     challengeId: publicId,
     maskedPhone: maskPhone(phone),
     expiresInSeconds: OTP_EXPIRY_MS / 1000,
     resendInSeconds: OTP_RESEND_COOLDOWN_MS / 1000,
-    deliveryStatus: "SUBMITTED" as const,
+    deliveryStatus: preview ? "SIMULATED" as const : "SUBMITTED" as const,
+    ...(preview ? { developmentPreview: { code, simulated: true as const } } : {}),
   };
 }
 
@@ -174,6 +173,10 @@ export async function verifyOtp(
       "OTP_INVALID",
       "This verification code is no longer valid.",
     );
+  if (challenge.deliveryStatus === "SIMULATED" &&
+      (env.OTP_MODE !== "development_preview" || !env.OTP_DEV_PREVIEW_ENABLED ||
+       !["SIGNUP", "LOGIN"].includes(challenge.purpose)))
+    throw new AppError(400, "OTP_INVALID", "Development verification is disabled.");
   if (
     options.expectedPurpose &&
     challenge.purpose !== options.expectedPurpose
@@ -255,6 +258,7 @@ export async function verifyOtp(
     );
   return {
     phone: challenge.phone,
+    simulated: challenge.deliveryStatus === "SIMULATED",
     purpose: challenge.purpose as OtpPurpose,
     pendingOperationId: challenge.pendingOperationId
       ? String(challenge.pendingOperationId)

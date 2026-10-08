@@ -7,8 +7,9 @@
   --text-size-section: clamp(1.125rem, 1rem + 0.6vw, 1.5rem);
   --text-size-card: 1.0625rem;
   color-scheme: light;
-  --font-display: "Plus Jakarta Sans", "Inter", "Segoe UI", Arial, sans-serif;
-  --font-body: "Plus Jakarta Sans", "Inter", "Segoe UI", Arial, sans-serif;
+  --font-system: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans", Arial, sans-serif;
+  --font-display: var(--font-system);
+  --font-body: var(--font-system);
   --brand: #84cc16;
   --brand-strong: #65a30d;
   --brand-ink: #07111f;

@@ -142,14 +142,12 @@ function PeopleList({
       {query.error && <p role="alert">{query.error.message}</p>}
       <div className="profile-people">
         {query.data?.data.map((person) => (
-          <Link
+          <div
             key={person.publicId}
-            to={`/profile/${person.publicId}`}
-            onClick={onClose}
           >
             <Avatar user={person} />
-            <span>{person.name || "Member"}</span>
-          </Link>
+            <Link to={`/profile/${person.publicId}`} onClick={onClose}>{person.name || "Member"}</Link>
+          </div>
         ))}
       </div>
       {query.data && !query.data.data.length && <p>No members to show.</p>}
@@ -405,7 +403,7 @@ function ProfileContent({ id }: { id: string }) {
         </button>
       </div>
       <section className="profile-hero">
-        <Avatar user={person} size={96} />
+        <Avatar user={person} variant="profile" />
         <div className="profile-identity">
           <h2>{person.name || "Member"}</h2>
           {person.social?.bio && (
@@ -425,14 +423,14 @@ function ProfileContent({ id }: { id: string }) {
         </div>
         <div className="profile-actions">
           {person.own && <AccountAppSettings />}
-          {person.own && (
+          {/* {person.own && (
             <Link
               className="btn btn-secondary"
               to={`${workspacePrefix(me.data?.data.context.role || "USER")}/security`}
             >
               Account security
             </Link>
-          )}
+          )} */}
           {person.own ? (
             <button
               className="btn btn-secondary"

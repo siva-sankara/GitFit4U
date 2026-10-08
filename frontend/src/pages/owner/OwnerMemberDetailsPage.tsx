@@ -24,7 +24,10 @@ export function OwnerMemberDetailsPage({ id }: { id: string }) {
     session.data?.data.context.permissions.includes("member:write");
   const canReadFinance =
     session.data?.data.context.permissions.includes("finance:read");
-  const canManageAccess = Boolean(canManage && ["GYM_OWNER", "ADMIN"].includes(session.data?.data.context.role || ""));
+  const canManageAccess = Boolean(
+    canManage &&
+    ["GYM_OWNER", "ADMIN"].includes(session.data?.data.context.role || ""),
+  );
   const path = "/api/v1/owner/members/" + encodeURIComponent(id),
     client = useQueryClient();
   const query = useQuery({
@@ -91,7 +94,14 @@ export function OwnerMemberDetailsPage({ id }: { id: string }) {
   });
   function perform() {
     if (action === "deactivate-access" || action === "reactivate-access")
-      update.mutate({ url: path, method: "PATCH", body: { status: action === "deactivate-access" ? "INACTIVE" : "ACTIVE", note: reason } });
+      update.mutate({
+        url: path,
+        method: "PATCH",
+        body: {
+          status: action === "deactivate-access" ? "INACTIVE" : "ACTIVE",
+          note: reason,
+        },
+      });
     else if (action === "archive")
       update.mutate({
         url: path,
@@ -159,7 +169,12 @@ export function OwnerMemberDetailsPage({ id }: { id: string }) {
               <Avatar
                 name={memberName(member)}
                 src={member.contact?.avatarUrl || member.userId?.avatarUrl}
-                thumbnailSrc={member.contact?.avatarThumbnailUrl || (!member.contact?.avatarUrl ? member.userId?.avatarThumbnailUrl : undefined)}
+                thumbnailSrc={
+                  member.contact?.avatarThumbnailUrl ||
+                  (!member.contact?.avatarUrl
+                    ? member.userId?.avatarThumbnailUrl
+                    : undefined)
+                }
                 size={48}
               />
             </div>
@@ -204,7 +219,44 @@ export function OwnerMemberDetailsPage({ id }: { id: string }) {
           </dl>
         </section>
         <section id="member-membership" className="panel">
-          <h2>Gym access and membership</h2>
+          <div style={{ display: "flex", justifyContent: "space-between" }}>
+            <h2>Gym access and membership</h2>
+            <div className="heading-actions">
+              {canManageAccess &&
+                subscription.status === "ACTIVE" &&
+                Number(subscription.planSnapshot?.freezeDaysAllowed) > 0 && (
+                  <button
+                    className="btn btn-secondary"
+                    onClick={() => setAction("freeze")}
+                  >
+                    Freeze
+                  </button>
+                )}
+              {canManageAccess &&
+                member.status !== "ARCHIVED" &&
+                ["FROZEN", "DEACTIVATED", "CANCELLED"].includes(
+                  subscription.status,
+                ) && (
+                  <button
+                    className="btn btn-primary"
+                    onClick={() => setAction("reactivate")}
+                  >
+                    {subscription.status === "FROZEN"
+                      ? "Unfreeze membership"
+                      : "Reactivate membership"}
+                  </button>
+                )}
+              {canManageAccess &&
+                ["ACTIVE", "FROZEN", "GRACE"].includes(subscription.status) && (
+                  <button
+                    className="btn btn-secondary"
+                    onClick={() => setAction("deactivate")}
+                  >
+                    Deactivate membership
+                  </button>
+                )}
+            </div>
+          </div>
           {subscription ? (
             <>
               <dl className="member-summary-grid">
@@ -235,38 +287,6 @@ export function OwnerMemberDetailsPage({ id }: { id: string }) {
                   </dd>
                 </div>
               </dl>
-              <div className="heading-actions">
-                {canManageAccess &&
-                  subscription.status === "ACTIVE" &&
-                  Number(subscription.planSnapshot?.freezeDaysAllowed) > 0 && (
-                    <button
-                      className="btn btn-secondary"
-                      onClick={() => setAction("freeze")}
-                    >
-                      Freeze
-                    </button>
-                  )}
-                {canManageAccess && member.status !== "ARCHIVED" &&
-                  ["FROZEN", "DEACTIVATED", "CANCELLED"].includes(subscription.status) && (
-                    <button
-                      className="btn btn-primary"
-                      onClick={() => setAction("reactivate")}
-                    >
-                      {subscription.status === "FROZEN" ? "Unfreeze membership" : "Reactivate membership"}
-                    </button>
-                  )}
-                {canManageAccess &&
-                  ["ACTIVE", "FROZEN", "GRACE"].includes(
-                    subscription.status,
-                  ) && (
-                    <button
-                      className="btn btn-secondary"
-                      onClick={() => setAction("deactivate")}
-                    >
-                      Deactivate membership
-                    </button>
-                  )}
-              </div>
             </>
           ) : (
             <p>
@@ -275,11 +295,25 @@ export function OwnerMemberDetailsPage({ id }: { id: string }) {
                 : "No paid membership has been created."}
             </p>
           )}
-          {canManageAccess && member.directAccess && !subscription && ["ACTIVE", "INACTIVE", "SUSPENDED"].includes(member.status) && (
-            <button className="btn btn-secondary" onClick={() => setAction(member.status === "ACTIVE" ? "deactivate-access" : "reactivate-access")}>
-              {member.status === "ACTIVE" ? "Deactivate gym access" : "Reactivate gym access"}
-            </button>
-          )}
+          {canManageAccess &&
+            member.directAccess &&
+            !subscription &&
+            ["ACTIVE", "INACTIVE", "SUSPENDED"].includes(member.status) && (
+              <button
+                className="btn btn-secondary"
+                onClick={() =>
+                  setAction(
+                    member.status === "ACTIVE"
+                      ? "deactivate-access"
+                      : "reactivate-access",
+                  )
+                }
+              >
+                {member.status === "ACTIVE"
+                  ? "Deactivate gym access"
+                  : "Reactivate gym access"}
+              </button>
+            )}
           {canManageAccess && member.status === "JOIN_REQUESTED" && (
             <div className="heading-actions">
               <button
@@ -298,43 +332,52 @@ export function OwnerMemberDetailsPage({ id }: { id: string }) {
           )}
           <label className="field" style={{ marginTop: 20 }}>
             <span>Assigned trainer</span>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <select
-              className="select"
-              value={
-                assignedTrainer?._id ||
-                (typeof assignedTrainer === "string" ? assignedTrainer : "")
-              }
-              disabled={!canManage || update.isPending}
-              onChange={(event) =>
-                update.mutate({
-                  url: path,
-                  method: "PATCH",
-                  body: { assignedTrainerId: event.target.value || null },
-                })
-              }
+            <div
+              style={{
+                width: "350px",
+                alignItems: "center",
+                display: "flex",
+                justifyContent: "space-between",
+                gap: 8,
+              }}
             >
-              <option value="">Unassigned</option>
-              {trainers.data?.data
-                .filter((trainer) => trainer.status === "ACTIVE")
-                .map((trainer) => (
-                  <option key={trainer._id} value={trainer._id}>
-                    {trainer.name}
-                  </option>
-                ))}
-            </select>
-           </div>
+              <select
+                className="select"
+                value={
+                  assignedTrainer?._id ||
+                  (typeof assignedTrainer === "string" ? assignedTrainer : "")
+                }
+                disabled={!canManage || update.isPending}
+                onChange={(event) =>
+                  update.mutate({
+                    url: path,
+                    method: "PATCH",
+                    body: { assignedTrainerId: event.target.value || null },
+                  })
+                }
+              >
+                <option value="">Unassigned</option>
+                {trainers.data?.data
+                  .filter((trainer) => trainer.status === "ACTIVE")
+                  .map((trainer) => (
+                    <option key={trainer._id} value={trainer._id}>
+                      {trainer.name}
+                    </option>
+                  ))}
+              </select>
+              {canManageAccess && member.status !== "ARCHIVED" && (
+                <button
+                  className="btn btn-secondary"
+                  style={{ marginTop: 16, width: "auto", flexShrink: 0 }}
+                  onClick={() => setAction("archive")}
+                >
+                  Archive member
+                </button>
+              )}
+            </div>
           </label>
           {trainers.isError && <p role="alert">{trainers.error.message}</p>}
-          {canManageAccess && member.status !== "ARCHIVED" && (
-            <button
-              className="btn btn-secondary"
-              style={{ marginTop: 16 }}
-              onClick={() => setAction("archive")}
-            >
-              Archive member
-            </button>
-          )}
+
           {update.isError && !action && (
             <p role="alert">{update.error.message}</p>
           )}
@@ -427,9 +470,14 @@ export function OwnerMemberDetailsPage({ id }: { id: string }) {
           )}
         </section>
         {canReadFinance && (
-          <section id="member-payments" className="panel member-management-scroll">
+          <section
+            id="member-payments"
+            className="panel member-management-scroll"
+          >
             <h2>Payment history</h2>
-            <p>Latest 50 payments. The Payments page contains the full history.</p>
+            <p>
+              Latest 50 payments. The Payments page contains the full history.
+            </p>
             <table className="member-management-table">
               <thead>
                 <tr>
@@ -464,7 +512,10 @@ export function OwnerMemberDetailsPage({ id }: { id: string }) {
             )}
           </section>
         )}
-        <section id="member-attendance" className="panel member-management-scroll">
+        <section
+          id="member-attendance"
+          className="panel member-management-scroll"
+        >
           <h2>Recent attendance</h2>
           <table className="member-management-table">
             <thead>
@@ -522,17 +573,21 @@ export function OwnerMemberDetailsPage({ id }: { id: string }) {
       <Modal
         open={!!action}
         title={
-          action === "deactivate-access" ? "Deactivate gym access" : action === "reactivate-access" ? "Reactivate gym access" : action === "archive"
-            ? "Archive member"
-            : action === "approve"
-              ? "Approve direct gym access"
-              : action === "reject"
-                ? "Reject join request"
-                : action === "reactivate"
-                  ? "Reactivate membership"
-                  : action === "freeze"
-                    ? "Freeze membership"
-                    : "Deactivate membership"
+          action === "deactivate-access"
+            ? "Deactivate gym access"
+            : action === "reactivate-access"
+              ? "Reactivate gym access"
+              : action === "archive"
+                ? "Archive member"
+                : action === "approve"
+                  ? "Approve direct gym access"
+                  : action === "reject"
+                    ? "Reject join request"
+                    : action === "reactivate"
+                      ? "Reactivate membership"
+                      : action === "freeze"
+                        ? "Freeze membership"
+                        : "Deactivate membership"
         }
         onClose={() => {
           if (!update.isPending) setAction("");
@@ -549,7 +604,9 @@ export function OwnerMemberDetailsPage({ id }: { id: string }) {
             {action === "archive"
               ? "Gym access ends and current memberships are cancelled. Payment and attendance history remain available. This does not issue a refund."
               : action === "reactivate"
-                ? subscription?.status === "FROZEN" ? "Unused freeze days are returned and membership dates are recalculated." : "Restore eligible remaining paid access. Expired, refunded or replaced memberships cannot be reactivated. This does not extend the membership."
+                ? subscription?.status === "FROZEN"
+                  ? "Unused freeze days are returned and membership dates are recalculated."
+                  : "Restore eligible remaining paid access. Expired, refunded or replaced memberships cannot be reactivated. This does not extend the membership."
                 : action === "approve"
                   ? "Grant attendance access without creating a paid plan. This is available only while this gym has no active plans."
                   : "Confirm this change to the member's gym access."}

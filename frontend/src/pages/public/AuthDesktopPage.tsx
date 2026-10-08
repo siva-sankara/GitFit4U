@@ -39,7 +39,7 @@ type Challenge = {
   purpose: "SIGNUP" | "LOGIN" | "ACCOUNT_RECOVERY";
   expiresAt: number;
   resendAt: number;
-  deliveryStatus: "SUBMITTED" | "SENT" | "DELIVERED" | "READ" | "FAILED";
+  deliveryStatus: "SUBMITTED" | "SENT" | "DELIVERED" | "READ" | "FAILED" | "SIMULATED";
 };
 type AuthResponse = ApiEnvelope<{
   accessToken: string;
@@ -85,6 +85,19 @@ export function AuthDesktopPage() {
   const running = useRef(false);
   const invalidPhoneInput = useRef(false);
   const [challenge, setChallenge] = useState<Challenge | null>(readChallenge);
+  const [preview, setPreview] = useState<{ code: string; challengeId: string; expiresAt: number } | null>(null);
+  function saveChallenge(next: Challenge, developmentPreview?: { code: string; simulated: true }) {
+    setChallenge(next);
+    // The preview is transient React state: never persist it with the challenge.
+    setPreview(import.meta.env.DEV && developmentPreview?.simulated && next.deliveryStatus === "SIMULATED"
+      ? { code: developmentPreview.code, challengeId: next.challengeId, expiresAt: next.expiresAt } : null);
+    sessionStorage.setItem("gfu_auth_challenge", JSON.stringify(next));
+  }
+  useEffect(() => {
+    if (!preview) return;
+    const timer = window.setTimeout(() => setPreview(null), Math.max(0, preview.expiresAt - Date.now()));
+    return () => window.clearTimeout(timer);
+  }, [preview]);
   const [resetToken, setResetToken] = useState(
       sessionStorage.getItem("gfu_reset") || "",
     ),
@@ -154,6 +167,7 @@ export function AuthDesktopPage() {
     };
   }, [otpView, challenge?.challengeId]);
   function clearChallenge(resetState = true) {
+    setPreview(null);
     sessionStorage.removeItem("gfu_auth_challenge");
     sessionStorage.removeItem("gfu_challenge");
     if (resetState) setChallenge(null);
@@ -200,7 +214,8 @@ export function AuthDesktopPage() {
           maskedPhone: string;
           expiresInSeconds: number;
           resendInSeconds: number;
-          deliveryStatus: "SUBMITTED";
+          deliveryStatus: "SUBMITTED" | "SIMULATED";
+          developmentPreview?: { code: string; simulated: true };
         }>
       >(
         purpose === "LOGIN"
@@ -222,8 +237,7 @@ export function AuthDesktopPage() {
         resendAt: Date.now() + r.data.resendInSeconds * 1000,
         deliveryStatus: r.data.deliveryStatus,
       };
-      setChallenge(next);
-      sessionStorage.setItem("gfu_auth_challenge", JSON.stringify(next));
+      saveChallenge(next, r.data.developmentPreview);
       otp.reset();
       navigate(
         authLink(purpose === "LOGIN" ? "/auth/otp" : "/auth/recovery-otp"),
@@ -240,7 +254,8 @@ export function AuthDesktopPage() {
           maskedPhone: string;
           expiresInSeconds: number;
           resendInSeconds: number;
-          deliveryStatus: "SUBMITTED";
+          deliveryStatus: "SUBMITTED" | "SIMULATED";
+          developmentPreview?: { code: string; simulated: true };
         }>
       >("/api/v1/auth/signup/resend", {
         method: "POST",
@@ -256,8 +271,7 @@ export function AuthDesktopPage() {
         resendAt: Date.now() + r.data.resendInSeconds * 1000,
         deliveryStatus: r.data.deliveryStatus,
       };
-      setChallenge(next);
-      sessionStorage.setItem("gfu_auth_challenge", JSON.stringify(next));
+      saveChallenge(next, r.data.developmentPreview);
       otp.reset();
     });
   }
@@ -361,6 +375,7 @@ export function AuthDesktopPage() {
         )}
         {signup ? (
           <form
+            key="signup"
             noValidate
             onSubmit={registration.handleSubmit((values) => {
               if (invalidPhoneInput.current) {
@@ -376,7 +391,8 @@ export function AuthDesktopPage() {
                     maskedPhone: string;
                     expiresInSeconds: number;
                     resendInSeconds: number;
-                    deliveryStatus: "SUBMITTED";
+                    deliveryStatus: "SUBMITTED" | "SIMULATED";
+          developmentPreview?: { code: string; simulated: true };
                   }>
                 >("/api/v1/auth/register", {
                     method: "POST",
@@ -392,8 +408,7 @@ export function AuthDesktopPage() {
                   resendAt: Date.now() + r.data.resendInSeconds * 1000,
                   deliveryStatus: r.data.deliveryStatus,
                 };
-                setChallenge(next);
-                sessionStorage.setItem("gfu_auth_challenge", JSON.stringify(next));
+                saveChallenge(next, r.data.developmentPreview);
                 otp.reset();
                 navigate(authLink("/auth/signup-otp"), { state: location.state });
               });
@@ -492,6 +507,7 @@ export function AuthDesktopPage() {
           </>
         ) : resetView ? (
           <form
+            key="reset-password"
             noValidate
             onSubmit={reset.handleSubmit((values) =>
               run(async () => {
@@ -538,6 +554,7 @@ export function AuthDesktopPage() {
           </form>
         ) : otpView ? (
           <form
+            key={`otp:${challenge!.challengeId}`}
             noValidate
             onSubmit={otp.handleSubmit((values) =>
               run(async () => {
@@ -589,11 +606,12 @@ export function AuthDesktopPage() {
                 label="Back to change phone number"
               />
             )}
-            <h1>Check WhatsApp</h1>
-            <p>
-              Enter the six-digit verification code sent to{" "}
-              <strong>{challenge!.maskedPhone}</strong>. Meta accepted the message for delivery; delivery may still fail and will be tracked by webhook.
-            </p>
+            <h1>{challenge!.deliveryStatus === "SIMULATED" ? (signupOtp ? "Verify test signup" : "Verify test login") : "Check WhatsApp"}</h1>
+            {challenge!.deliveryStatus === "SIMULATED" ? <section className="state-card" aria-label="Development verification">
+              <strong>Development only — test verification code</strong>
+              <p>No WhatsApp message was sent. No email was sent. Enter the test code below to continue.</p>
+              {preview?.challengeId === challenge!.challengeId && remaining > 0 ? <><output>{preview.code}</output><p>Expires in: {remaining}s</p></> : <p>The preview is unavailable after reloading. Request a new code when the resend timer allows.</p>}
+            </section> : <p>Enter the six-digit verification code for <strong>{challenge!.maskedPhone}</strong>. Meta accepted the request; delivery is tracked separately.</p>}
             <label className="field">
               <span>Verification code</span>
               <input
@@ -630,6 +648,7 @@ export function AuthDesktopPage() {
           </form>
         ) : phoneView ? (
           <form
+            key="phone"
             noValidate
             onSubmit={phone.handleSubmit((values) => {
               if (invalidPhoneInput.current) {
@@ -670,6 +689,7 @@ export function AuthDesktopPage() {
           </form>
         ) : (
           <form
+            key="login"
             noValidate
             onSubmit={login.handleSubmit((values) =>
               run(async () =>

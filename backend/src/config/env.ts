@@ -1,6 +1,7 @@
 import "dotenv/config";
 import { z } from "zod";
 import { normalizeClientOrigins } from "./clientOrigins.js";
+import { assertSafeOtpPreview } from "./otpPreviewPolicy.js";
 
 const schema = z
   .object({
@@ -8,6 +9,9 @@ const schema = z
       .enum(["development", "test", "production"])
       .default("development"),
     PORT: z.coerce.number().int().positive().default(5000),
+    OTP_MODE: z.enum(["whatsapp", "development_preview"]).default("whatsapp"),
+    OTP_DEV_PREVIEW_ENABLED: z.enum(["true", "false"]).default("false").transform(value => value === "true"),
+    OTP_PREVIEW_TIER: z.enum(["local"]).optional(),
     MONGO_URI: z
       .string()
       .regex(/^mongodb(?:\+srv)?:\/\//, "MONGO_URI must be a MongoDB connection URI.")
@@ -182,6 +186,7 @@ const schema = z
   });
 
 export function parseEnvironment(input: NodeJS.ProcessEnv) {
+  assertSafeOtpPreview(input);
   // Existing names retain precedence; standard AWS names are supported server-side.
   const awsRegion = input.OBJECT_STORAGE_REGION || input.AWS_REGION;
   return schema.parse({

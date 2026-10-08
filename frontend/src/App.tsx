@@ -1,6 +1,7 @@
 import { GuestRoute } from "./routes/GuestRoute";
 import { LegacyAuthRedirect } from "./routes/LegacyAuthRedirect";
 import { NotificationInboxRedirect } from "./pages/shared/NotificationInboxRedirect";
+import { NotificationOpenPage } from "./pages/shared/NotificationOpenPage";
 import { lazy, Suspense, useEffect } from "react";
 import { safeReturnTo } from "./services/authRedirect";
 import {
@@ -34,6 +35,7 @@ const Auth = lazy(() =>
 );
 const PlatformSubscription = lazy(() => import("./pages/owner/PlatformSubscriptionPage").then(module => ({ default: module.PlatformSubscriptionPage })));
 const router = createBrowserRouter([
+  { path: "/notification-open/:id", element: <ProtectedRoute><NotificationOpenPage /></ProtectedRoute> },
   { path: "/activate-account", element: <ActivateAccountPage /> },
   ...publicPolicyRoutes,
   {

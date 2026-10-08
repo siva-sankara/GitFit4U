@@ -106,10 +106,10 @@ export function GymProfileEditor({
       <QueryState query={gym}>
         {gym.data?.data && (
           <div className="gym-profile-sections">
-            <SectionAccordion id="gym-logo" title="Gym logo" description="The identity members see across GETFIT4U." defaultOpen>
+            <SectionAccordion id="gym-logo" title="Gym logo" description="The identity members see across GETFIT4U." >
               <GymLogoEditor key={`logo-${gym.data.data._id}`} gym={gym.data.data} disabled={!canEdit} embedded />
             </SectionAccordion>
-            <SectionAccordion id="gym-details" title="Basic and contact details" description="Gym name, description, contact channels and facilities." defaultOpen>
+            <SectionAccordion id="gym-details" title="Basic and contact details" description="Gym name, description, contact channels and facilities." >
               <fieldset disabled={!canEdit} className="profile-fieldset">
                 <EditForm
                   method="PATCH"
@@ -130,12 +130,12 @@ export function GymProfileEditor({
                     { ...field("contact.whatsapp", "WhatsApp number"), clearable: true },
                     { ...field("contact.website", "Website", "text"), clearable: true },
                     field("facilities", "Facilities (one per line)", "lines"),
-                    field("amenities", "Amenities (one per line)", "lines"),
-                    field(
-                      "benefits",
-                      "Member benefits (one per line)",
-                      "lines",
-                    ),
+                    // field("amenities", "Amenities (one per line)", "lines"),
+                    // field(
+                    //   "benefits",
+                    //   "Member benefits (one per line)",
+                    //   "lines",
+                    // ),
                   ]}
                 />
               </fieldset>
@@ -145,7 +145,7 @@ export function GymProfileEditor({
                 <GymProfilePlans fields={planFields} canWrite={permissions.includes("plan:write")} slug={gym.data.data.slug} published={gym.data.data.status === "ACTIVE" && gym.data.data.platformSubscriptionStatus === "ACTIVE"} embedded />
               </SectionAccordion>
             )}
-            <SectionAccordion id="gym-media" title="Media gallery" description={`${gym.data.data.mediaCount || gym.data.data.mediaAttachmentIds?.length || 0} photos and videos. Preview uses optimized thumbnails.`} defaultOpen>
+            <SectionAccordion id="gym-media" title="Media gallery" description={`${gym.data.data.mediaCount || gym.data.data.mediaAttachmentIds?.length || 0} photos and videos. Preview uses optimized thumbnails.`} >
               <GymMediaEditor key={`media-${gym.data.data._id}`} gym={gym.data.data} disabled={!canEdit} />
             </SectionAccordion>
             <SectionAccordion id="gym-location" title="Address and location" description="Public address, entrance pin and attendance radius.">
@@ -154,7 +154,7 @@ export function GymProfileEditor({
             <SectionAccordion id="gym-hours" title="Opening hours" description="Weekly opening and closing schedule.">
               <GymHoursEditor gym={gym.data.data} disabled={!canEdit} />
             </SectionAccordion>
-            <SectionAccordion id="gym-classes" title="Classes preview" description="The next three gym classes, without an internal scrolling panel." defaultOpen>
+            <SectionAccordion id="gym-classes" title="Classes preview" description="The next three gym classes, without an internal scrolling panel." >
               <GymProfileClasses fields={classFields} canWrite={permissions.includes("class:write")} canRead={permissions.includes("gym:read")} />
             </SectionAccordion>
             <SectionAccordion id="gym-communication" title="Notification and communication settings" description="WhatsApp connection and automated member reminders.">

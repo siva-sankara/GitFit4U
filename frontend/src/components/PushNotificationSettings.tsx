@@ -168,6 +168,10 @@ export function PushNotificationSettings() {
           {!available && !server.isLoading && (
             <p>Your in-app inbox still receives updates.</p>
           )}
+          {/iPhone|iPad|iPod/.test(navigator.userAgent) && !window.matchMedia("(display-mode: standalone)").matches && (
+            <p>On iPhone or iPad, use Safari’s Share → Add to Home Screen, open the installed app, then enable notifications here.</p>
+          )}
+          <p>Background alerts depend on browser permission, connectivity and system Focus settings.</p>
         </div>
         <div className="notification-setting-actions">
           {permission !== "denied" && (

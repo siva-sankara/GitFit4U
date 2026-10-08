@@ -1,13 +1,16 @@
 import mongoose from "mongoose";
 const { Schema, model, models } = mongoose;
 import { PERMISSIONS, ROLES } from "../constants/domain.js";
+import { enforcePlatformCapacity } from "../services/platformCapacityService.js";
 
 const authIdentitySchema = new Schema(
   {
     userId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
     provider: { type: String, enum: ["PHONE", "GOOGLE", "PASSWORD"], required: true },
     providerSubject: { type: String, required: true },
-    verifiedAt: { type: Date, required: true },
+    verifiedAt: { type: Date, required: function (this: any) { return this.verificationSource !== "DEVELOPMENT_SIMULATION"; } },
+    verificationSource: { type: String, enum: ["PROVIDER", "DEVELOPMENT_SIMULATION"], default: "PROVIDER" },
+    simulatedAt: Date,
     passwordHash: { type: String, select: false }
   },
   { timestamps: true }
@@ -25,6 +28,16 @@ const roleAssignmentSchema = new Schema(
   { timestamps: true }
 );
 roleAssignmentSchema.index({ userId: 1, role: 1, gymId: 1 }, { unique: true });
+roleAssignmentSchema.pre("save", async function () {
+  if (["TRAINER", "GYM_STAFF"].includes(this.role) && this.status === "ACTIVE" && (this.isNew || this.isModified("status")))
+    await enforcePlatformCapacity(this.gymId, "STAFF", this.$session(), { userId: this.userId, role: this.role });
+});
+roleAssignmentSchema.pre("findOneAndUpdate", async function () {
+  const filter = this.getFilter(), update = this.getUpdate() as any;
+  const active = update?.$set?.status === "ACTIVE" || update?.status === "ACTIVE";
+  if (active && ["TRAINER", "GYM_STAFF"].includes(filter.role))
+    await enforcePlatformCapacity(filter.gymId, "STAFF", this.getOptions().session || null, { userId: filter.userId, role: filter.role });
+});
 
 const sessionSchema = new Schema(
   {
@@ -67,7 +80,7 @@ const otpChallengeSchema = new Schema(
     providerMessageId: { type: String, unique: true, sparse: true, index: true },
     deliveryStatus: {
       type: String,
-      enum: ["PENDING", "SUBMITTED", "SENT", "DELIVERED", "READ", "FAILED", "UNKNOWN"],
+      enum: ["PENDING", "SUBMITTED", "SENT", "DELIVERED", "READ", "FAILED", "UNKNOWN", "SIMULATED"],
       default: "PENDING",
       index: true,
     },

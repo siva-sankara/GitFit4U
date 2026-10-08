@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { hashOtp } from "../utils/crypto.js";
+import { env } from "../config/env.js";
 
 const mocks = vi.hoisted(() => ({
   findOne: vi.fn(),
@@ -84,6 +85,67 @@ describe("normalizePhone", () => {
   });
 });
 
+describe("isolated development signup and login transport", () => {
+  it("returns only the current simulated code, stores its HMAC, and uses the real verifier", async () => {
+    const original = { mode: env.OTP_MODE, enabled: env.OTP_DEV_PREVIEW_ENABLED };
+    try {
+      env.OTP_MODE = "development_preview"; env.OTP_DEV_PREVIEW_ENABLED = true;
+      const result = await requestOtp("9876543210", "SIGNUP", { pendingOperationId: "signup-operation", ipAddress: "127.0.0.1" });
+      const code = result.developmentPreview!.code;
+      expect(code).toMatch(/^\d{6}$/); expect(result.deliveryStatus).toBe("SIMULATED");
+      expect(mocks.send).not.toHaveBeenCalled();
+      const stored = mocks.create.mock.calls[0][0];
+      expect(stored.codeHash).toBe(hashOtp(result.challengeId, code));
+      expect(stored).not.toHaveProperty("code"); expect(stored).not.toHaveProperty("developmentPreview");
+      const row = { ...stored, _id: "challenge", attempts: 0, maxAttempts: 5, deliveryStatus: "SIMULATED" };
+      verificationQuery(row); mocks.findOneAndUpdate.mockResolvedValue({ ...row, consumedAt: new Date() });
+      await expect(verifyOtp(result.challengeId, code, { expectedPurpose: "SIGNUP", pendingOperationId: "signup-operation" })).resolves.toMatchObject({ simulated: true });
+      verificationQuery({ ...row, consumedAt: new Date() });
+      await expect(verifyOtp(result.challengeId, code)).rejects.toMatchObject({ code: "OTP_INVALID" });
+      env.OTP_MODE = "whatsapp"; verificationQuery(row);
+      await expect(verifyOtp(result.challengeId, code)).rejects.toMatchObject({ code: "OTP_INVALID" });
+    } finally { env.OTP_MODE = original.mode; env.OTP_DEV_PREVIEW_ENABLED = original.enabled; }
+  });
+  it("keeps the prior usable challenge when replacement delivery fails", async () => {
+    mocks.send.mockRejectedValue(new Error("Provider unavailable"));
+    await expect(requestOtp("9876543210", "LOGIN")).rejects.toThrow("Provider unavailable");
+    expect(mocks.updateMany).not.toHaveBeenCalled();
+  });
+  it("issues a single-use login preview without messaging and rejects it once previews are disabled", async () => {
+    const original = { mode: env.OTP_MODE, enabled: env.OTP_DEV_PREVIEW_ENABLED };
+    try {
+      env.OTP_MODE = "development_preview"; env.OTP_DEV_PREVIEW_ENABLED = true;
+      const result = await requestOtp("9876543210", "LOGIN", { ipAddress: "127.0.0.1" });
+      const code = result.developmentPreview!.code;
+      expect(code).toMatch(/^\d{6}$/);
+      expect(mocks.send).not.toHaveBeenCalled();
+      const stored = mocks.create.mock.calls[0][0];
+      expect(stored.codeHash).toBe(hashOtp(result.challengeId, code));
+      expect(stored).not.toHaveProperty("code");
+      const row = { ...stored, _id: "challenge", attempts: 0, maxAttempts: 5, deliveryStatus: "SIMULATED" };
+      verificationQuery(row); mocks.findOneAndUpdate.mockResolvedValue({ ...row, consumedAt: new Date() });
+      await expect(verifyOtp(result.challengeId, code, { expectedPurpose: "LOGIN" })).resolves.toMatchObject({ simulated: true, purpose: "LOGIN" });
+      verificationQuery({ ...row, consumedAt: new Date() });
+      await expect(verifyOtp(result.challengeId, code)).rejects.toMatchObject({ code: "OTP_INVALID" });
+      env.OTP_DEV_PREVIEW_ENABLED = false; verificationQuery(row);
+      await expect(verifyOtp(result.challengeId, code)).rejects.toMatchObject({ code: "OTP_INVALID" });
+    } finally { env.OTP_MODE = original.mode; env.OTP_DEV_PREVIEW_ENABLED = original.enabled; }
+  });
+  it.each(["ACCOUNT_RECOVERY", "STEP_UP"] as const)("does not expose a test code for %s", async purpose => {
+    const original = { mode: env.OTP_MODE, enabled: env.OTP_DEV_PREVIEW_ENABLED };
+    try {
+      env.OTP_MODE = "development_preview"; env.OTP_DEV_PREVIEW_ENABLED = true;
+      await expect(requestOtp("9876543210", purpose)).rejects.toMatchObject({ code: "PREVIEW_PURPOSE_FORBIDDEN" });
+      expect(mocks.create).not.toHaveBeenCalled(); expect(mocks.send).not.toHaveBeenCalled();
+    } finally { env.OTP_MODE = original.mode; env.OTP_DEV_PREVIEW_ENABLED = original.enabled; }
+  });
+  it("never adds a preview to the normal production transport response", async () => {
+    const result = await requestOtp("9876543210", "LOGIN");
+    expect(result).not.toHaveProperty("developmentPreview");
+    expect(JSON.stringify(result)).not.toContain(mocks.send.mock.calls[0][1]);
+  });
+});
+
 describe("persistent WhatsApp OTP challenges", () => {
   it("submits a six-digit code while returning no OTP or plaintext verifier", async () => {
     const result = await requestOtp("9876543210", "LOGIN", {
@@ -141,7 +203,7 @@ describe("persistent WhatsApp OTP challenges", () => {
     expect(mocks.findOneAndUpdate).not.toHaveBeenCalled();
   });
 
-  it("invalidates the earlier code before creating a resend", async () => {
+  it("invalidates earlier codes only after a replacement is accepted", async () => {
     await requestOtp("+919876543210", "LOGIN", { ipAddress: "203.0.113.11" });
     expect(mocks.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -151,6 +213,7 @@ describe("persistent WhatsApp OTP challenges", () => {
       }),
       { $set: { consumedAt: expect.any(Date) } },
     );
+    expect(mocks.updateMany.mock.invocationCallOrder[0]).toBeGreaterThan(mocks.send.mock.invocationCallOrder[0]);
   });
 
   it("enforces the persistent per-phone request limit", async () => {

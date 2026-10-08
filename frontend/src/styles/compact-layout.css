@@ -39,7 +39,7 @@
   .compact-filters { flex-basis: auto; width: 100%; }
   .compact-filter-content { flex-direction: column; align-items: stretch; padding: 12px; margin-top: 8px; border: 1px solid var(--border); border-radius: var(--radius-md, 12px); background: var(--surface); }
   .compact-filter-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .compact-filter-fields input, .compact-filter-fields select { font-size: 16px; }
+  .compact-filter-fields input, .compact-filter-fields select { font-size: 1rem; }
   .compact-filter-actions { justify-content: flex-end; }
   .explore-filter-toolbar.table-toolbar { gap: 8px; }
   .explore-filter-toolbar .explore-search { flex-basis: 100%; }

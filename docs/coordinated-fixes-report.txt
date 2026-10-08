@@ -1,0 +1,298 @@
+GETFIT4U coordinated fixes — implementation and verification report
+7 October 2026
+
+1. Confirmed causes and fixes
+
+Admin activation previously depended exclusively on a captured registration
+payment and active subscription. The new shared activation service accepts
+audited admin authorization for cash/UPI receipt or payment-pending access.
+It does not bypass account, verification, moderation or tenant checks.
+
+The login cookie handshake stored the new access token, then the login page
+stored the same token again. That incremented the session generation twice,
+invalidating an in-flight profile request with SESSION_CHANGED. A regression
+test reproduced the failure before the fix. Reapplying the same token is now
+idempotent. Real session changes, logout, expiry and revocation still invalidate
+stale requests. Existing three-day sliding inactivity expiry remains in place;
+access tokens stay in memory and refresh credentials stay in HttpOnly cookies.
+
+The push opt-in controls had been commented out of the notification page.
+They are restored. Background click handling relied on a message listener in
+an existing page; it now navigates/focuses the window or opens a new one. Firebase
+notification payloads are displayed once by Firebase; legacy data-only payloads
+use the service-worker handler. Denied permission does not trigger more prompts.
+The always-on server already runs maintenance and durable push processing.
+Whether a particular user's device suppressed delivery could not be confirmed.
+
+Notification destinations previously used inconsistent legacy paths and could
+lose the exact entity or selected gym. Every current click surface now goes
+through /notification-open/:id and a recipient-scoped backend resolver. It
+rechecks the target's ownership/authorization and uses real application routes.
+
+WhatsApp signup has a confirmed configuration blocker: the read-only Meta check
+found WHATSAPP_AUTH_TEMPLATE_NAME unset and returned no Authentication template.
+The configured sender was CONNECTED and its number VERIFIED. The three supplied
+welcome/renewal templates are Utility templates; they cannot replace the OTP
+Authentication template. Template validation now handles both creation and GET
+component representations. The example no longer incorrectly suggests hello_world.
+
+Support used a limited ticket/list/thread flow without the requested workflow
+controls and context. It now has real search/filter/summary data, private ticket
+details, attachments, activity, assignment, priorities, and separate internal notes.
+
+2. Important implementation files (paths relative to this repository)
+
+Admin/financial: backend/src/services/gymActivationService.ts,
+platformCapacityService.ts; backend/src/controllers/adminController.ts and
+checkoutController.ts; backend/src/routes/adminRoutes.ts;
+frontend/src/pages/admin/GymActivationForm.tsx;
+frontend/src/pages/owner/PlatformSubscriptionPage.tsx.
+
+Session: frontend/src/services/apiClient.ts, authRedirect.ts;
+frontend/src/pages/public/AuthDesktopPage.tsx and their regression tests.
+Auth forms now have separate React keys, which also fixes signup name text
+being reused as the empty OTP input when switching screens.
+
+Notifications: backend/src/services/notificationDestinationService.ts,
+notificationLinkService.ts, notificationService.ts;
+backend/src/controllers/notificationController.ts;
+frontend/src/pages/shared/NotificationOpenPage.tsx;
+frontend/src/firebase-messaging-sw.ts; frontend/src/services/firebasePush.ts;
+frontend/src/components/PushNotificationSettings.tsx.
+
+OTP: backend/src/config/otpPreviewPolicy.ts; backend/src/services/otpService.ts
+and whatsappAuthOtpService.ts; auth/session/socket guards;
+backend/src/scripts/check-auth-delivery.ts;
+backend/config/whatsapp-auth-template.example.json;
+backend/.env.otp-preview.example.
+
+Support: backend/src/services/supportContextService.ts;
+backend/src/controllers/supportManagementController.ts, messagingController.ts
+and userController.ts; frontend/src/pages/shared/SupportTicketsPage.tsx;
+frontend/src/styles/support-tickets.css.
+
+Integration checks: backend/src/scripts/check-coordinated-fixes.ts.
+Unrelated working-tree edits were preserved. No deployment or commit was made.
+
+3. Database and configuration changes
+
+Additive fields only: platform subscription adminAuthorization; support ticket
+assignment/context/activity/internalNotes/revision; notification providerAcceptedAt
+and openedAt; OTP SIMULATED delivery status; identity verificationSource/simulatedAt;
+and user developmentTestAccount. Existing payment metadata stores confirmation,
+collector, references and reconciliation details. Existing audit/event/idempotency
+collections and unique indexes are reused. No destructive migration is required.
+
+Historical tickets are bridged into their existing support conversation through
+the idempotent additive migration. Internal notes are excluded from ordinary
+queries and returned only by the protected management endpoint.
+
+Before using a new manual authorization, configure explicit member and staff
+limits on its platform plan in Admin. A missing limit is not treated as unlimited.
+The selected term is bounded to the plan's 30-day or 365-day period.
+Existing legacy plans without snapshots/limits retain their prior policy.
+
+No real .env credentials were changed. OTP preview defaults remain off.
+Production keeps OTP_MODE=whatsapp and OTP_DEV_PREVIEW_ENABLED=false.
+MongoDB transactions require a replica set, as the existing application does.
+
+4. Admin activation and payment behavior
+
+Activate & Record Payment requires cash/UPI, actual payment date, exact plan
+amount/currency, explicit received-funds confirmation, and a UPI reference when
+applicable. UPI references are manually confirmed; they are not called gateway
+verification. One subscription and one actual offline payment are recorded,
+with normal invoice delivery and an audit trail.
+
+Activate — Payment Pending requires a plan, reason, start/end and due date.
+It creates bounded active access with an outstanding payment. It creates no
+captured revenue, gateway transaction ID, paid invoice or payment-success event.
+Expiry jobs honor the access term; model-level member/staff activation checks
+enforce its limits with a transactional gym lock.
+
+Collect outstanding payment settles that payment and subscription, records the
+collector, and produces one invoice. Retries cannot create another receipt;
+conflicting collection details are rejected. Collection does not extend expiry
+or remove a suspension. An earlier registration gateway order that later captures
+can settle the matching pending term. An already-settled or mismatched capture
+is flagged for admin reconciliation instead of silently creating extra access.
+
+5. Background push and destination results
+
+Business transactions persist inbox notifications and queued push state together.
+The existing always-on server retries queued deliveries independently of React
+or browser presence. Invalid tokens are revoked without logging the account out.
+Provider acceptance and observed opening have separate timestamps; acceptance
+does not prove display. Device registration/logout remain scoped to the device.
+
+Tests cover one background display, existing-window navigation, closing-window
+fallback, cold-start destination, ignored external payload URLs, malformed IDs,
+login preservation, wrong recipient, inaccessible target, exact support ticket,
+and the owner gym selection. A member-only event opened in an owner/trainer/admin
+session explains the required role instead of silently redirecting to a dashboard.
+Payments/memberships select the exact public record;
+class events open the authorized booking. Unknown legacy destinations show an
+explained inbox fallback. No target is exposed before authorization.
+
+Deploy the rebuilt frontend/service worker and restart the existing always-on
+backend with npm run build followed by npm start. Its server.ts starts both
+maintenance and push delivery; no new hosting provider or browser timer is needed.
+Confirm backend FIREBASE_PROJECT_ID/FIREBASE_CLIENT_EMAIL/FIREBASE_PRIVATE_KEY
+match the frontend VITE_FIREBASE_* project, including VITE_FIREBASE_VAPID_KEY.
+The local configured project IDs matched in the read-only check.
+Each device must enable Browser notifications in Notifications > Notification
+settings. iPhone guidance explains installation to the Home Screen first.
+Browser/OS permission, connectivity and Focus settings still govern delivery.
+
+6. Login results
+
+The previously failing duplicate-token/in-flight-profile regression passes.
+The full frontend suite also covers restoration, stale requests, cookie handshake,
+refresh races, explicit logout and owner onboarding/role destinations. Optional
+push initialization remains separate from authentication. No persistent bearer
+token was introduced in localStorage or sessionStorage.
+
+7. WhatsApp OTP diagnosis and live status
+
+Command: from backend, npx.cmd tsx src/scripts/check-auth-delivery.ts.
+This made read-only Meta API calls with the configured sender. It generated no
+challenge and sent no message. Sender connected/verified; Authentication template
+not configured and none returned. Authentication delivery is therefore NOT live
+verified and cannot succeed with the current configuration.
+
+Create/approve an Authentication template in the platform WABA with the exact
+language (default en_US), five-minute expiry and Copy Code button at index 0.
+The JSON example is in backend/config/whatsapp-auth-template.example.json; it
+is an example to submit for approval, not an approval or a created template.
+Set WHATSAPP_AUTH_TEMPLATE_NAME to the approved name and
+WHATSAPP_AUTH_TEMPLATE_LANGUAGE to its exact language, then rerun the read-only
+check. Keep the existing platform sender credentials. The sender's real send
+permission, recipient restrictions and delivered webhook still require a
+controlled live test after approval. No provider was changed.
+
+For the existing welcome/renewal outbox and webhook processing, keep the separate
+WhatsApp worker supervised: WHATSAPP_WORKER_ENABLED=true and
+npm run start:whatsapp-worker after building. The push worker is part of npm start.
+OTP submission is synchronous; provider acceptance is not labelled delivery.
+
+8. Exact safe local OTP-preview steps (PowerShell)
+
+Use a new local test environment with a loopback MongoDB replica set. Do not copy
+production records into it and do not merge the normal backend .env into it.
+The example database is gfu_otp_test_local on 127.0.0.1:27017, replica set rs0.
+MongoDB must already be installed/running as that local replica set; it was not
+installed or started by this task.
+
+From GitFit4U/backend in a fresh PowerShell terminal:
+
+  Copy-Item -LiteralPath .env.otp-preview.example -Destination .env.otp-preview
+  node -e "const f=require('fs'),c=require('crypto');f.appendFileSync('.env.otp-preview','\n'+['JWT_ACCESS_SECRET','JWT_REFRESH_SECRET','AUTH_OTP_HMAC_SECRET','ATTENDANCE_QR_SECRET'].map(k=>k+'='+c.randomBytes(48).toString('hex')).join('\n')+'\n')"
+  $env:DOTENV_CONFIG_PATH='.env.otp-preview'
+  npm.cmd run dev
+
+From GitFit4U/frontend in another terminal:
+
+  $env:VITE_DEV_API_TARGET='http://127.0.0.1:5001'
+  npm.cmd run dev
+
+Open http://localhost:5173 and create a new test signup. The screen explicitly
+labels simulated delivery and displays only the current generated code. Enter it
+manually. The field is not autofilled. Codes expire in five minutes, are HMAC
+protected, single use, subject to attempts/cooldown/rate limits, and disappear
+after verification, replacement or expiry. Reloading does not recover the code.
+
+The required file flags are OTP_MODE=development_preview,
+OTP_DEV_PREVIEW_ENABLED=true, OTP_PREVIEW_TIER=local, NODE_ENV=development,
+a gfu_otp_test_* loopback database and localhost CLIENT_ORIGIN. The server binds
+to loopback and rejects remote/proxied preview requests. Startup rejects live
+integration secrets, public origins, production mode and known deployment markers.
+Shared/public preview servers are deliberately unsupported.
+
+To disable: stop the preview backend, run
+  Remove-Item Env:DOTENV_CONFIG_PATH -ErrorAction SilentlyContinue
+and restart the normal backend with OTP_MODE=whatsapp and
+OTP_DEV_PREVIEW_ENABLED=false. Remove the frontend VITE_DEV_API_TARGET process
+override if it differs from your normal development target. Keep the preview
+file ignored. Simulated accounts are marked and rejected outside preview mode
+by login, refresh, authenticated requests and sockets; never migrate them as
+proof of real phone possession.
+
+9. Support redesign and permission coverage
+
+All roles use the existing Support routes. Desktop table and mobile cards show
+real references, dates, status, priority, assignee and unread replies. Filters
+collapse on small screens. Create-ticket context/reference choices are fetched
+from the authenticated user's permitted records. Failed requests preserve drafts
+and reuse request identifiers. Attachments reuse validated private upload/storage
+services. Ticket details include replies, activity, reopen/status/assignment and
+admin-only notes. Reply and workflow notifications commit with their changes;
+the author is excluded and stable identifiers deduplicate retries.
+
+Member tickets remain private to the requester and platform admins even when a
+gym is selected. Owners cannot read a member complaint simply by owning the gym.
+Trainers retain their own-ticket scope; this change does not invent a new support
+staff permission or grant broad trainer access. Admin assignment uses active
+platform admins. Support remains available when gym entitlement expires.
+Theme styles use existing tokens, preserving dark default and explicit light.
+
+10. Commands and verification results
+
+backend: npm.cmd test -- --pool=threads --maxWorkers=2
+  PASS: 98 files, 715 tests.
+frontend: npm.cmd test -- --maxWorkers=2
+  PASS: 84 files, 560 tests.
+backend and frontend: npm.cmd run build
+  PASS: TypeScript plus frontend production/service-worker bundle.
+backend and frontend: npm.cmd run lint
+  PASS: zero errors/warnings on the completed source and UI tests.
+backend: npm.cmd run test:vercel-types
+  PASS: Vercel-style semantic TypeScript compilation.
+backend: npx.cmd tsx src/scripts/check-coordinated-fixes.ts --run-isolated
+  PASS: cash/UPI/pending, no false revenue/invoice, concurrent retry, offline and
+  late-gateway settlement without a second subscription,
+  expiry/capacity, private support, assignment/status/reopen, internal-note scope,
+  failed-attachment transaction rollback, exact notification and expired-gym access.
+backend: npx.cmd tsx src/scripts/verify-isolated-membership.ts --run-isolated --section attendance-classes
+  PASS: 10 grouped API checks including QR/manual attendance, tenant isolation,
+  final-seat booking races, reminders, booking changes and attachment claims.
+backend: npx.cmd tsx src/scripts/verify-isolated-membership.ts --run-isolated --section account
+  PASS: 5 grouped API checks including invitation/activation, immutable/idempotent
+  payments/invoices, private PDF downloads and queued email receipts.
+backend and frontend: npm.cmd audit --json
+  PASS: dependency audit reported zero vulnerabilities in both dependency trees,
+  including zero High/Critical findings at the time of the checks.
+git diff --check
+  PASS: no whitespace errors; Windows line-ending warnings only.
+Source secret scan (PowerShell/Node, git-tracked and untracked nonignored files)
+  591 text/source/config files checked against credential patterns and 13 locally
+  configured secret values, without printing values. No exposed credentials found.
+  One initial PEM-header match was a short documentation placeholder, not a valid
+  key. This is a bounded source scan, not a repository-history security audit.
+
+Integration scripts created randomly named gfv_* databases, disabled external
+delivery, verified the database boundary and removed only their own fixtures.
+No production database records or external messages were changed.
+
+11. Real tests versus mocks and remaining verification
+
+Actual: builds, lint, dependency audits, source scan, real MongoDB transactions
+and Express API workflows in isolated databases, and read-only Meta sender/template
+queries. Frontend tests use jsdom; Firebase SDK/system-notification interactions
+are mocked. Existing provider tests mock payment, WhatsApp and Firebase delivery.
+
+Not performed: a real signup WhatsApp send/delivered webhook, physical desktop
+background display, Android browser/PWA push, iPhone Home Screen push, or a real
+S3 upload/download. The browser tool reported no available browser and rejected
+opening the in-app browser, so visual desktop/mobile and both-theme inspection
+remain unverified. API authorization and component interactions passed; they do
+not substitute for browser/OS/device or real-provider acceptance testing.
+
+12. External blockers and rollout status
+
+The code is implemented locally. No production deployment was performed.
+Production WhatsApp OTP still requires approval/configuration of the Authentication
+template and a controlled send test. Background push requires the deployed worker
+bundle, running backend, valid Firebase project/VAPID configuration and per-device
+permission. Live delivery is not guaranteed by passing unit tests or provider
+acceptance. There were no unresolved High/Critical dependency-audit findings or
+confirmed exposed credentials within the checks performed.

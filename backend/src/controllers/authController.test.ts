@@ -78,7 +78,7 @@ vi.mock("../services/domainEventService.js", () => ({
 vi.mock("google-auth-library", () => ({ OAuth2Client: class { verifyIdToken = mocks.googleToken; } }));
 vi.mock("../services/ownerOnboardingService.js", () => ({ getOwnerOnboarding: mocks.onboarding }));
 vi.mock("../models/Collaboration.js", () => ({ DeviceToken: { updateMany: mocks.revokeDevices } }));
-import { register, verifySignupOtp, passwordLogin, otpVerify, googleLogin, switchRole, logout, refresh } from "./authController.js";
+import { register, verifySignupOtp, passwordLogin, otpRequest, otpVerify, googleLogin, switchRole, logout, refresh } from "./authController.js";
 import { sha256 } from "../utils/crypto.js";
 import { env } from "../config/env.js";
 import type { Request, Response } from "express";
@@ -344,6 +344,49 @@ describe("authentication controller", () => {
       expectedPurpose: "LOGIN",
     });
     expect(mocks.createSession).not.toHaveBeenCalled();
+  });
+});
+
+describe("local test login previews", () => {
+  const original = { mode: env.OTP_MODE, enabled: env.OTP_DEV_PREVIEW_ENABLED };
+  beforeEach(() => { env.OTP_MODE = "development_preview"; env.OTP_DEV_PREVIEW_ENABLED = true; });
+  afterEach(() => { env.OTP_MODE = original.mode; env.OTP_DEV_PREVIEW_ENABLED = original.enabled; });
+  const account = () => ({ _id: "local-test-user", publicId: "local-test-public", developmentTestAccount: true, status: "ACTIVE", roles: ["USER"], activeRole: "USER", save: vi.fn() });
+  it("returns the login preview only for an active local test account", async () => {
+    mocks.findUser.mockResolvedValue(account());
+    mocks.requestOtp.mockResolvedValue({ challengeId: "test-challenge", deliveryStatus: "SIMULATED", developmentPreview: { code: "246810", simulated: true } });
+    const res = response();
+    await otpRequest(request({ phone: "9876543210" }), res);
+    expect(mocks.findUser).toHaveBeenCalledWith({ phone: "+919876543210" });
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining("No WhatsApp message or email was sent"), data: expect.objectContaining({ purpose: "LOGIN", developmentPreview: { code: "246810", simulated: true } }) }));
+  });
+  it.each([
+    { developmentTestAccount: false }, { status: "SUSPENDED" }, { roles: ["ADMIN"] },
+  ])("refuses preview requests for an ineligible account: %j", async overrides => {
+    mocks.findUser.mockResolvedValue({ ...account(), ...overrides });
+    await expect(otpRequest(request({ phone: "9876543210" }), response())).rejects.toMatchObject({ code: "PREVIEW_ACCOUNT_FORBIDDEN" });
+    expect(mocks.requestOtp).not.toHaveBeenCalled();
+  });
+  it("requires signup before test login", async () => {
+    mocks.findUser.mockResolvedValue(null);
+    await expect(otpRequest(request({ phone: "9876543210" }), response())).rejects.toMatchObject({ code: "SIGNUP_REQUIRED" });
+    expect(mocks.requestOtp).not.toHaveBeenCalled();
+  });
+  it("logs in the test account without marking its phone provider-verified", async () => {
+    mocks.verifyOtp.mockResolvedValue({ purpose: "LOGIN", phone: "+919876543210", simulated: true });
+    mocks.findUser.mockResolvedValue(account());
+    mocks.findIdentity.mockResolvedValue({ userId: "local-test-user", verificationSource: "DEVELOPMENT_SIMULATION" });
+    mocks.createSession.mockResolvedValue({ accessToken: "test-access", refreshToken: "test-refresh" });
+    await otpVerify(request({ challengeId: "test-challenge", code: "246810" }), response());
+    expect(mocks.updateIdentity).not.toHaveBeenCalled();
+    expect(mocks.emitEvent).not.toHaveBeenCalled();
+    expect(mocks.createSession).toHaveBeenCalledOnce();
+  });
+  it("rechecks the test-account boundary at verification", async () => {
+    mocks.verifyOtp.mockResolvedValue({ purpose: "LOGIN", phone: "+919876543210", simulated: true });
+    mocks.findUser.mockResolvedValue({ ...account(), developmentTestAccount: false });
+    await expect(otpVerify(request({ challengeId: "test-challenge", code: "246810" }), response())).rejects.toMatchObject({ code: "PREVIEW_ACCOUNT_FORBIDDEN" });
+    expect(mocks.createSession).not.toHaveBeenCalled(); expect(mocks.updateIdentity).not.toHaveBeenCalled();
   });
 });
 

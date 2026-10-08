@@ -82,27 +82,28 @@ const navigation: Record<string, Array<[string, string, string?]>> = {
     ["Registrations", "registrations"],
     ["Gyms", "gyms"],
     ["Owners", "owners"],
-    ["Trainers", "trainers"],
-    ["Members", "members"],
-    ["Membership plans", "membership-plans"],
-    ["Memberships", "memberships"],
-    ["Users", "users"],
+    // ["Trainers", "trainers"],
+    // ["Members", "members"],
+    // ["Membership plans", "membership-plans"],
+    // ["Memberships", "memberships"],
+    // ["Users", "users"],
     ["Platform plans", "platform-plans"],
-    ["Subscriptions", "subscriptions"],
+    // ["Subscriptions", "subscriptions"],
     ["Payments", "payments"],
     ["Invoices", "invoices"],
-    ["Refunds", "refunds"],
+    // ["Refunds", "refunds"],
     ["Campaigns", "whatsapp"],
-    ["Advertisements", "ads"],
-    ["Offers", "offers"],
-    ["Reviews", "reviews"],
-    ["Monitoring", "monitoring"],
-    ["Audit logs", "audit"],
+    ["Gym Advertisements", "ads"],
+    ["Gym Offers", "offers"],
+    ["Platform Offers", "platform-offers"],
+    // ["Reviews", "reviews"],
+    // ["Monitoring", "monitoring"],
+    // ["Audit logs", "audit"],
     ["Support", "support"],
     ["Notifications", "notifications"],
     ["Broadcasts", "broadcasts"],
-    ["Notification delivery", "notification-delivery"],
-    ["Settings", "settings"],
+    // ["Notification delivery", "notification-delivery"],
+    // ["Settings", "settings"],
   ],
 };
 export function WorkspaceLayout() {
@@ -246,7 +247,7 @@ export function WorkspaceLayout() {
             aria-label={`Open profile for ${user?.name || "Member"}`}
             title={user?.name || "My profile"}
           >
-            <Avatar user={user} size={36} />
+            <Avatar user={user} size={36} interactive={false} />
             <span className="profile-name">
               <strong>{user?.name || "Member"}</strong>
             </span>
@@ -300,7 +301,7 @@ export function WorkspaceLayout() {
               aria-label={`Open profile for ${user?.name || "Member"}`}
               title="My profile"
             >
-              <Avatar user={user} size={32} />
+              <Avatar user={user} size={32} interactive={false} />
               <strong>{user?.name || "Member"}</strong>
             </NavLink>
           </div>

@@ -98,7 +98,7 @@ export async function notifySupportCreated(
   ticket: any,
   conversationId: string,
 ) {
-  const admins = await User.find({ roles: "ADMIN", status: "ACTIVE" })
+  const admins = await User.find({ roles: "ADMIN", status: "ACTIVE", _id: { $ne: ticket.requesterId } })
     .select("_id")
     .limit(100)
     .lean();

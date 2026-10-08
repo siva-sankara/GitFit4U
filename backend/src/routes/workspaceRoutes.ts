@@ -71,6 +71,7 @@ import {
   legacyRegistrationStates,
 } from "../services/registrationService.js";
 import { env } from "../config/env.js";
+import { gymOfferScopeFilter } from "../services/promotionService.js";
 import rateLimit from "express-rate-limit";
 import { downloadPaymentInvoice, invoiceEmailStatus, resendInvoiceEmail } from "../controllers/invoiceController.js";
 import { requireIdempotencyKey } from "../middleware/idempotency.js";
@@ -165,7 +166,7 @@ const resources: Record<string, Resource> = {
   notifications: {
     model: Notification,
     select:
-      "userId title message category readAt archivedAt pushStatus createdAt",
+      "userId title message category readAt archivedAt pushStatus providerAcceptedAt openedAt createdAt",
     search: ["title", "message"],
     populate: [{ path: "userId", select: "name publicId" }],
   },
@@ -209,7 +210,7 @@ const resources: Record<string, Resource> = {
   payments: {
     model: Payment,
     select:
-      "publicId purpose payerId gymId subscriptionId amountMinor currency provider status methodCategory capturedAt failureDescription createdAt",
+      "publicId purpose payerId gymId subscriptionId amountMinor currency provider status methodCategory capturedAt failureDescription createdAt pricingSnapshot",
     populate: [
       { path: "payerId", select: "name publicId" },
       { path: "gymId", select: "name timezone" },
@@ -421,7 +422,7 @@ export async function resourceScope(
   if (key === "support")
     return auth.role === "ADMIN" ? {} : { requesterId: auth.userId };
   if (auth.role === "ADMIN")
-    return key === "owners" ? { roles: "GYM_OWNER" } : {};
+    return key === "owners" ? { roles: "GYM_OWNER" } : key === "offers" ? { $and: [gymOfferScopeFilter] } : {};
   if (auth.role === "GYM_OWNER" || auth.role === "GYM_STAFF") {
     if (key === "registrations" && auth.role === "GYM_OWNER")
       return { ownerId: auth.userId };
@@ -438,7 +439,7 @@ export async function resourceScope(
         "PERMISSION_DENIED",
         "You do not have permission for this resource.",
       );
-    return { gymId: auth.gymId };
+    return { gymId: auth.gymId, ...(key === "offers" ? { $and: [gymOfferScopeFilter] } : {}) };
   }
   if (auth.role === "TRAINER") {
     const trainer = await Trainer.findOne({
@@ -509,6 +510,8 @@ workspaceRoutes.get("/records/:resource", async (req, res) => {
     throw new AppError(404, "RESOURCE_NOT_FOUND", "Resource not found.");
   const scope = await resourceScope(req, key),
     clauses: any[] = [scope];
+  if (["payments", "subscriptions", "gyms"].includes(key) && typeof req.query.selected === "string")
+    clauses.push({ publicId: z.string().min(1).max(80).parse(req.query.selected) });
   const q =
     typeof req.query.q === "string" ? req.query.q.trim().slice(0, 80) : "";
   if (q) {

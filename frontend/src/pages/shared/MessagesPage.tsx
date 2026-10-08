@@ -506,7 +506,7 @@ function InternalMessagesPage({
           <div className="conversation-scroll">
             <QueryState query={conversations}>
               {visible.map((row) => (
-                <button
+                <div
                   key={row.publicId}
                   className={
                     "conversation" + (active === row.publicId ? " active" : "")
@@ -533,7 +533,7 @@ function InternalMessagesPage({
                       />
                     )}
                   </span>
-                  <span className="conversation-copy">
+                  <button type="button" className="conversation-copy">
                     <strong>{name(row)}</strong>
                     {contactPhone(row) && <small className="chat-contact-phone">{contactPhone(row)}</small>}
                     <small>
@@ -546,7 +546,7 @@ function InternalMessagesPage({
                         {row.supportTicketId.status.replaceAll("_", " ")}
                       </small>
                     )}
-                  </span>
+                  </button>
                   <span className="conversation-meta">
                     <time dateTime={row.lastMessageAt}>
                       {row.lastMessageAt
@@ -565,7 +565,7 @@ function InternalMessagesPage({
                       </span>
                     )}
                   </span>
-                </button>
+                </div>
               ))}
               {!visible.length && (
                 <div className="state-card">

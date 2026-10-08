@@ -1,0 +1,341 @@
+GETFIT4U: PROMOTIONS, DISCOVERY, TYPOGRAPHY, PHOTOS AND INSTALLATION
+Implementation and verification report - 7 October 2026
+
+Changes are in the existing repository. No deployment, production database
+write, real payment, outbound notification or native application release was
+performed. Existing unrelated edits were preserved.
+
+1. REQUIREMENT-BY-REQUIREMENT STATUS
+
+01 Inspection: completed against the existing role permissions, promotions,
+   per-gym platform billing, payments/invoices, profiles, image delivery,
+   public discovery, PWA, service worker and tests. No AGENTS.md was found.
+02 Separate offers: implemented explicit GYM_MEMBERSHIP and
+   PLATFORM_SUBSCRIPTION scopes; ambiguous legacy records use REVIEW_REQUIRED.
+03 Admin inspection: separate Gym Offers and Gym Advertisements views support
+   cross-gym inspection, search, status/gym filters and pagination. Owner
+   management retains its tenant boundary. Existing moderation actions remain.
+04 Platform management: dedicated Admin Platform Offers view supports create,
+   preview, edit, dates/scheduling, active/paused/archived status, platform plans,
+   owner/gym audiences, purchase kind, billing period, limits, terms and codes.
+05 Eligibility/pricing: eligible offers appear in the shared platform checkout
+   used by registration and platform subscription/renewal. Server pricing,
+   reservations and immutable payment snapshots enforce eligibility and limits.
+   Discounts apply to one selected purchase, not future automatic renewals.
+06 Landing limit: a named limit of eight controls both the request and render.
+07 Discovery link: See all gyms is always available beside the heading and
+   opens the existing public /explore catalog; loading/error are not empty.
+08 System fonts: shared body/display tokens now use the system-font stack.
+   Controls inherit it. Invoice font assets were retained for their PDF use.
+09 Text sizing: root size is 100%; shared sizing is relative. Enlarged-text
+   profile reflow was fixed. Chrome viewport/text-size checks passed; physical
+   Android/iPhone accessibility settings and native browser zoom remain manual.
+10 Profile size: all four role profiles use the shared 6rem mobile / 8rem
+   desktop avatar variant; list avatars retain compact sizing.
+11 Photo viewer: shared Avatar opens the authorized full-size source in the
+   existing portal dialog. Missing photos remain initials, without an empty
+   viewer. No new public image route or S3 ACL change was introduced.
+12 Viewer behavior: image, backdrop, Close and Escape dismiss; focus restoration,
+   scroll locking, loading/error handling and row click/keyboard isolation are
+   covered. Account changes clear an open viewer. Editing stays separate.
+13 Install button: the confirmed instructions-only labeling defect is fixed.
+   A retained browser install event invokes its real prompt from the click.
+14 Installation controller: one shared runtime controller handles early event
+   capture, consumption, prompt busy state, dismissal and detected installation.
+15 Platform limits: unsupported browsers get clearly labeled How to install
+   guidance. No fabricated native download/store link was added. Physical
+   installation, home-screen icon and standalone launch are not yet verified.
+16 Existing PWA flows: the two-minute session banner and persistent Settings
+   entry remain; banner expiry does not remove install capability. Service
+   worker/Firebase coordination, private-data caching restrictions, auth and
+   User tabs (Home, Book, Scan, Profile, Messages) were preserved.
+17 Security/migration: server authorization and scope boundaries are enforced;
+   additive, dry-run-first migration added. Financial history is not rewritten.
+18 Acceptance: automated unit, API/database integration and Chrome layout
+   checks passed. Real-device and live payment/provider checks are distinguished
+   below and have not been claimed as completed.
+19 Delivery: code, regression tests, migration tooling and this report added.
+   Build/types/lint/audit/secret-scan results and deployment steps follow.
+20 Post-login session transition: fixed the first protected screen occasionally
+   rendering "Unable to check your session" with a Retry button. A deliberate
+   SESSION_CHANGED cancellation from an in-flight pre-login profile request is
+   now retried immediately as a safe GET, with a bounded two-attempt limit.
+
+2. IMPORTANT FILES AND APIs
+
+Backend (paths relative to backend/src):
+- models/Business.ts: offer scope, version, platform targeting and scope index.
+- routes/promotionSchemas.ts: separate strict gym/platform inputs.
+- controllers/promotionController.ts: tenant-safe management, Admin filters,
+  populated gym/owner/plans, advertisement destinations and public scope rules.
+- controllers/platformOfferController.ts: authorized platform administration
+  and purchase-specific eligible-offer listing.
+- services/promotionService.ts: common pricing, eligibility, reservations,
+  offer versions, usage limits and redemption handling.
+- controllers/checkoutController.ts and services/platformRenewalService.ts:
+  registration/renewal quote integration and committed-order resumption.
+- routes/adminRoutes.ts, checkoutRoutes.ts and workspaceRoutes.ts: routes,
+  authorization and payment-history snapshot exposure.
+- services/promotionScopeMigration.ts and scripts/migrate-promotion-scopes.ts:
+  additive migration. services/platformOffer.test.ts and
+  scripts/check-platform-offers.ts: financial/security regression coverage.
+
+Relevant API routes (existing routes extended where appropriate):
+- GET /api/v1/admin/promotions/offers
+- GET /api/v1/admin/promotions/ads
+- GET, POST /api/v1/admin/promotions/platform-offers
+- PATCH /api/v1/admin/promotions/platform-offers/:publicId
+- GET /api/v1/checkout/platform/offers
+- Existing platform registration and renewal quote/order endpoints now accept
+  one offer selection and use the shared server eligibility/pricing service.
+  They reject injected client amounts, scope and creator fields.
+
+Frontend (paths relative to frontend):
+- src/pages/promotions/PromotionManagement.tsx and layouts/WorkspaceLayout.tsx:
+  separated Admin navigation, management, audience selectors and preview.
+- src/components/PlatformCheckoutOffers.tsx: shared eligible-offer selection.
+- src/pages/live/LivePublic.tsx: bounded landing preview and platform checkout.
+- src/pages/owner/PlatformSubscriptionPage.tsx: shared renewal integration.
+- src/components/PaymentPricing.tsx, pages/live/LiveWorkspace.tsx and
+  pages/user/ProfileHub.tsx: historical payment price breakdowns.
+- src/components/Avatar.tsx, ProfilePhotoViewer.tsx and Modal.tsx: shared
+  profile sizing and accessible photo viewing. SocialProfilePage.tsx and
+  MessagesPage.tsx avoid nested avatar/navigation buttons.
+- src/styles/tokens.css, global.css, compact-layout.css, profile-editor.css,
+  avatar.css, social-profile.css, promotions.css and product-polish.css:
+  system typography, profile reflow and promotion/landing layouts.
+- public/install-bootstrap.js, index.html, src/services/pwa.ts,
+  components/AppInstallBanner.tsx and PwaSettings.tsx: shared install flow.
+- scripts/check-promotion-ui.mjs: repeatable Chrome verification with isolated
+  fixtures. Test files cover landing, offers, checkout, viewer and installation.
+- src/services/session.ts and session.test.tsx: transparent, bounded recovery
+  when login replaces an in-flight profile read before route navigation.
+
+3. PROMOTION SCOPES AND ELIGIBILITY
+
+Gym offers apply only to membership purchases for their owning gym. Platform
+offers apply only to GETFIT4U platform purchases. Public gym offer/ad queries
+exclude platform and review-required offers. The normal Owner management
+endpoints still require the current authorized gym; Admin inspection does not
+remove those restrictions.
+
+Only an Admin with admin:platform permission can create/update platform offers.
+The server sets scope, publisher, version and one-time application. Platform
+billing follows the existing per-gym subscription. Registration applicants can
+view offers only through their own persisted registration; renewals require
+the current owned gym and validate the expected gym context.
+
+Eligibility checks status, dates, owner, gym, platform plan, MONTHLY/YEARLY
+period, NEW/RENEWAL purchase kind, minimum purchase and redemption limits.
+Empty audience/plan selections mean all otherwise eligible purchases. Selected
+owner, gym and plan restrictions must all match. Purchase history enforces
+new-subscription-only restrictions. Listing is paginated; checkout repeats the
+authoritative validation, so display alone never grants a discount.
+
+Only one discount can be selected. Automatic stacking and recurring discounts
+were not introduced. An offer without a custom code can be selected using its
+public reference from the Apply action. Prices come from configured platform
+plans, use integer minor currency units and existing rounding, and retain the
+existing tax treatment. Invalid or unsupported payable totals are rejected.
+
+4. MIGRATION AND FINANCIAL SAFEGUARDS
+
+The scope migration considers gym ownership, creator permissions/assignments,
+membership plans and existing purchase relationships. Clearly gym-bound offers
+are backfilled as GYM_MEMBERSHIP, including legitimate Admin-created gym offers.
+Missing/conflicting relationships become REVIEW_REQUIRED for explicit review;
+unbound old offers are not guessed to be active platform discounts. Updates
+compare the observed revision and are safe to rerun. No deletion, financial
+amount/status change or issued-invoice rewrite is part of this migration.
+
+Read-only dry-run against the configured database returned:
+  mode: dry-run
+  scanned: 2
+  gymMembership: 2
+  reviewRequired: 0
+  updated: 0
+
+The apply operation was exercised only in the isolated test database. Production
+application has not been run. Deployment steps from the backend directory:
+  npm.cmd run db:migrate-promotion-scopes
+  Review the counts and investigate any REVIEW_REQUIRED records.
+  npm.cmd run db:migrate-promotion-scopes -- --apply
+  Use the established index migration/deployment process to create the new
+  non-unique scope/status/date index; existing npm.cmd run db:migrate also
+  performs notification/OTP index maintenance, so retain its maintenance-window
+  procedure rather than treating it as a scope-only operation.
+
+Payment snapshots preserve original amount, discount, tax, total and applied
+offer reference/version. Checkout, payment-history detail and existing invoice
+generation use these committed values. An existing pending order is resumed at
+its committed amount; checkout locks offer changes once that order exists.
+
+Offer reservations participate in the existing payment transaction and serialize
+competing use of a limited offer. Existing order retries and captured-payment
+redemption remain duplicate-safe. A signed delayed capture after an offer edit
+or expiry honors the committed payment, creates one invoice and redeems once.
+Subsequent purchases do not inherit a one-time discount. Offer edits or pauses
+invalidate stale uncommitted discounted quotes.
+
+Pending orders remain pending and have no paid invoice. Existing authorized
+Admin cash/UPI collection and payment-pending activation are preserved; an
+offer or activation override does not itself record money as collected.
+
+5. LANDING PAGE AND SEE ALL ROUTE
+
+LivePublic.tsx defines LANDING_GYM_LIMIT = 8, requests at most eight records,
+slices the response defensively and uses each gym's stable _id key. Existing
+server ordering/public eligibility remain intact. See all gyms is always
+visible in the wrapping heading/action layout and links to /explore, the
+existing public search/filter/pagination page. Other gym queries are unchanged.
+The successful-empty message is gated on query success, not initial loading or
+failure. Tests cover 0, 1, 5, 8, 9 and 30 response records plus loading/error.
+
+6. TYPOGRAPHY AND ENLARGED-TEXT RESULTS
+
+Shared stack: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+"Noto Sans", Arial, sans-serif. Root font-size is 100%; typography retains its
+relative hierarchy. Mobile input overrides now use 1rem. Existing PDF invoice
+font support is intentionally retained. No font enumeration or device-font
+permission was added, and browser zoom is not disabled.
+
+Headless installed Chrome rendered the production build at desktop and mobile
+viewports, including 320/390-pixel widths and a 200% root-text setting. The
+19 checks covered the landing heading/cards, all four profile roles, viewer
+interaction, system fonts, and Admin offer forms in Dark and Light. They found
+and drove fixes for a global avatar flex-size override and narrow profile
+header overflow; the final run passed with no horizontal layout overflow in
+the checked views and no uncaught application JavaScript exceptions.
+
+These are browser viewport/reflow and CSS text-size checks with intercepted
+fixture APIs. They are not physical phone tests or an actual browser zoom-menu
+interaction. OS font-size changes, iOS text settings and broader production
+content combinations still require device verification. Browser system fonts
+do not promise native Dynamic Type behavior or every manufacturer's custom font.
+
+Browser artifacts were written locally to:
+  %TEMP%\getfit4u-ui-verification\results.json
+  %TEMP%\getfit4u-ui-verification\admin-offer-200-percent.png
+The generated screenshot was visually reviewed.
+
+7. PROFILE PHOTO AND VIEWER BEHAVIOR
+
+Profiles use one shared avatar variant: 6rem mobile and 8rem desktop; compact
+list/table avatars remain separate. The profile header wraps names/actions and
+stats with enlarged text. Existing Avatar consumers in lists, messages, reviews,
+attendance and support gain the same viewer when an authorized photo exists.
+Header navigation avatars retain their existing profile-link behavior.
+
+The viewer prefers the provided full-size avatar URL over its thumbnail and
+uses natural-size, viewport-bounded object-fit: contain rendering, without
+circular cropping or forced enlargement of small images. It provides visible
+Close, image-click, backdrop-click and Escape dismissal, a loading state and
+safe error text. It uses the existing accessible portal, focus trap/restoration,
+modal stacking and background-scroll lock. Click/double-click/Enter/Space events
+do not activate the containing member row; editing controls are separate.
+
+Only image URLs already authorized and supplied by existing APIs are used. No
+private bucket is made public, no new image lookup bypasses tenant permissions,
+and no viewer-specific persistent image cache is added. Account-session changes
+close an open photo. Existing S3 access and service-worker privacy rules remain.
+
+8. CONFIRMED INSTALL-BUTTON CAUSE
+
+The startup action was labeled Install even when no saved beforeinstallprompt
+event existed; that branch opened the guidance modal. This is the confirmed
+code path behind an instructions-only action being presented as direct install.
+Absence of an event can be legitimate browser/installability behavior.
+
+The existing PWA lifecycle already started at application level, outside the
+banner. This update additionally captures the event with an early same-origin
+head script before the application module and adopts it into the shared
+controller. That closes a possible bundle-loading timing gap; a missed event
+on the user's specific device was not proven. No unsupported claim that adding
+a manifest alone fixed installation is made.
+
+9. SUPPORTED INSTALL FLOW AND LIMITATIONS
+
+When the browser provides an unused beforeinstallprompt event, the UI shows
+Install. A direct click synchronously calls the real event's prompt() before
+unrelated asynchronous work, clears the saved event and shares its busy state
+across banner/Settings. Subsequent clicks cannot reuse it. Dismissed/error states
+are handled. Prompt acceptance alone is not reported as verified installation;
+appinstalled or detectable standalone mode controls installed UI state.
+
+Without a supported event, the action is explicitly How to install and explains
+the applicable browser's manual route. The shared controller survives route
+changes and banner expiry. The session banner remains dismissible, above the
+navbar and limited to two minutes; Profile/Settings remains available afterward.
+No event object is serialized into localStorage.
+
+Manifest identity/start URL/scope/standalone settings, icon assets, early script
+ordering and existing root service-worker behavior were inspected/tested. The
+root worker remains coordinated with Firebase; no private API, message or
+invoice cache was introduced. Login/session restoration and tab ordering remain.
+
+Automated tests synthesize browser install events and verify exact prompt calls;
+they do not install an app on a physical device. Real Android/Chromium prompt,
+home-screen icon and standalone launch, and iPhone manual installation remain
+unverified. No configured signed native release/store destination was established;
+native app distribution would require a separate deliverable.
+
+Platform behavior references checked during implementation:
+  https://developer.mozilla.org/en-US/docs/Web/API/Window/beforeinstallprompt_event
+  https://developer.mozilla.org/en-US/docs/Web/API/BeforeInstallPromptEvent/prompt
+
+10. COMMANDS AND ACTUAL VERIFICATION OUTCOMES
+
+Backend directory:
+- npm.cmd run build: PASS (TypeScript).
+- npm.cmd run test:vercel-types: PASS.
+- npm.cmd run lint: PASS, zero allowed warnings.
+- npm.cmd test -- --pool=threads --maxWorkers=2: PASS, 99 files / 741 tests.
+- node --import tsx src/scripts/check-platform-offers.ts --run-isolated: PASS.
+  Real Express endpoints and MongoDB transactions were exercised in a uniquely
+  named temporary test database. Payment provider responses were mocked and
+  external delivery disabled. The test database was removed by a guarded cleanup.
+  Verified Admin A/B visibility, Owner isolation, audience/plan/scope rejection,
+  manipulated amounts, a concurrent final redemption, pending/unpaid state,
+  idempotent retries, signed mock delayed capture/replay, one immutable invoice,
+  renewal-only rules, one-purchase pricing and additive migration classification.
+- node --import tsx src/scripts/migrate-promotion-scopes.ts: read-only PASS,
+  2 legacy gym offers identified, 0 ambiguous, 0 records updated.
+- npm.cmd audit --json: 0 reported vulnerabilities across 705 dependencies.
+
+Frontend directory:
+- npm.cmd run build: PASS (tsc -b and production Vite bundle).
+- npm.cmd run lint: PASS, zero allowed warnings.
+- npm.cmd test -- --maxWorkers=2: PASS, 89 files / 587 tests, including the
+  post-login session transition and shared-modal event-isolation coverage.
+- The focused seven-file run before the final full run passed all 43 tests
+  covering checkout, platform forms, viewer, landing and installation.
+- node scripts/check-promotion-ui.mjs: PASS, 19 Chrome checks described above.
+- npm.cmd audit --json: 0 reported vulnerabilities across 336 dependencies.
+
+Repository hygiene:
+- git diff --check: PASS.
+- Local secret scan checked 639 text files against 12 configured secret values
+  and common credential/private-key patterns: no unresolved findings. One
+  existing documentation example containing the literal YOUR_KEY placeholder
+  was reviewed and excluded as a false positive. Actual .env values were not
+  printed or included in this report or frontend source.
+- No unresolved Critical/High finding was reported by these checks. This is a
+  bounded test/audit result, not a guarantee of vulnerability-free operation.
+
+11. DEPLOYMENT AND DEVICE FOLLOW-UP
+
+Deploy the matching backend and frontend together and perform the reviewed scope
+backfill/index step above. Keep the existing same-origin API/refresh-cookie,
+HTTPS and service-worker deployment configuration. The current configured DB
+was inspected read-only; its scope backfill remains a deployment task.
+
+On the deployed HTTPS origin, verify physical Android installation and iPhone
+manual installation, the home-screen icon and standalone launch, then smoke-test
+login/session restoration, QR camera scanning, class booking, notifications/deep
+links, messages, profile viewing/upload and payment/invoice access. Also check
+200% browser zoom and each available OS accessibility text-size setting.
+
+Live gateway capture, live Firebase delivery and physical install behavior were
+not exercised by the isolated/mocked tests. There is no newly introduced payment
+or notification provider configuration requirement for these offer/UI changes.
+No production deployment or app-store distribution was performed in this task.

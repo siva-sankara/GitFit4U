@@ -9,7 +9,7 @@ it("upgrades old reminders using a batched trusted gym lookup, preserving immuta
   const results = await withNotificationLinks([old, { ...old, _id: "second" }]);
   expect(find).toHaveBeenCalledTimes(1);
   expect(find).toHaveBeenCalledWith({ _id: { $in: [gymId] }, deletedAt: null });
-  expect(results[0]).toEqual({ ...old, actionUrl: "/platform-renewal?gym=target-gym" });
+  expect(results[0]).toEqual({ ...old, actionUrl: "/notification-open/notification" });
   expect(old.actionUrl).toBe("/owner/platform-subscription");
 });
 it("falls back to the inbox when a historical gym no longer exists rather than choosing the active gym", async () => {

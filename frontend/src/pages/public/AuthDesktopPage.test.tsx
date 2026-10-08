@@ -30,6 +30,7 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount());
   host.remove();
+  vi.unstubAllEnvs();
 });
 function GymDestination() {
   const location = useLocation();
@@ -111,6 +112,51 @@ async function verifySignup() {
   await submit();
 }
 describe("account screens", () => {
+  it("shows the transient test OTP in the login flow and clears it on successful login", async () => {
+    mocks.request.mockImplementation(async (path) => path === "/api/v1/auth/otp/request"
+      ? { data: { ...submittedOtp.data, deliveryStatus: "SIMULATED", developmentPreview: { code: "135790", simulated: true } } }
+      : path.includes("/status") ? { data: { deliveryStatus: "SIMULATED", expired: false } }
+        : { data: { accessToken: "token", user: { activeRole: "USER" } } });
+    await render("/login"); await clickLink("Login with WhatsApp OTP");
+    await fill("phone", "9876543210"); await submit();
+    expect(host.textContent).toContain("Verify test login");
+    expect(host.querySelector("output")?.textContent).toBe("135790");
+    expect(host.textContent).toContain("No email was sent");
+    expect(host.querySelector<HTMLInputElement>('input[name="code"]')!.value).toBe("");
+    expect(sessionStorage.getItem("gfu_auth_challenge")).not.toContain("135790");
+    await fill("code", "135790"); await submit();
+    expect(host.textContent).toContain("Member home");
+    expect(host.textContent).not.toContain("135790");
+  });
+  it("never exposes a preview attached to a normal delivery response", async () => {
+    mocks.request.mockResolvedValue({ data: { ...submittedOtp.data, developmentPreview: { code: "135790", simulated: true } } });
+    await render("/auth/phone"); await fill("phone", "9876543210"); await submit();
+    expect(host.querySelector("output")).toBeNull();
+    expect(host.textContent).not.toContain("135790");
+    expect(sessionStorage.getItem("gfu_auth_challenge")).not.toContain("135790");
+  });
+  it("does not render a supplied simulated code in a production frontend", async () => {
+    vi.stubEnv("DEV", false);
+    mocks.request.mockResolvedValue({ data: { ...submittedOtp.data, deliveryStatus: "SIMULATED", developmentPreview: { code: "135790", simulated: true } } });
+    await render("/auth/phone"); await fill("phone", "9876543210"); await submit();
+    expect(host.querySelector("output")).toBeNull();
+    expect(host.textContent).not.toContain("135790");
+    expect(sessionStorage.getItem("gfu_auth_challenge")).not.toContain("135790");
+  });
+  it("shows a transient simulated preview without auto-filling or persisting the code", async () => {
+    mocks.request.mockImplementation(async (path) => path === "/api/v1/auth/register"
+      ? { data: { ...submittedOtp.data, deliveryStatus: "SIMULATED", developmentPreview: { code: "246810", simulated: true } } }
+      : path.includes("/status") ? { data: { deliveryStatus: "SIMULATED", expired: false } }
+        : { data: { accessToken: "token", user: { activeRole: "USER" } } });
+    await render("/register"); await signupFields(); await submit();
+    expect(host.textContent).toContain("Development only"); expect(host.textContent).toContain("246810");
+    expect(host.textContent).toContain("No WhatsApp message was sent");
+    expect(host.querySelector<HTMLInputElement>('input[name="code"]')!.value).toBe("");
+    expect(sessionStorage.getItem("gfu_auth_challenge")).not.toContain("246810");
+    await fill("code", "246810"); await submit();
+    expect(host.textContent).toContain("Member home"); expect(host.textContent).not.toContain("246810");
+    expect(sessionStorage.getItem("gfu_auth_challenge")).toBeNull();
+  });
   it.each(["/register", "/auth/signup"])(
     "submits signup from %s and enters the member workspace",
     async (path) => {

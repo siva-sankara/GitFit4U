@@ -19,7 +19,8 @@ worker.addEventListener("notificationclick", (event) => {
   let url = new URL("/notifications", worker.location.origin);
   try {
     const candidate = new URL(
-      data.navigationPath || "/notifications",
+      /^[a-f\d]{24}$/i.test(data.notificationId || "")
+        ? `/notification-open/${data.notificationId}` : "/notifications",
       worker.location.origin,
     );
     if (candidate.origin === url.origin) url = candidate;
@@ -36,9 +37,12 @@ worker.addEventListener("notificationclick", (event) => {
         (client) => new URL(client.url).origin === url.origin,
       );
       if (existing) {
-        existing.postMessage({ type: "GETFIT4U_NOTIFICATION_CLICK", path: url.pathname + url.search + url.hash });
-        await existing.focus();
-      } else await worker.clients.openWindow(url.href);
+        try {
+          const navigated = await existing.navigate(url.href);
+          if (navigated) { await navigated.focus(); return; }
+        } catch { /* A closing tab must not lose the notification destination. */ }
+      }
+      await worker.clients.openWindow(url.href);
     })(),
   );
 });
@@ -60,7 +64,7 @@ if (
         tag: payload.data?.notificationId,
         silent: payload.data?.soundEnabled !== "true",
         data: {
-          navigationPath: payload.data?.navigationPath || "/notifications",
+          notificationId: payload.data?.notificationId,
         },
       },
     );

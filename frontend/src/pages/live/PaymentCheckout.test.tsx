@@ -96,6 +96,22 @@ function pay() {
     (b) => b.textContent === "Pay with Razorpay",
   )!;
 }
+it("locks a resumed platform order to its committed quote instead of offering a second coupon", async () => {
+  const original = mocks.request.getMockImplementation()!;
+  mocks.request.mockImplementation(async (path, ...args) => {
+    const result = await original(path, ...args);
+    if (path.endsWith("/quotes")) result.data = { ...result.data, paymentCommitted: true, discountMinor: 2000, totalMinor: 8000,
+      pricingSnapshot: { offerDiscountMinor: 2000, offer: { name: "Committed offer", code: "ORIGINAL", terms: "One purchase" } } };
+    return result;
+  });
+  await act(async () => root.render(<QueryClientProvider client={client}><PaymentCheckout quotePath="/api/v1/checkout/platform/quotes" quoteBody={{ registrationId: "registration-one", planId: "plan-one" }} /></QueryClientProvider>));
+  await until(() => Boolean(pay()));
+  expect(host.textContent).toContain("Pricing is locked to the existing payment order");
+  expect(host.textContent).toContain("Applied: Committed offer");
+  expect(host.querySelector(".checkout-coupon")).toBeNull();
+  expect(host.querySelector(".platform-checkout-offers")).toBeNull();
+  expect(mocks.request.mock.calls.some(([path]) => path.endsWith("/orders"))).toBe(false);
+});
 async function start(membership = false) {
   await act(async () =>
     root.render(

@@ -689,11 +689,11 @@ export function OwnerMembersPage() {
                   />
                 </th>
                 <th>Member</th>
-                <th>Trainer</th>
+                {/* <th>Trainer</th> */}
                 <th>Contact</th>
                 <th>Plan / Access</th>
                 <th>Attendance</th>
-                <th>Actions</th>
+                <th style={{width:'200px'}}>Actions</th>
                 <th>Join / Renewal</th>
               </tr>
             </thead>
@@ -738,7 +738,7 @@ export function OwnerMembersPage() {
                         </div>
                       </div>
                     </td>
-                    <td data-label="Trainer">
+                    {/* <td data-label="Trainer">
                       <strong>{row.assignedTrainerId?.name || "Not assigned"}</strong>
                       {row.assignedTrainerId && (
                         <small className="member-trainer-phone">
@@ -753,7 +753,7 @@ export function OwnerMembersPage() {
                           {canManage ? row.assignedTrainerId ? "View / Edit" : "Assign trainer" : "View member"}
                         </Link>
                       </small>
-                    </td>
+                    </td> */}
                     <td data-label="Contact">
                       <span className="member-contact-line">
                         <Phone size={15} aria-hidden="true" />
@@ -776,6 +776,7 @@ export function OwnerMembersPage() {
                     <td data-label="Actions">
                       <div
                         className="member-row-actions"
+                        style={{width:'200px'}}
                         onClick={(event) => event.stopPropagation()}
                         onDoubleClick={(event) => event.stopPropagation()}
                       >

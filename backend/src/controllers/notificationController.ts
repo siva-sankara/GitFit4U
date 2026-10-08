@@ -4,10 +4,21 @@ import { Notification } from "../models/Engagement.js";
 import { AppError } from "../utils/AppError.js";
 import { writeAudit } from "../services/auditService.js";
 import { withNotificationLinks } from "../services/notificationLinkService.js";
+import { resolveNotificationDestination } from "../services/notificationDestinationService.js";
 
 const objectId = z
   .string()
   .regex(/^[a-f\d]{24}$/i, "A valid notification identifier is required.");
+export async function openNotification(req: Request, res: Response) {
+  const id = objectId.parse(req.params.id);
+  const row = await Notification.findOne({ _id: id, userId: req.auth!.userId, archivedAt: null }).lean();
+  if (!row) throw new AppError(404, "NOTIFICATION_NOT_FOUND", "This notification is unavailable for the signed-in account.");
+  const destination = await resolveNotificationDestination(row, req.auth!);
+  // Reading/opening is best effort and never changes target authorization.
+  await Notification.updateOne({ _id: id, userId: req.auth!.userId, archivedAt: null },
+    { $set: { openedAt: new Date(), ...(row.readAt ? {} : { readAt: new Date() }) } }).catch(() => undefined);
+  res.json({ success: true, data: destination });
+}
 export async function notificationDetails(req: Request, res: Response) {
   const id = objectId.parse(req.params.id);
   const data = await Notification.findOne({

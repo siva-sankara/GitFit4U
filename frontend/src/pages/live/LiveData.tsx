@@ -2,7 +2,7 @@ import { PageHeader } from "../../components/PageHeader";
 import { CompactFilters } from "../../components/CompactFilters";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { apiRequest, type ApiEnvelope } from "../../services/apiClient";
 import { Modal } from "../../components/Modal";
 import { LocationPicker } from "../../components/LocationPicker";
@@ -478,6 +478,8 @@ export function ResourcePage({
   actions?: (row: Row) => ReactNode;
   transform?: (body: Row) => Row;
 }) {
+  const [routeParams, setRouteParams] = useSearchParams();
+  const selectedRecord = resource === "payments" ? routeParams.get("payment") : resource === "subscriptions" ? routeParams.get("membership") : resource === "gyms" ? routeParams.get("gym") : null;
   const [page, setPage] = useState(1),
     [limit, setLimit] = useState(10),
     [q, setQ] = useState(""),
@@ -497,7 +499,7 @@ export function ResourcePage({
     return () => window.clearTimeout(timer);
   }, [q, search]);
   const query = useData<Row[]>(
-    `/api/v1/workspace/records/${resource}?${new URLSearchParams({ page: String(page), limit: String(limit), q: search, status, ...(from ? { from } : {}), ...(to ? { to } : {}) })}`,
+    `/api/v1/workspace/records/${resource}?${new URLSearchParams({ page: String(page), limit: String(limit), q: search, status, ...(selectedRecord ? { selected: selectedRecord } : {}), ...(from ? { from } : {}), ...(to ? { to } : {}) })}`,
   );
   const rows = query.data?.data || [],
     meta = query.data?.meta;
@@ -508,6 +510,7 @@ export function ResourcePage({
           <span className="eyebrow">Workspace</span>
           <h1>{title}</h1>
           <p>{meta?.total ?? 0} records</p>
+          {selectedRecord && <p>Showing the record from your notification. <button className="btn btn-ghost" onClick={() => { setRouteParams(current => { current.delete("payment"); current.delete("membership"); current.delete("gym"); return current; }); setPage(1); }}>Show all</button></p>}
         </div>
         {createPath && fields && (
           <button className="btn btn-primary" onClick={() => setAdding(true)}>

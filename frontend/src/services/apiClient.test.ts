@@ -194,6 +194,17 @@ it("emits structured session diagnostics without credentials", async () => {
 
 const token = (sid = "session", version = 1) => `header.${btoa(JSON.stringify({ sub: "user", sid, iat: version }))}.signature`;
 
+it("does not invalidate the first profile request when the login page confirms the already established token", async () => {
+  const profile = deferred<Response>();
+  api.setAccessToken(token());
+  fetcher.mockReturnValueOnce(profile.promise);
+  const request = api.apiRequest("/api/v1/auth/me");
+  // The API handshake publishes authentication before AuthDesktopPage.finish.
+  api.setAccessToken(token());
+  profile.resolve(ok({ user: { name: "Member" } }));
+  await expect(request).resolves.toMatchObject({ data: { user: { name: "Member" } } });
+});
+
 it("migrates an old tab token to cookie recovery without retaining the credential in storage", async () => {
   sessionStorage.setItem("gfu_access_token", "legacy-token");
   localStorage.removeItem("gfu-has-session");

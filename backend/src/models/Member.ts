@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { enforcePlatformCapacity } from "../services/platformCapacityService.js";
 const { Schema, model, models } = mongoose;
 
 const memberProfileSchema = new Schema(
@@ -68,6 +69,10 @@ memberProfileSchema.index({ gymId: 1, isDeleted: 1, status: 1, joinedAt: -1 });
 memberProfileSchema.index({ "contact.avatarAttachmentId": 1 });
 memberProfileSchema.index({ gymId: 1, assignedTrainerId: 1, createdAt: -1 });
 memberProfileSchema.index({ gymId: 1, currentSubscriptionId: 1 });
+memberProfileSchema.pre("save", async function () {
+  if (this.status === "ACTIVE" && (this.isNew || this.isModified("status")))
+    await enforcePlatformCapacity(this.gymId, "MEMBER", this.$session(), { _id: this._id });
+});
 
 export const MemberProfile =
   models.MemberProfile || model("MemberProfile", memberProfileSchema);

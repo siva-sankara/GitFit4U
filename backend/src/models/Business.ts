@@ -181,6 +181,16 @@ const promotionFields = {
 const offerSchema = new Schema(
   {
     ...promotionFields,
+    // No default: legacy records are classified explicitly by the additive migration.
+    scope: { type: String, enum: ["GYM_MEMBERSHIP", "PLATFORM_SUBSCRIPTION", "REVIEW_REQUIRED"], index: true },
+    version: { type: Number, default: 1, min: 1 },
+    platformPlanIds: [{ type: Schema.Types.ObjectId, ref: "PlatformPlan" }],
+    ownerAudienceIds: [{ type: Schema.Types.ObjectId, ref: "User" }],
+    gymAudienceIds: [{ type: Schema.Types.ObjectId, ref: "Gym" }],
+    purchaseKinds: [{ type: String, enum: ["NEW", "RENEWAL"] }],
+    billingPeriods: [{ type: String, enum: ["MONTHLY", "YEARLY"] }],
+    application: { type: String, enum: ["ONE_TIME"] },
+    scopeReviewReason: String,
     type: {
       type: String,
       enum: ["DISCOUNT", "NEW_MEMBER", "FESTIVAL", "REFERRAL", "FIRST_MONTH"],
@@ -200,6 +210,7 @@ const offerSchema = new Schema(
 );
 offerSchema.index({ gymId: 1, code: 1 }, { unique: true, partialFilterExpression: { code: { $type: "string" } } });
 offerSchema.index({ gymId: 1, status: 1, startsAt: 1, endsAt: 1 });
+offerSchema.index({ scope: 1, status: 1, startsAt: 1, endsAt: 1 });
 const advertisementSchema = new Schema(
   {
     ...promotionFields,

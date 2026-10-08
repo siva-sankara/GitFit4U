@@ -213,6 +213,7 @@ export async function markNotificationUnread(req: Request, res: Response) {
 }
 
 export async function createSupportTicket(req: Request, res: Response) {
+  const context = await validatedSupportContext(req.auth!.userId, req.body.gymId, req.body.related);
   const requestKey = req.header("idempotency-key");
   if (requestKey && !/^[a-zA-Z0-9-]{8,120}$/.test(requestKey))
     throw new AppError(
@@ -226,10 +227,11 @@ export async function createSupportTicket(req: Request, res: Response) {
   const input = {
     publicId,
     requesterId: req.auth!.userId,
-    gymId: req.body.gymId,
+    ...context,
     subject: req.body.subject,
     category: req.body.category,
     priority: req.body.priority,
+    activity: [{ type: "CREATED", actorId: req.auth!.userId, to: "OPEN", at: new Date() }],
     messages: [
       {
         authorId: req.auth!.userId,
@@ -256,7 +258,10 @@ export async function createSupportTicket(req: Request, res: Response) {
   if (
     ticket.subject !== input.subject ||
     ticket.messages[0]?.body !== req.body.message ||
-    String(ticket.gymId || "") !== String(req.body.gymId || "")
+    String(ticket.gymId || "") !== String(req.body.gymId || "") ||
+    (ticket.category || "") !== (req.body.category || "") ||
+    (ticket.priority || "NORMAL") !== (req.body.priority || "NORMAL") ||
+    (ticket.related?.id || "") !== (req.body.related?.id || "")
   )
     throw new AppError(
       409,
@@ -270,3 +275,4 @@ export async function createSupportTicket(req: Request, res: Response) {
     data: { ...ticket.toObject(), conversationId: conversation.publicId },
   });
 }
+import { validatedSupportContext } from "../services/supportContextService.js";

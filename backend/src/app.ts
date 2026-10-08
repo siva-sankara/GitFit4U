@@ -30,6 +30,15 @@ app.disable("x-powered-by");
 app.set("trust proxy", 1);
 app.use(requestContext);
 app.use(httpLogging);
+app.use((req, res, next) => {
+  if (env.OTP_MODE !== "development_preview") return next();
+  const peer = req.socket.remoteAddress || "";
+  const local = ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(peer);
+  if (!local || !["localhost", "127.0.0.1", "[::1]"].includes(req.hostname) || req.headers["x-forwarded-host"] || req.headers["forwarded"])
+    return next(new AppError(403, "LOCAL_PREVIEW_ONLY", "This test server accepts direct local requests only."));
+  res.setHeader("Cache-Control", "no-store");
+  next();
+});
 app.use(
   helmet({
     contentSecurityPolicy: false,

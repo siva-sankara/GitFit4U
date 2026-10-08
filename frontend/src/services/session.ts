@@ -77,8 +77,19 @@ export function useSession({
     // was cleared. Persistence belongs to the cookie, never to a JS hint.
     enabled: !publicPage || Boolean(token) || recoverSession,
     retry: (attempt, error) =>
-      attempt < 1 && error instanceof ApiError &&
-      (error.status === 0 || error.status === 429 || error.status >= 500),
+      error instanceof ApiError &&
+      (error.code === "SESSION_CHANGED"
+        ? attempt < 2
+        : attempt < 1 &&
+          (error.status === 0 || error.status === 429 || error.status >= 500)),
+    // A login, logout, role switch or another-tab session change deliberately
+    // invalidates an in-flight profile read. Retry that safe GET immediately so
+    // the destination screen never exposes the internal transition as a
+    // user-facing "Retry session" error.
+    retryDelay: (attempt, error) =>
+      error instanceof ApiError && error.code === "SESSION_CHANGED"
+        ? 0
+        : Math.min(1_000 * 2 ** attempt, 30_000),
     retryOnMount: true,
     staleTime: 60_000,
     // Lifecycle reconciliation below replaces session keep-alive polling.

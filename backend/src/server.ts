@@ -14,7 +14,7 @@ async function start() {
   const io = createRealtimeGateway(server);
   app.set("io", io);
   const stopPush = startPushDelivery(io);
-  server.listen(env.PORT, () => {
+  server.listen(env.PORT, env.OTP_MODE === "development_preview" ? "127.0.0.1" : "0.0.0.0", () => {
     logger.info(
       { port: env.PORT, environment: env.NODE_ENV },
       "GETFIT4U API started",

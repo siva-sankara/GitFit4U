@@ -10,6 +10,7 @@
     "worker:whatsapp": "tsx src/workers/whatsappWorker.ts",
     "test:enhancements": "tsx src/scripts/verify-isolated-membership.ts --run-isolated",
     "dev": "tsx watch src/server.ts",
+    "dev:otp-preview": "tsx src/scripts/start-otp-preview.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server.js",
     "start:whatsapp-worker": "node dist/workers/whatsappWorker.js",
@@ -25,7 +26,9 @@
     "db:migrate": "tsx src/scripts/migrate-indexes.ts",
     "db:migrate-account-promotions": "tsx src/scripts/migrate-account-promotions.ts",
     "db:migrate-promotions": "tsx src/scripts/migrate-promotions.ts",
-    "test:push": "tsx src/scripts/firebase-push-check.ts"
+    "test:push": "tsx src/scripts/firebase-push-check.ts",
+    "db:migrate-promotion-scopes": "tsx src/scripts/migrate-promotion-scopes.ts",
+    "test:platform-offers": "tsx src/scripts/check-platform-offers.ts --run-isolated"
   },
   "dependencies": {
     "@fontsource/noto-sans": "^5.3.0",

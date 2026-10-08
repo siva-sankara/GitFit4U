@@ -136,7 +136,11 @@ export async function sendWhatsAppAuthenticationOtp(phone: string, code: string)
     const footer = components.find(
       (entry: any) => String(entry?.type).toUpperCase() === "FOOTER",
     );
-    if (Number(footer?.code_expiration_minutes) !== 5)
+    // Creation and GET responses have different component shapes. Meta can
+    // return the rendered English footer instead of the creation-only field.
+    const expiryMinutes = footer?.code_expiration_minutes ??
+      (config.language.startsWith("en") ? String(footer?.text || "").match(/\b(\d+)\s+minutes?\b/i)?.[1] : undefined);
+    if (Number(expiryMinutes) !== 5)
       throw new AppError(
         503,
         "WHATSAPP_AUTH_TEMPLATE_EXPIRY_MISMATCH",
@@ -146,9 +150,15 @@ export async function sendWhatsAppAuthenticationOtp(phone: string, code: string)
       (entry: any) => String(entry?.type).toUpperCase() === "BUTTONS",
     );
     const copyCodeButton = buttons?.buttons?.[0];
-    const hasCopyCode =
-      String(copyCodeButton?.type).toUpperCase() === "OTP" &&
-      String(copyCodeButton?.otp_type).toUpperCase() === "COPY_CODE";
+    let returnedCopyCode = false;
+    try {
+      const url = new URL(String(copyCodeButton?.url || ""));
+      returnedCopyCode = String(copyCodeButton?.type).toUpperCase() === "URL" &&
+        url.protocol === "https:" && url.hostname === "www.whatsapp.com" && url.pathname === "/otp/code/" &&
+        url.searchParams.get("code") === "{{1}}";
+    } catch { /* A creation-style OTP component is checked below. */ }
+    const hasCopyCode = returnedCopyCode ||
+      (String(copyCodeButton?.type).toUpperCase() === "OTP" && String(copyCodeButton?.otp_type).toUpperCase() === "COPY_CODE");
     if (!hasCopyCode)
       throw new AppError(
         503,

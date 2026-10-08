@@ -305,7 +305,7 @@ td small { display: block; color: var(--text-muted); }
   .footer-bottom { align-items: flex-start; flex-direction: column; gap: 6px; }
 
   .workspace { display: block; padding-bottom: 72px; }
-  .sidebar { position: fixed; z-index: 200; top: 0; bottom: 0; left: 0; width: min(310px, calc(100vw - 44px)); height: 100dvh; transform: translateX(-105%); transition: transform 200ms var(--ease); }
+  .sidebar { position: fixed; z-index: 200; top: 0; bottom: 0; left: 0; width: min(310px, calc(100vw - 44px)); height: 100%; transform: translateX(-105%); transition: transform 200ms var(--ease); }
   .sidebar.drawer-open { transform: translateX(0); }
   .sidebar .brand > span:last-child,
   .sidebar .gym-selector,

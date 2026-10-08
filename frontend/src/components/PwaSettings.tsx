@@ -18,7 +18,7 @@ export function PwaSettings() {
     <h2><Smartphone size={20} aria-hidden="true" /> GETFIT4U on your device</h2>
     {pwa.installed ? <p>GETFIT4U is installed on this device.</p> : <>
       <p>Install GETFIT4U for a dedicated app window and quick access from your home screen.</p>
-      {pwa.installAvailable ? <button className="btn btn-primary" onClick={() => { void installApp(); }}><Download size={18} aria-hidden="true" />Install GETFIT4U</button> : <p>{installInstructions()}</p>}
+      {pwa.installState === "prompting" ? <p role="status">Complete the installation prompt in your browser.</p> : pwa.installAvailable ? <button className="btn btn-primary" onClick={() => { void installApp(); }}><Download size={18} aria-hidden="true" />Install GETFIT4U</button> : <div><h3>How to install</h3><p>{installInstructions()}</p></div>}
     </>}
     <p className="subtle">A connection is required for payments, bookings, attendance, messages and account changes.</p>
     {pwa.error && <p role="alert">{pwa.error}</p>}

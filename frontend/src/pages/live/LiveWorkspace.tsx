@@ -18,6 +18,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useCurrentUser } from "../../api/hooks";
 import { Modal } from "../../components/Modal";
 import { Avatar } from "../../components/Avatar";
+import { PaymentPricing } from "../../components/PaymentPricing";
 import { apiRequest, setAccessToken } from "../../services/apiClient";
 import {
   useData,
@@ -133,7 +134,7 @@ const paymentCols = [
   col("publicId", "Reference"),
   col("payerId.name", "Payer"),
   col("purpose", "Purpose", "status"),
-  col("amountMinor", "Amount", "money"),
+  { ...col("amountMinor", "Amount", "money"), render: (row: Row) => <PaymentPricing payment={row} /> },
   status,
   created,
 ];
@@ -760,7 +761,7 @@ export function LiveWorkspace() {
   }
   if (
     ["owner", "admin"].includes(role) &&
-    (page === "offers" || page === "ads")
+    (page === "offers" || page === "ads" || (role === "admin" && page === "platform-offers"))
   )
     return <PromotionManagement kind={page} admin={role === "admin"} />;
   if (page === "security") return <Security />;
@@ -776,7 +777,7 @@ export function LiveWorkspace() {
             col("userId.name", "Recipient"),
             col("title", "Title"),
             col("category", "Category"),
-            col("pushStatus", "Push delivery", "status"),
+            { key: "pushStatus", title: "Push delivery", render: (row: Row) => row.openedAt ? "Opened" : row.pushStatus === "SENT" ? "Accepted by provider" : label(row.pushStatus) },
             col("createdAt", "Created", "date"),
           ]}
           actions={(row) =>

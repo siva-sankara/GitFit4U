@@ -241,6 +241,7 @@ function SubscriptionCommand({
 
 export function MemberSubscriptions() {
   const location = useLocation();
+  const selectedMembership = new URLSearchParams(location.search).get("membership");
   const joinedGymName: unknown = location.state?.joinedGymName;
   const client = useQueryClient();
   const [page, setPage] = useState(1), [limit, setLimit] = useState(10);
@@ -249,7 +250,7 @@ export function MemberSubscriptions() {
   const [draftSearch, setDraftSearch] = useState("");
   const [selection, setSelection] = useState<Selection | null>(null);
   const [notice, setNotice] = useState("");
-  const path = `${resourcePath}?${new URLSearchParams({ page: String(page), limit: String(limit), status, q: search })}`;
+  const path = `${resourcePath}?${new URLSearchParams({ page: String(page), limit: String(limit), status, q: search, ...(selectedMembership ? { selected: selectedMembership } : {}) })}`;
   const query = useQuery({
     queryKey: ["api", path],
     queryFn: () => apiRequest<ApiEnvelope<MemberSubscription[]>>(path),
@@ -317,6 +318,7 @@ export function MemberSubscriptions() {
           <span className="eyebrow">Memberships</span>
           <h1>Your subscriptions</h1>
           <p>Manage your gym access, membership dates and plans.</p>
+          {selectedMembership && <Link className="btn btn-secondary" to="/app/profile?section=membership">Show all memberships</Link>}
         </div>
         <Link className="btn btn-primary" to="/app/explore">
           Find a gym

@@ -1,7 +1,7 @@
 import type { Request, Response } from "express";
 import mongoose from "mongoose";
 import { nanoid } from "nanoid";
-import { redeemPaymentOffer } from "../services/promotionService.js";
+import { redeemPaymentOffer, platformQuotePricing } from "../services/promotionService.js";
 import { env } from "../config/env.js";
 import { platformRenewalQuote, activatePlatformRenewal } from "../services/platformRenewalService.js";
 import {
@@ -30,6 +30,7 @@ import {
 import { Gym } from "../models/Gym.js";
 import { User } from "../models/User.js";
 import { GymRegistration } from "../models/GymRegistration.js";
+import { settleAuthorizedGatewayPayment } from "../services/gymActivationService.js";
 import { PlatformPlan } from "../models/Commerce.js";
 import {
   registrationPayment,
@@ -42,7 +43,7 @@ export async function createPlatformQuote(req: Request, res: Response) {
   if (req.body.renewal === true) {
     if (req.auth?.role !== "GYM_OWNER" || !req.auth.gymId) throw new AppError(403, "RENEWAL_FORBIDDEN", "Select a gym you own before renewing.");
     if (req.body.expectedGymId && req.body.expectedGymId !== req.auth.gymId) throw new AppError(409, "GYM_CONTEXT_CHANGED", "Your selected gym changed. Confirm the intended gym before renewing.");
-    return res.status(201).json({ success: true, data: await platformRenewalQuote(req.auth.userId, req.auth.gymId, req.body.planId) });
+    return res.status(201).json({ success: true, data: await platformRenewalQuote(req.auth.userId, req.auth.gymId, req.body.planId, req.body) });
   }
   const quote = await mongoose.connection.transaction(async (session) => {
     const registration = await GymRegistration.findOne({
@@ -93,7 +94,7 @@ export async function createPlatformQuote(req: Request, res: Response) {
         );
       previous.expiresAt = new Date(Date.now() + 15 * 60000);
       await previous.save({ session });
-      return previous;
+      return { ...previous.toObject(), paymentCommitted: true };
     }
     if (!plan.active)
       throw new AppError(
@@ -101,11 +102,14 @@ export async function createPlatformQuote(req: Request, res: Response) {
         "PLAN_UNAVAILABLE",
         "This registration plan is no longer available. Select another plan.",
       );
+    const pricing = await platformQuotePricing({ ...req.body, plan, userId: req.auth!.userId, gymId: registration.gymId, renewal: false }, session);
     const cached = await PlanQuote.findOne({
       gymId: registration.gymId,
       purchaserId: req.auth!.userId,
       planId: plan._id,
       "planSnapshot.version": plan.version,
+      offerId: pricing.offerId || null,
+      "pricingSnapshot.offer.version": pricing.pricingSnapshot.offer?.version || { $exists: false },
       expiresAt: { $gt: new Date() },
     }).session(session);
     registration.selectedPlatformPlanId = plan._id;
@@ -133,10 +137,7 @@ export async function createPlatformQuote(req: Request, res: Response) {
             memberLimit: plan.memberLimit,
             staffLimit: plan.staffLimit,
           },
-          subtotalMinor: plan.priceMinor,
-          discountMinor: 0,
-          taxMinor: 0,
-          totalMinor: plan.priceMinor,
+          ...pricing,
           currency: plan.currency,
           expiresAt: new Date(Date.now() + 15 * 60000),
         },
@@ -462,6 +463,10 @@ async function processProviderEvent(
                 "REGISTRATION_PAYMENT_CONFLICT",
                 "Payment does not match this registration.",
               );
+            // Serialize with manual activation/collection before deciding which
+            // subscription this verified gateway receipt settles.
+            await Gym.updateOne({ _id: registration.gymId }, { $inc: { version: 1 } }, { session: dbSession });
+            if (await settleAuthorizedGatewayPayment(registration, payment, quote, dbSession)) return;
             const alreadyActive = await Subscription.findOne({
               type: "PLATFORM",
               gymId: registration.gymId,

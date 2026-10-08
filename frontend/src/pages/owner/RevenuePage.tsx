@@ -26,8 +26,8 @@ export function RevenueAnalytics({ embedded = false }: { embedded?: boolean }) {
     data = query.data?.data;
   const metrics: [string, string][] = [
     ["totalMinor", "Net membership revenue"],
-    ["grossMinor", "Captured receipts"],
-    ["refundMinor", "Processed refunds"],
+    // ["grossMinor", "Captured receipts"],
+    // ["refundMinor", "Processed refunds"],
     ["offlineMinor", "Offline payments"],
     ["onlineMinor", "Online payments"],
     ["pendingMinor", "Pending payments"],
@@ -122,10 +122,10 @@ export function RevenueAnalytics({ embedded = false }: { embedded?: boolean }) {
                   <strong>{money(data[key] || 0)}</strong>
                 </article>
               ))}
-              <article className="panel revenue-kpi">
+              {/* <article className="panel revenue-kpi">
                 <span>Transactions</span>
                 <strong>{data.transactionCount }</strong>
-              </article>
+              </article> */}
             </div>
             {data.series?.length  && (   <section className="panel form-section">
               <h2>Revenue over time</h2>
