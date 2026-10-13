@@ -19,12 +19,18 @@ const refundSchema = new Schema(
     },
     amountMinor: { type: Number, min: 1, required: true },
     currency: { type: String, default: "INR" },
-    source: { type: String, enum: ["ADMIN", "PROVIDER"], default: "ADMIN" },
+    source: { type: String, enum: ["ADMIN", "OWNER", "PROVIDER"], default: "ADMIN" },
     idempotencyKey: { type: String, unique: true, sparse: true },
     requestHash: String,
-    provider: { type: String, enum: ["RAZORPAY", "OFFLINE"] },
+    provider: { type: String, enum: ["RAZORPAY", "PHONEPE", "OFFLINE"] },
     providerRequestStartedAt: Date,
     reconciliationRequired: { type: Boolean, default: false },
+    transferReversalStatus: {
+      type: String,
+      enum: ["NOT_APPLICABLE", "PENDING", "PROCESSED", "FAILED", "RECONCILIATION_REQUIRED"],
+      default: "NOT_APPLICABLE",
+    },
+    providerReversalId: String,
     offlineReference: String,
     reason: { type: String, required: true, maxlength: 1000 },
     providerRefundId: { type: String, unique: true, sparse: true },
@@ -282,6 +288,115 @@ const bankAccountSchema = new Schema(
   { timestamps: true },
 );
 bankAccountSchema.index({ gymId: 1, status: 1 });
+
+const paymentConnectionSchema = new Schema(
+  {
+    publicId: { type: String, required: true, unique: true },
+    gymId: { type: Schema.Types.ObjectId, ref: "Gym", required: true, index: true },
+    authorizedOwnerId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
+    provider: { type: String, enum: ["RAZORPAY", "PHONEPE"], required: true },
+    environment: { type: String, enum: ["TEST", "LIVE"], required: true },
+    businessLegalName: { type: String, required: true, trim: true, maxlength: 200 },
+    businessType: { type: String, trim: true, maxlength: 80 },
+    businessContactEmail: { type: String, required: true, lowercase: true, trim: true },
+    businessContactPhone: { type: String, trim: true, maxlength: 18 },
+    linkedAccountId: { type: String, trim: true },
+    productConfigurationId: { type: String, trim: true },
+    settlementAccountId: { type: String, trim: true },
+    providerMerchantReference: String,
+    providerVendorReference: String,
+    providerEvidenceReference: String,
+    maskedSettlementAccount: String,
+    onboardingStatus: {
+      type: String,
+      enum: ["NOT_STARTED", "PENDING", "ACTION_REQUIRED", "APPROVED", "REJECTED", "DISABLED"],
+      default: "NOT_STARTED",
+      index: true,
+    },
+    collectionEnabled: { type: Boolean, default: false },
+    allocationCapability: {
+      type: String,
+      enum: ["PENDING", "ENABLED", "DISABLED"],
+      default: "PENDING",
+    },
+    settlementCapability: {
+      type: String,
+      enum: ["PENDING", "ENABLED", "DISABLED"],
+      default: "PENDING",
+    },
+    feeBearerPolicy: {
+      type: String,
+      enum: ["PLATFORM_ABSORBS", "GYM_DEDUCTS_ACTUAL"],
+    },
+    mappingVersion: { type: Number, default: 1, min: 1 },
+    termsAcceptedAt: Date,
+    termsAcceptedBy: { type: Schema.Types.ObjectId, ref: "User" },
+    termsVersion: String,
+    verifiedAt: Date,
+    disabledAt: Date,
+    lastProviderSyncAt: Date,
+    lastProviderStatus: String,
+  },
+  { timestamps: true, versionKey: "documentVersion", optimisticConcurrency: true },
+);
+paymentConnectionSchema.index(
+  { gymId: 1, provider: 1, environment: 1 },
+  { unique: true },
+);
+paymentConnectionSchema.index(
+  { linkedAccountId: 1, provider: 1, environment: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { linkedAccountId: { $type: "string" } },
+  },
+);
+
+const routeTransferSchema = new Schema(
+  {
+    publicId: { type: String, required: true, unique: true },
+    paymentId: { type: Schema.Types.ObjectId, ref: "Payment", required: true, index: true },
+    gymId: { type: Schema.Types.ObjectId, ref: "Gym", required: true, index: true },
+    paymentConnectionId: { type: Schema.Types.ObjectId, ref: "PaymentConnection", required: true },
+    provider: { type: String, enum: ["RAZORPAY"], default: "RAZORPAY" },
+    environment: { type: String, enum: ["TEST", "LIVE"], required: true },
+    providerOrderId: { type: String, required: true, index: true },
+    providerPaymentId: String,
+    providerTransferId: { type: String, required: true },
+    linkedAccountId: { type: String, required: true },
+    beneficiaryMappingVersion: { type: Number, required: true },
+    amountMinor: { type: Number, required: true, min: 1 },
+    amountReversedMinor: { type: Number, default: 0, min: 0 },
+    providerFeeMinor: { type: Number, default: 0, min: 0 },
+    providerTaxMinor: { type: Number, default: 0, min: 0 },
+    currency: { type: String, enum: ["INR"], default: "INR" },
+    status: {
+      type: String,
+      enum: ["PLANNED", "CREATED", "PENDING", "PROCESSED", "FAILED", "REVERSED", "PARTIALLY_REVERSED"],
+      default: "CREATED",
+      index: true,
+    },
+    settlementStatus: {
+      type: String,
+      enum: ["PENDING", "ON_HOLD", "PROCESSING", "SETTLED", "FAILED", "ADJUSTED"],
+      default: "PENDING",
+      index: true,
+    },
+    providerSettlementId: String,
+    settledAt: Date,
+    processedAt: Date,
+    errorCode: String,
+    errorDescription: String,
+    beneficiarySnapshot: { type: Schema.Types.Mixed, required: true, immutable: true },
+  },
+  { timestamps: true },
+);
+routeTransferSchema.index(
+  { provider: 1, environment: 1, providerTransferId: 1 },
+  { unique: true },
+);
+routeTransferSchema.index({ gymId: 1, createdAt: -1 });
+routeTransferSchema.index({ providerSettlementId: 1 }, { sparse: true });
+
 const settlementSchema = new Schema(
   {
     publicId: { type: String, required: true, unique: true },
@@ -325,5 +440,9 @@ export const Favorite = models.Favorite || model("Favorite", favoriteSchema);
 export const Referral = models.Referral || model("Referral", referralSchema);
 export const BankAccount =
   models.BankAccount || model("BankAccount", bankAccountSchema);
+export const PaymentConnection =
+  models.PaymentConnection || model("PaymentConnection", paymentConnectionSchema);
+export const RouteTransfer =
+  models.RouteTransfer || model("RouteTransfer", routeTransferSchema);
 export const Settlement =
   models.Settlement || model("Settlement", settlementSchema);

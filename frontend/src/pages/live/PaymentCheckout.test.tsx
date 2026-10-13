@@ -33,6 +33,7 @@ class Checkout {
 }
 beforeEach(() => {
   vi.resetAllMocks();
+  sessionStorage.clear();
   state = "PENDING";
   complete = vi.fn();
   gatewayChanged = vi.fn();
@@ -169,14 +170,12 @@ it("waits for backend capture, then completes exactly once", async () => {
   });
   expect(complete).toHaveBeenCalledTimes(1);
 });
-it("records checkout dismissal and allows retry without showing activation", async () => {
+it("treats checkout dismissal as pending and allows retry without showing activation", async () => {
   await start();
   await act(async () => Checkout.last.options.modal.ondismiss());
   await until(() => Boolean(pay()) && !pay().disabled);
-  expect(mocks.request).toHaveBeenCalledWith(
-    "/api/v1/checkout/payments/payment-one/cancel",
-    { method: "POST", body: "{}" },
-  );
+  expect(mocks.request.mock.calls.some((call) => call[0].endsWith("/cancel"))).toBe(false);
+  expect(sessionStorage.getItem("getfit4u.pendingPaymentId")).toBe("payment-one");
   expect(complete).not.toHaveBeenCalled();
   await act(async () => pay().click());
   expect(

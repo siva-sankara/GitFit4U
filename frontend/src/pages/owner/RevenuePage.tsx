@@ -10,7 +10,13 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { QueryState, useData, money, type Row } from "../live/LiveData";
+import {
+  QueryState,
+  Table,
+  useData,
+  money,
+  type Row,
+} from "../live/LiveData";
 export function RevenuePage() {
   return <RevenueAnalytics />;
 }
@@ -24,6 +30,7 @@ export function RevenueAnalytics({ embedded = false }: { embedded?: boolean }) {
   if (period === "custom" && to) params.set("to", to);
   const query = useData<Row>(`/api/v1/owner/revenue?${params}`),
     data = query.data?.data;
+  const transfers = useData<Row[]>("/api/v1/owner/route-transfers");
   const metrics: [string, string][] = [
     ["totalMinor", "Net membership revenue"],
     // ["grossMinor", "Captured receipts"],
@@ -198,6 +205,41 @@ export function RevenueAnalytics({ embedded = false }: { embedded?: boolean }) {
           </>
         )}
       </QueryState>
+      {!embedded && (
+        <section className="panel form-section page-stack">
+          <div className="section-heading">
+            <div>
+              <h2>Razorpay Route transfers</h2>
+              <p>
+                Customer payment, beneficiary transfer, and bank settlement are
+                tracked as separate states. A captured payment is not proof of a
+                settled bank payout.
+              </p>
+            </div>
+          </div>
+          <QueryState query={transfers}>
+            <Table
+              rows={transfers.data?.data || []}
+              columns={[
+                {
+                  key: "paymentId.publicId",
+                  title: "Payment",
+                  render: (row) => row.paymentId?.publicId || "Pending reference",
+                },
+                { key: "amountMinor", title: "Beneficiary amount", format: "money" },
+                { key: "status", title: "Transfer", format: "status" },
+                { key: "settlementStatus", title: "Settlement", format: "status" },
+                {
+                  key: "providerSettlementId",
+                  title: "Settlement reference",
+                  render: (row) => row.providerSettlementId || "Not settled",
+                },
+                { key: "createdAt", title: "Created", format: "date" },
+              ]}
+            />
+          </QueryState>
+        </section>
+      )}
     </div>
   );
 }

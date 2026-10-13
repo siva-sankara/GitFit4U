@@ -1,13 +1,14 @@
 import { afterEach, expect, it, vi } from "vitest";
 vi.mock("../../config/env.js", () => ({
   env: {
-    RAZORPAY_KEY_ID: "test-public-key",
+    RAZORPAY_KEY_ID: "rzp_test_public_key",
+    RAZORPAY_MODE: "test",
     RAZORPAY_KEY_SECRET: "test-server-secret",
   },
 }));
 import { RazorpayProvider } from "./razorpayProvider.js";
 afterEach(() => vi.unstubAllGlobals());
-it("uses the stable refund identifier for Razorpay idempotency and receipt correlation", async () => {
+it("uses the stable application refund identifier for receipt reconciliation without inventing an unsupported provider header", async () => {
   const fetcher = vi.fn().mockResolvedValue({
     ok: true,
     json: async () => ({
@@ -27,9 +28,7 @@ it("uses the stable refund identifier for Razorpay idempotency and receipt corre
   expect(fetcher.mock.calls[0][0]).toBe(
     "https://api.razorpay.com/v1/payments/pay_test/refund",
   );
-  expect(fetcher.mock.calls[0][1].headers["X-Refund-Idempotency"]).toBe(
-    "stable_refund_12345",
-  );
+  expect(fetcher.mock.calls[0][1].headers?.["X-Refund-Idempotency"]).toBeUndefined();
   expect(JSON.parse(fetcher.mock.calls[0][1].body)).toEqual({
     amount: 500,
     receipt: "stable_refund_12345",

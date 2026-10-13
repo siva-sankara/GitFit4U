@@ -24,6 +24,7 @@ import { platformInput } from "./inputSchemas.js";
 import * as promotions from "../controllers/promotionController.js";
 import { savePlatformOffer } from "../controllers/platformOfferController.js";
 import { adminManualCheckIn } from "../controllers/attendanceController.js";
+import * as paymentConnections from "../controllers/paymentConnectionController.js";
 
 export const adminRoutes = Router();
 adminRoutes.use(
@@ -32,6 +33,64 @@ adminRoutes.use(
   requirePermission("admin:platform"),
 );
 adminRoutes.get("/dashboard", controller.dashboard);
+adminRoutes.get(
+  "/payment-connections",
+  paymentConnections.listPaymentConnections,
+);
+adminRoutes.get(
+  "/route-transfers",
+  paymentConnections.adminRouteTransfers,
+);
+adminRoutes.post(
+  "/route-transfers/:id/reconcile",
+  requireIdempotencyKey,
+  validate(
+    z.object({
+      body: z.object({}).strict(),
+      params: z.object({ id: z.string().min(8).max(64) }),
+      query: z.object({}),
+    }),
+  ),
+  paymentConnections.reconcileAdminRouteTransfer,
+);
+adminRoutes.get("/refund-exceptions", paymentConnections.adminRefundExceptions);
+adminRoutes.post(
+  "/refunds/:id/reconcile",
+  requireIdempotencyKey,
+  validate(
+    z.object({
+      body: z.object({}).strict(),
+      params: z.object({ id: z.string().min(8).max(64) }),
+      query: z.object({}),
+    }),
+  ),
+  paymentConnections.reconcileAdminRefund,
+);
+adminRoutes.patch(
+  "/payment-connections/:id",
+  validate(
+    z.object({
+      body: z
+        .object({
+          onboardingStatus: z.enum([
+            "PENDING",
+            "ACTION_REQUIRED",
+            "APPROVED",
+            "REJECTED",
+            "DISABLED",
+          ]),
+          linkedAccountId: z.string().trim().regex(/^acc_[A-Za-z0-9]+$/).optional(),
+          productConfigurationId: z.string().trim().regex(/^acc_prd_[A-Za-z0-9]+$/).optional(),
+          collectionEnabled: z.boolean().optional(),
+          reason: z.string().trim().min(5).max(1000),
+        })
+        .strict(),
+      params: z.object({ id: z.string().min(8).max(64) }),
+      query: z.object({}),
+    }),
+  ),
+  paymentConnections.reviewPaymentConnection,
+);
 adminRoutes.post("/gyms/:gymId/attendance", requireIdempotencyKey, adminManualCheckIn);
 adminRoutes.get("/promotions/offers", promotions.listOffers);
 adminRoutes.get("/promotions/platform-offers", promotions.listPlatformOffers);

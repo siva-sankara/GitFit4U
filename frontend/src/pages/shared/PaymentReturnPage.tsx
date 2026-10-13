@@ -31,7 +31,7 @@ export function PaymentReturnPage() {
       <span className="eyebrow">Secure payment return</span>
       <h1>{status === "CAPTURED" ? "Payment confirmed" : status === "FAILED" ? "Payment was not completed" : "Checking payment status"}</h1>
       <StatusBadge status={status} />
-      {payment.isLoading && <p>Confirming the order directly with PhonePe…</p>}
+      {payment.isLoading && <p>Checking the Razorpay payment with GETFIT4U…</p>}
       {!["CAPTURED", "FAILED", "CANCELLED", "REFUNDED"].includes(status) && !payment.isError && (
         <p>You may safely keep this screen open. A browser redirect alone never activates a purchase.</p>
       )}

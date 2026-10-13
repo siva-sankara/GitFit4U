@@ -540,6 +540,7 @@ export function PaymentCheckout({
         throw new Error("Online payment is not configured.");
       if (!mounted.current) return;
       setPaymentId(order.data.paymentId);
+      sessionStorage.setItem("getfit4u.pendingPaymentId", order.data.paymentId);
       if (quotePath.includes("platform"))
         void client.invalidateQueries({
           queryKey: ["api", "/api/v1/workspace/registrations"],
@@ -584,6 +585,8 @@ export function PaymentCheckout({
                   ? "Payment verified. Your membership is ready."
                   : "Payment submitted. Waiting for verified capture.",
               );
+              if (verified.data.status === "CAPTURED")
+                sessionStorage.removeItem("getfit4u.pendingPaymentId");
               await client.invalidateQueries({
                 queryKey: ["payment", order.data.paymentId],
               });
@@ -598,25 +601,13 @@ export function PaymentCheckout({
             ondismiss: async () => {
               releaseGateway();
               if (received) return;
-              try {
-                await apiRequest(
-                  `/api/v1/checkout/payments/${order.data.paymentId}/cancel`,
-                  { method: "POST", body: "{}" },
-                );
-                setMessage(
-                  "Checkout closed. You can retry the same order if payment was not completed.",
-                );
-                await client.invalidateQueries({
-                  queryKey: ["payment", order.data.paymentId],
-                });
-                if (quotePath.includes("platform"))
-                  void client.invalidateQueries({
-                    queryKey: ["api", "/api/v1/workspace/registrations"],
-                  });
-                resolve();
-              } catch (error) {
-                reject(error);
-              }
+              setMessage(
+                "Checkout closed. We are still checking this order; closing the window is not a payment failure.",
+              );
+              await client.invalidateQueries({
+                queryKey: ["payment", order.data.paymentId],
+              });
+              resolve();
             },
           },
         });

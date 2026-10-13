@@ -82,6 +82,13 @@ const AdminBroadcastPage = lazyWithRetry("admin-broadcast", () =>
     default: module.AdminBroadcastPage,
   })),
 );
+const AdminPaymentConnectionsPage = lazyWithRetry(
+  "admin-payment-connections",
+  () =>
+    import("../admin/AdminPaymentConnectionsPage").then((module) => ({
+      default: module.AdminPaymentConnectionsPage,
+    })),
+);
 const OwnerScannerPage = lazyWithRetry("owner-gym-qr", () =>
   import("../owner/OwnerScannerPage").then((module) => ({
     default: module.OwnerScannerPage,
@@ -769,6 +776,8 @@ export function LiveWorkspace() {
   if (role === "admin") {
     if (page === "settings") return <AdminSettings />;
     if (page === "broadcasts") return <AdminBroadcastPage />;
+    if (page === "payment-connections")
+      return <AdminPaymentConnectionsPage />;
     if (page === "notification-delivery")
       return (
         <ResourcePage

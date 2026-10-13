@@ -30,7 +30,7 @@ checkoutRoutes.post(
   requireIdempotencyKey,
   validate(
     z.object({
-      body: z.object({ quoteId: z.string().min(1) }),
+      body: z.object({ quoteId: z.string().min(1) }).strict(),
       params: z.object({}),
       query: z.object({}),
     }),
@@ -58,7 +58,7 @@ checkoutRoutes.post(
   requireIdempotencyKey,
   validate(
     z.object({
-      body: z.object({ quoteId: z.string() }),
+      body: z.object({ quoteId: z.string() }).strict(),
       params: z.object({}),
       query: z.object({}),
     }),
@@ -76,7 +76,7 @@ checkoutRoutes.post(
         providerOrderId: z.string(),
         providerPaymentId: z.string(),
         signature: z.string().min(32),
-      }),
+      }).strict(),
       params: z.object({}),
       query: z.object({}),
     }),

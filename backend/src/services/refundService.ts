@@ -2,7 +2,7 @@ import type { Request } from "express";
 import mongoose, { type ClientSession } from "mongoose";
 import { nanoid } from "nanoid";
 import { Payment } from "../models/Commerce.js";
-import { Refund } from "../models/Business.js";
+import { Refund, RouteTransfer } from "../models/Business.js";
 import { AuditLog } from "../models/Operations.js";
 import { AppError } from "../utils/AppError.js";
 import { sha256 } from "../utils/crypto.js";
@@ -57,11 +57,11 @@ async function updatePaymentRefundStatus(payment: any, session: ClientSession) {
 }
 
 export async function reserveRefund(req: Request) {
-  if (req.auth?.role !== "ADMIN")
+  if (!req.auth || !["ADMIN", "GYM_OWNER"].includes(req.auth.role))
     throw new AppError(
       403,
       "REFUND_FORBIDDEN",
-      "Only administrators can issue or record refunds.",
+      "Only administrators or the authorized gym owner can issue or record an eligible refund.",
     );
   const key = req.idempotencyKey || req.header("idempotency-key");
   if (!key || key.length < 8 || key.length > 128)
@@ -112,6 +112,9 @@ export async function reserveRefund(req: Request) {
       const payment = await Payment.findOneAndUpdate(
         {
           publicId: req.params.id,
+          ...(req.auth!.role === "GYM_OWNER"
+            ? { gymId: req.auth!.gymId, purpose: "MEMBERSHIP" }
+            : {}),
           status: { $in: ["CAPTURED", "PARTIALLY_REFUNDED", "REFUND_PENDING"] },
         },
         { $inc: { __v: 1 } },
@@ -124,6 +127,12 @@ export async function reserveRefund(req: Request) {
           "A captured payment with a remaining balance is required.",
         );
       const offline = payment.provider === "OFFLINE";
+      if (!offline && payment.provider !== "RAZORPAY")
+        throw new AppError(
+          409,
+          "LEGACY_REFUND_EXTERNAL_ACTION_REQUIRED",
+          "This historical payment must be refunded through its original provider's authorized process and then reconciled in GETFIT4U.",
+        );
       if (offline && req.body.offlineConfirmed !== true)
         throw new AppError(
           422,
@@ -155,8 +164,12 @@ export async function reserveRefund(req: Request) {
             idempotencyKey,
             requestHash,
             provider: payment.provider,
-            source: "ADMIN",
+            source: req.auth!.role === "ADMIN" ? "ADMIN" : "OWNER",
             status: offline ? "PROCESSED" : "PROCESSING",
+            transferReversalStatus:
+              !offline && payment.purpose === "MEMBERSHIP"
+                ? "PENDING"
+                : "NOT_APPLICABLE",
             ...(offline
               ? {
                   processedAt: new Date(),
@@ -350,16 +363,74 @@ export async function submitRefund(req: Request) {
   const result = await reserveRefund(req);
   if (!result.created || result.payment.provider === "OFFLINE")
     return result.refund;
+  let reversalSubmitted = false;
   try {
+    let reverseAll = false;
+    if (result.payment.purpose === "MEMBERSHIP") {
+      const transfer = await RouteTransfer.findOne({
+        paymentId: result.payment._id,
+        provider: "RAZORPAY",
+      });
+      if (!transfer)
+        throw new AppError(
+          409,
+          "ROUTE_TRANSFER_NOT_RECONCILED",
+          "The original gym transfer must be reconciled before issuing a refund.",
+        );
+      const reversibleMinor =
+        transfer.amountMinor - transfer.amountReversedMinor;
+      if (result.refund.amountMinor > reversibleMinor)
+        throw new AppError(
+          409,
+          "TRANSFER_REVERSAL_AMOUNT_EXCEEDED",
+          "The refund exceeds the amount still reversible from the gym beneficiary.",
+        );
+      reverseAll =
+        result.refund.amountMinor === result.payment.amountMinor &&
+        transfer.amountReversedMinor === 0;
+      if (!reverseAll) {
+        const reversal: any = await paymentProvider.reverseTransfer(
+          transfer.providerTransferId,
+          result.refund.amountMinor,
+          result.refund.publicId,
+        );
+        if (!reversal?.id)
+          throw new AppError(
+            502,
+            "TRANSFER_REVERSAL_UNCERTAIN",
+            "Razorpay did not return a reversal reference. Reconcile before retrying.",
+          );
+        reversalSubmitted = true;
+        await Refund.updateOne(
+          { _id: result.refund._id },
+          {
+            $set: {
+              providerReversalId: reversal.id,
+              // API acceptance is submission evidence, not confirmation that
+              // the beneficiary funds were reversed. The Route transfer
+              // webhook/reconciliation promotes this to PROCESSED.
+              transferReversalStatus: "PENDING",
+            },
+          },
+        );
+      }
+    }
     const provider: any = await paymentProvider.refundPayment(
       result.payment.providerPaymentId,
       result.refund.amountMinor,
       result.refund.publicId,
+      { reverseAll },
     );
-    return await reconcileRefundEvent("refund.created", {
+    const reconciled = await reconcileRefundEvent("refund.created", {
       ...provider,
       receipt: result.refund.publicId,
     });
+    if (reverseAll)
+      await Refund.updateOne(
+        { _id: result.refund._id },
+        { $set: { transferReversalStatus: "PENDING" } },
+      );
+    return reconciled;
   } catch (error: any) {
     // A timeout or database error after the HTTP request is an unknown outcome.
     // Never release the reservation or start another transfer for this key.
@@ -388,11 +459,45 @@ export async function submitRefund(req: Request) {
       });
       throw error;
     }
+    if (
+      error instanceof AppError &&
+      [
+        "PAYMENT_PROVIDER_ERROR",
+        "ROUTE_TRANSFER_NOT_RECONCILED",
+        "TRANSFER_REVERSAL_AMOUNT_EXCEEDED",
+      ].includes(error.code) &&
+      !reversalSubmitted
+    ) {
+      await mongoose.connection.transaction(async (session) => {
+        const payment = await Payment.findOneAndUpdate(
+          { _id: result.payment._id },
+          { $inc: { __v: 1 } },
+          { returnDocument: "after", session },
+        );
+        await Refund.updateOne(
+          { _id: result.refund._id, status: "PROCESSING" },
+          {
+            $set: {
+              status: "FAILED",
+              reconciliationRequired: false,
+              transferReversalStatus: "FAILED",
+              failureReason: "No refund was submitted because the Route reversal could not be confirmed.",
+            },
+          },
+          { session },
+        );
+        await updatePaymentRefundStatus(payment, session);
+      });
+      throw error;
+    }
     const refund = await Refund.findOneAndUpdate(
       { _id: result.refund._id, status: "PROCESSING" },
       {
         $set: {
           reconciliationRequired: true,
+          transferReversalStatus: result.payment.purpose === "MEMBERSHIP"
+            ? "RECONCILIATION_REQUIRED"
+            : "NOT_APPLICABLE",
           failureReason:
             "Provider outcome pending. Await its webhook or reconcile the provider refund before retrying.",
         },
@@ -401,4 +506,40 @@ export async function submitRefund(req: Request) {
     );
     return refund || (await Refund.findById(result.refund._id));
   }
+}
+
+export async function reconcileReservedRefund(publicId: string) {
+  const refund = await Refund.findOne({ publicId });
+  if (!refund)
+    throw new AppError(404, "REFUND_NOT_FOUND", "Refund record not found.");
+  const payment = await Payment.findById(refund.paymentId);
+  if (!payment || payment.provider !== "RAZORPAY" || !payment.providerPaymentId)
+    throw new AppError(
+      409,
+      "REFUND_RECONCILIATION_UNAVAILABLE",
+      "Only a Razorpay refund with an original provider payment can be reconciled here.",
+    );
+  const providerRefunds = await paymentProvider.getPaymentRefunds(
+    payment.providerPaymentId,
+  );
+  const entity = providerRefunds.find(
+    (candidate) =>
+      candidate.id === refund.providerRefundId ||
+      candidate.receipt === refund.publicId ||
+      candidate.notes?.receipt === refund.publicId,
+  );
+  if (!entity) {
+    refund.reconciliationRequired = true;
+    refund.failureReason =
+      "Razorpay has not returned a matching refund. Do not resubmit while the original provider outcome remains uncertain.";
+    await refund.save();
+    return refund;
+  }
+  const event =
+    entity.status === "processed"
+      ? "refund.processed"
+      : entity.status === "failed"
+        ? "refund.failed"
+        : "refund.created";
+  return reconcileRefundEvent(event, entity);
 }

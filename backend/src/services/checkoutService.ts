@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 import { env } from "../config/env.js";
 import { nanoid } from "nanoid";
 import { MembershipPlan, Payment, PlanQuote } from "../models/Commerce.js";
+import { RouteTransfer } from "../models/Business.js";
 import { Gym } from "../models/Gym.js";
 import { GymRegistration } from "../models/GymRegistration.js";
 import { AppError } from "../utils/AppError.js";
@@ -12,6 +13,7 @@ import {
 import { paymentProvider } from "../integrations/payments/index.js";
 import { validatePlatformRenewalOrder } from "./platformRenewalService.js";
 import { calculateMembershipPricing, findEligibleOffer, reserveQuoteOffer } from "./promotionService.js";
+import { requireMembershipBeneficiary } from "./paymentConnectionService.js";
 
 export async function createMembershipQuote(input: {
   userId: string;
@@ -102,6 +104,7 @@ export async function createCheckoutOrder(input: {
         "This quote has expired. Refresh the price.",
       );
     let registration: any;
+    let beneficiary: any;
     if (quote.planSnapshot?.type === "PLATFORM" && quote.planSnapshot?.renewal) {
       await validatePlatformRenewalOrder(quote, input.userId, session);
     } else if (quote.planSnapshot?.type === "PLATFORM") {
@@ -119,6 +122,8 @@ export async function createCheckoutOrder(input: {
           "Refresh the registration and select its current plan.",
         );
       await payableGym(registration, session);
+    } else {
+      beneficiary = await requireMembershipBeneficiary(String(quote.gymId));
     }
     if (
       await Payment.exists({
@@ -147,6 +152,15 @@ export async function createCheckoutOrder(input: {
       ],
     }).session(session);
     if (existing) {
+      if (
+        existing.purpose === "MEMBERSHIP" &&
+        existing.allocationStatus === "FAILED"
+      )
+        throw new AppError(
+          409,
+          "ROUTE_ORDER_RECONCILIATION_REQUIRED",
+          "This Razorpay order has an unresolved beneficiary allocation. Contact support before retrying.",
+        );
       if (existing.offerId && !existing.providerOrderId && ["FAILED", "CANCELLED"].includes(existing.status))
         throw new AppError(409, "PROMOTION_ORDER_RECONCILIATION_REQUIRED", "This offer is reserved for a payment whose order could not be confirmed. Contact support with the payment reference before starting another payment.");
       if (registration) {
@@ -177,6 +191,29 @@ export async function createCheckoutOrder(input: {
           pricingSnapshot: quote.pricingSnapshot,
           ...(quote.offerId ? { offerId: quote.offerId, offerReservationStatus: "RESERVED" } : {}),
           currency: quote.currency,
+          provider: "RAZORPAY",
+          providerEnvironment: env.RAZORPAY_MODE.toUpperCase(),
+          allocationStatus:
+            quote.planSnapshot?.type === "PLATFORM"
+              ? "NOT_APPLICABLE"
+              : "PLANNED",
+          beneficiarySnapshot: beneficiary
+            ? {
+                paymentConnectionId: beneficiary._id,
+                paymentConnectionPublicId: beneficiary.publicId,
+                linkedAccountId: beneficiary.linkedAccountId,
+                mappingVersion: beneficiary.mappingVersion,
+                businessLegalName: beneficiary.businessLegalName,
+                maskedSettlementAccount: beneficiary.maskedSettlementAccount,
+                feeBearerPolicy: beneficiary.feeBearerPolicy,
+                customerPaidMinor: quote.totalMinor,
+                gatewayFeeMinor: null,
+                routeFeeMinor: null,
+                providerTaxMinor: null,
+                commissionMinor: 0,
+                transferAmountMinor: quote.totalMinor,
+              }
+            : undefined,
           status: "CREATED",
           metadata: { quoteSnapshot: quote.toObject() },
         },
@@ -201,24 +238,116 @@ export async function createCheckoutOrder(input: {
     );
   }
   try {
+    const beneficiary = payment.beneficiarySnapshot;
     const providerOrder = await paymentProvider.createPayment({
       amountMinor: payment.amountMinor,
       currency: payment.currency,
       receipt: payment.publicId,
-      notes: { gymId: String(payment.gymId) },
+      notes: {
+        purchase_reference: payment.publicId,
+        purpose:
+          payment.purpose === "PLATFORM_PLAN"
+            ? "PLATFORM_SUBSCRIPTION"
+            : "GYM_MEMBERSHIP",
+      },
+      ...(payment.purpose === "MEMBERSHIP"
+        ? {
+            transfers: [
+              {
+                account: beneficiary.linkedAccountId,
+                amount: beneficiary.transferAmountMinor,
+                currency: "INR" as const,
+                on_hold: false,
+                notes: { purchase_reference: payment.publicId },
+                linked_account_notes: ["purchase_reference"],
+              },
+            ],
+          }
+        : {}),
     });
     payment.providerOrderId = providerOrder.id;
+    // Persist the provider identity before any follow-up inspection. A timeout
+    // or database error after order creation is an uncertain financial state,
+    // so a retry must reconcile this exact order instead of creating another.
+    await payment.save();
+    if (payment.purpose === "PLATFORM_PLAN" && providerOrder.transfers?.length)
+      throw new AppError(
+        409,
+        "PLATFORM_ORDER_TRANSFER_CONFLICT",
+        "The platform order unexpectedly contains a gym transfer and was blocked.",
+      );
+    if (payment.purpose === "MEMBERSHIP") {
+      const transfers =
+        providerOrder.transfers?.length
+          ? providerOrder.transfers
+          : await paymentProvider.getOrderTransfers(providerOrder.id);
+      const transfer = transfers.find(
+        (entry) =>
+          entry.recipient === beneficiary.linkedAccountId &&
+          entry.amount === beneficiary.transferAmountMinor &&
+          entry.currency === payment.currency,
+      );
+      if (transfers.length !== 1 || !transfer?.id) {
+        payment.status = "FAILED";
+        payment.allocationStatus = "FAILED";
+        payment.failureCode = "ROUTE_TRANSFER_MISMATCH";
+        payment.failureDescription =
+          "Razorpay did not confirm the exact gym beneficiary transfer.";
+        await payment.save();
+        throw new AppError(
+          409,
+          "ROUTE_TRANSFER_MISMATCH",
+          "Razorpay did not confirm the exact gym beneficiary transfer. This order requires reconciliation.",
+        );
+      }
+      await RouteTransfer.create({
+        publicId: nanoid(24),
+        paymentId: payment._id,
+        gymId: payment.gymId,
+        paymentConnectionId: beneficiary.paymentConnectionId,
+        environment: env.RAZORPAY_MODE.toUpperCase(),
+        providerOrderId: providerOrder.id,
+        providerTransferId: transfer.id,
+        linkedAccountId: beneficiary.linkedAccountId,
+        beneficiaryMappingVersion: beneficiary.mappingVersion,
+        amountMinor: transfer.amount,
+        amountReversedMinor: transfer.amount_reversed || 0,
+        providerFeeMinor: transfer.fees || 0,
+        providerTaxMinor: transfer.tax || 0,
+        currency: transfer.currency,
+        status: String(transfer.status || "CREATED").toUpperCase(),
+        settlementStatus:
+          String(transfer.settlement_status || "PENDING").toUpperCase() ===
+          "ON_HOLD"
+            ? "ON_HOLD"
+            : String(transfer.settlement_status || "PENDING").toUpperCase(),
+        providerSettlementId: transfer.recipient_settlement_id || undefined,
+        beneficiarySnapshot: beneficiary,
+      });
+      payment.allocationStatus = String(
+        transfer.status || "CREATED",
+      ).toUpperCase();
+    }
     payment.status = "PENDING";
     await payment.save();
     return payment;
   } catch (error) {
+    const providerOrderWasCreated = Boolean(payment.providerOrderId);
     await Payment.updateOne(
       { _id: payment._id, status: "CREATED" },
       {
         $set: {
           status: "FAILED",
+          ...(payment.purpose === "MEMBERSHIP" && providerOrderWasCreated
+            ? {
+                allocationStatus: "FAILED",
+                failureCode: "ROUTE_ORDER_RECONCILIATION_REQUIRED",
+              }
+            : {}),
           failureDescription:
-            "Payment order could not be created. Please retry.",
+            payment.purpose === "MEMBERSHIP" && providerOrderWasCreated
+              ? "Razorpay created the order, but its beneficiary allocation requires reconciliation before checkout can resume."
+              : "Payment order could not be created. Please retry.",
         },
       },
     );

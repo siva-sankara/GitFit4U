@@ -69,6 +69,20 @@ const schema = z
     RAZORPAY_KEY_ID: z.string().optional(),
     RAZORPAY_KEY_SECRET: z.string().optional(),
     RAZORPAY_WEBHOOK_SECRET: z.string().optional(),
+    PAYMENT_PROVIDER: z.literal("razorpay").default("razorpay"),
+    RAZORPAY_MODE: z.enum(["test", "live"]).default("test"),
+    RAZORPAY_ROUTE_ENABLED: z
+      .enum(["true", "false"])
+      .default("false")
+      .transform((value) => value === "true"),
+    RAZORPAY_SUBSCRIPTIONS_ENABLED: z
+      .enum(["true", "false"])
+      .default("false")
+      .transform((value) => value === "true"),
+    RAZORPAY_GYM_FEE_BEARER: z.preprocess(
+      (value) => value || undefined,
+      z.enum(["platform_absorbs", "gym_deducts_actual"]).optional(),
+    ),
     GOOGLE_CLIENT_ID: z.string().optional(),
     RESEND_API_KEY: z.string().optional(),
     EMAIL_FROM: z.string().optional(),
@@ -140,6 +154,13 @@ const schema = z
     LOG_LEVEL: z.string().default("info"),
   })
   .superRefine((value, context) => {
+    if (value.RAZORPAY_ROUTE_ENABLED && !value.RAZORPAY_GYM_FEE_BEARER) {
+      context.addIssue({
+        code: "custom",
+        path: ["RAZORPAY_GYM_FEE_BEARER"],
+        message: "RAZORPAY_GYM_FEE_BEARER is required when RAZORPAY_ROUTE_ENABLED=true.",
+      });
+    }
     if (value.AUTH_OTP_DUAL_DELIVERY_ENABLED) {
       for (const key of [
         "AUTH_OTP_DELIVERY_ENCRYPTION_KEY",

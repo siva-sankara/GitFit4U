@@ -37,11 +37,17 @@ const Auth = lazyWithRetry("authentication", () =>
   })),
 );
 const PlatformSubscription = lazyWithRetry("platform-subscription", () => import("./pages/owner/PlatformSubscriptionPage").then(module => ({ default: module.PlatformSubscriptionPage })));
+const PaymentReturn = lazyWithRetry("payment-return", () =>
+  import("./pages/shared/PaymentReturnPage").then((module) => ({
+    default: module.PaymentReturnPage,
+  })),
+);
 const router = createBrowserRouter([{
   element: <Outlet />,
   errorElement: <RouteErrorPage />,
   children: [
   { path: "/notification-open/:id", element: <ProtectedRoute><NotificationOpenPage /></ProtectedRoute> },
+  { path: "/payment-return", element: <ProtectedRoute><PaymentReturn /></ProtectedRoute> },
   { path: "/activate-account", element: <ActivateAccountPage /> },
   ...publicPolicyRoutes,
   {

@@ -12,7 +12,12 @@
 | `JWT_ACCESS_TTL`, `JWT_REFRESH_TTL` | Yes | Access-token lifetime (`15m`) and rolling session inactivity window (`3d`); refresh cookie and server expiry use the same deadline |
 | `COOKIE_DOMAIN` | Optional | Leave unset for a host-only refresh cookie; never set a frontend domain on an unrelated API domain |
 | `REDIS_URL` | Jobs/scale | BullMQ and Socket.IO adapter |
-| `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET` | Payments | Razorpay test/live credentials |
+| `PAYMENT_PROVIDER` | Payments | Must be `razorpay`; new payments have no automatic gateway fallback |
+| `RAZORPAY_MODE` | Payments | Explicit `test` or `live`; the Key ID prefix must match |
+| `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET` | Payments | Server-side Razorpay API and separate webhook credentials |
+| `RAZORPAY_ROUTE_ENABLED` | Gym membership payments | Application rollout flag only; it is not evidence that Razorpay approved Route |
+| `RAZORPAY_GYM_FEE_BEARER` | Gym membership payments | Approved fee policy. Currently `platform_absorbs` is live-capable; `gym_deducts_actual` remains fail-closed |
+| `RAZORPAY_SUBSCRIPTIONS_ENABLED` | Recurring payments | Defaults false; ordinary checkout never creates a mandate |
 | `GOOGLE_CLIENT_ID` | OAuth | Google sign-in audience |
 | `LOCATIONIQ_API_KEY` | Address search, maps and routes | Server-only LocationIQ token; never expose through a `VITE_` variable |
 | `LOCATIONIQ_REGION` | Optional | `us1` (default) or `eu1` for geocoding and routing |
@@ -33,7 +38,7 @@
 
 ## Frontend
 
-`VITE_API_URL`, `VITE_DEV_API_TARGET`, `VITE_FIREBASE_*`, `VITE_RAZORPAY_KEY_ID`. Only public browser identifiers use the `VITE_` prefix; secrets never do. `VITE_DEV_API_TARGET` is the local backend origin (match its `PORT`); Vite proxies API and socket requests through the frontend origin. LocationIQ requests, including map tiles, go through the backend. The legacy Google Maps key entries are commented out; Google sign-in configuration is independent. See [LocationIQ setup](locationiq-integration.md).
+`VITE_API_URL`, `VITE_DEV_API_TARGET`, and `VITE_FIREBASE_*`. Only public browser identifiers use the `VITE_` prefix; secrets never do. Razorpay Checkout receives the public Key ID from the authenticated server-created order response, so no frontend Razorpay variable is required. `VITE_DEV_API_TARGET` is the local backend origin (match its `PORT`); Vite proxies API and socket requests through the frontend origin. LocationIQ requests, including map tiles, go through the backend. The legacy Google Maps key entries are commented out; Google sign-in configuration is independent. See [LocationIQ setup](locationiq-integration.md).
 
 
 The legacy MSG91 adapter is not used by public authentication; signup, login OTP, recovery and verified phone changes use the platform WhatsApp sender. Payment checkout receives its public key from the backend order response. Leave `VITE_API_URL` empty for the production same-origin proxy; `CLIENT_ORIGIN` contains the allowed frontend origins. Credentialed cookies require appropriate HTTPS/domain settings. Redis configuration alone does not enable a distributed worker or Socket.IO adapter. See [Vercel production setup](vercel-production.md) for the current domain values.

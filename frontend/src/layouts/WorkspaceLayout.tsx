@@ -90,6 +90,7 @@ const navigation: Record<string, Array<[string, string, string?]>> = {
     ["Platform plans", "platform-plans"],
     // ["Subscriptions", "subscriptions"],
     ["Payments", "payments"],
+    ["Gym payment onboarding", "payment-connections"],
     ["Invoices", "invoices"],
     // ["Refunds", "refunds"],
     ["Campaigns", "whatsapp"],

@@ -1,7 +1,11 @@
 import type { Request } from "express";
 import mongoose from "mongoose";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-const provider = vi.hoisted(() => ({ refundPayment: vi.fn() }));
+const provider = vi.hoisted(() => ({
+  refundPayment: vi.fn(),
+  reverseTransfer: vi.fn(),
+  getPaymentRefunds: vi.fn(),
+}));
 vi.mock("../integrations/payments/index.js", () => ({
   paymentProvider: provider,
 }));
@@ -9,7 +13,7 @@ vi.mock("./domainEventService.js", () => ({
   emitDomainEvent: vi.fn().mockResolvedValue(undefined),
 }));
 import { Payment } from "../models/Commerce.js";
-import { Refund } from "../models/Business.js";
+import { Refund, RouteTransfer } from "../models/Business.js";
 import { AuditLog } from "../models/Operations.js";
 import {
   reconcileRefundEvent,
@@ -19,6 +23,7 @@ import {
 const paymentId = new mongoose.Types.ObjectId(),
   actor = String(new mongoose.Types.ObjectId());
 let ledger: any[], payment: any, session: any;
+let routeTransfer: any;
 function request(
   key = "refund-request-one",
   amountMinor = 60,
@@ -47,6 +52,8 @@ function query(value: any) {
 }
 beforeEach(() => {
   provider.refundPayment.mockReset();
+  provider.reverseTransfer.mockReset();
+  provider.getPaymentRefunds.mockReset();
   ledger = [];
   session = { testSession: true };
   payment = {
@@ -57,6 +64,13 @@ beforeEach(() => {
     amountMinor: 100,
     currency: "INR",
     status: "CAPTURED",
+  };
+  routeTransfer = {
+    _id: new mongoose.Types.ObjectId(),
+    providerTransferId: "trf_original",
+    amountMinor: 100,
+    amountReversedMinor: 0,
+    status: "PROCESSED",
   };
   let queue = Promise.resolve();
   vi.spyOn(mongoose.connection, "transaction").mockImplementation(((
@@ -137,6 +151,18 @@ beforeEach(() => {
     return {};
   }) as never);
   vi.spyOn(AuditLog, "create").mockResolvedValue([] as never);
+  vi.spyOn(RouteTransfer, "findOne").mockImplementation((async () =>
+    routeTransfer) as never);
+  vi.spyOn(RouteTransfer, "updateOne").mockImplementation((async (
+    _filter: any,
+    update: any,
+  ) => {
+    if (update.$set) Object.assign(routeTransfer, update.$set);
+    if (update.$inc)
+      for (const [key, value] of Object.entries(update.$inc))
+        routeTransfer[key] = Number(routeTransfer[key] || 0) + Number(value);
+    return {};
+  }) as never);
 });
 afterEach(() => vi.restoreAllMocks());
 
@@ -256,4 +282,49 @@ it("does not apply a provider event with a different amount to a reserved refund
     }),
   ).rejects.toMatchObject({ code: "REFUND_EVENT_MISMATCH" });
   expect(ledger[0].status).toBe("PROCESSING");
+});
+it("submits a partial Route reversal first but waits for provider confirmation before changing transfer totals", async () => {
+  payment.purpose = "MEMBERSHIP";
+  provider.reverseTransfer.mockResolvedValue({ id: "rfnd_partial_reversal" });
+  provider.refundPayment.mockResolvedValue({
+    id: "rfnd_partial",
+    payment_id: "pay_original",
+    amount: 60,
+    currency: "INR",
+    status: "pending",
+  });
+  const result = await submitRefund(request("partial-route", 60));
+  expect(provider.reverseTransfer).toHaveBeenCalledWith(
+    "trf_original",
+    60,
+    result.publicId,
+  );
+  expect(provider.refundPayment).toHaveBeenCalledWith(
+    "pay_original",
+    60,
+    result.publicId,
+    { reverseAll: false },
+  );
+  expect(result.transferReversalStatus).toBe("PENDING");
+  expect(routeTransfer.amountReversedMinor).toBe(0);
+  expect(routeTransfer.status).toBe("PROCESSED");
+});
+it("uses Razorpay's combined reverse_all flow only for a complete original membership refund", async () => {
+  payment.purpose = "MEMBERSHIP";
+  provider.refundPayment.mockResolvedValue({
+    id: "rfnd_full",
+    payment_id: "pay_original",
+    amount: 100,
+    currency: "INR",
+    status: "pending",
+  });
+  const result = await submitRefund(request("full-route", 100));
+  expect(provider.reverseTransfer).not.toHaveBeenCalled();
+  expect(provider.refundPayment).toHaveBeenCalledWith(
+    "pay_original",
+    100,
+    result.publicId,
+    { reverseAll: true },
+  );
+  expect(result.transferReversalStatus).toBe("PENDING");
 });

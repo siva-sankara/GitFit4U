@@ -46,6 +46,25 @@ describe("production environment validation", () => {
     });
   });
 
+  it("allows a blank Route fee policy while Route is disabled", () => {
+    expect(parseEnvironment({
+      NODE_ENV: "test",
+      RAZORPAY_ROUTE_ENABLED: "false",
+      RAZORPAY_GYM_FEE_BEARER: "",
+    })).toMatchObject({
+      RAZORPAY_ROUTE_ENABLED: false,
+      RAZORPAY_GYM_FEE_BEARER: undefined,
+    });
+  });
+
+  it("requires an explicit Route fee policy while Route is enabled", () => {
+    expect(() => parseEnvironment({
+      NODE_ENV: "test",
+      RAZORPAY_ROUTE_ENABLED: "true",
+      RAZORPAY_GYM_FEE_BEARER: "",
+    })).toThrow(/RAZORPAY_GYM_FEE_BEARER is required/);
+  });
+
   it.each(["JWT_ACCESS_TTL", "JWT_REFRESH_TTL"])("rejects zero-duration %s", (key) => {
     expect(() => parseEnvironment({ NODE_ENV: "test", [key]: "0m" })).toThrow();
   });

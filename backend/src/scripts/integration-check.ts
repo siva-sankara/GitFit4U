@@ -21,7 +21,13 @@ for (const key of [
   "FIREBASE_PROJECT_ID", "FIREBASE_CLIENT_EMAIL", "FIREBASE_PRIVATE_KEY", "LOCATIONIQ_API_KEY",
 ])
   delete process.env[key];
+process.env.PAYMENT_PROVIDER = "razorpay";
+process.env.RAZORPAY_MODE = "test";
+process.env.RAZORPAY_KEY_ID = "rzp_test_isolated_integration";
+process.env.RAZORPAY_KEY_SECRET = "isolated-integration-key-secret";
 process.env.RAZORPAY_WEBHOOK_SECRET = "isolated-integration-webhook-secret";
+process.env.RAZORPAY_ROUTE_ENABLED = "true";
+process.env.RAZORPAY_GYM_FEE_BEARER = "platform_absorbs";
 const { app } = await import("../app.js");
 const { User } = await import("../models/User.js");
 const { Gym } = await import("../models/Gym.js");
@@ -29,7 +35,7 @@ const { RoleAssignment, AuthIdentity, OtpChallenge, Session } = await import("..
 const { MemberProfile } = await import("../models/Member.js");
 const { MembershipPlan, Subscription, Payment, PlanQuote } =
   await import("../models/Commerce.js");
-const { Invoice } = await import("../models/Business.js");
+const { Invoice, PaymentConnection, RouteTransfer } = await import("../models/Business.js");
 const { ClassSession, Notification } = await import("../models/Engagement.js");
 const { createSession } = await import("../services/tokenService.js");
 const { OWNER_DEFAULT_PERMISSIONS } = await import("../constants/domain.js");
@@ -216,6 +222,30 @@ try {
     verificationStatus: "VERIFIED",
     platformSubscriptionStatus: "ACTIVE",
     profileCompleteness: 100,
+  });
+  const paymentConnection = await PaymentConnection.create({
+    publicId: "integration-route-connection",
+    gymId: gym._id,
+    authorizedOwnerId: owner._id,
+    provider: "RAZORPAY",
+    environment: "TEST",
+    businessLegalName: "Integration Fitness",
+    businessType: "partnership",
+    businessContactEmail: "owner@integration.example",
+    businessContactPhone: "+919876501290",
+    linkedAccountId: "acc_IntegrationGymA",
+    productConfigurationId: "acc_prd_IntegrationGymA",
+    providerEvidenceReference: "razorpay:isolated-fixture",
+    onboardingStatus: "APPROVED",
+    collectionEnabled: true,
+    allocationCapability: "ENABLED",
+    settlementCapability: "ENABLED",
+    feeBearerPolicy: "PLATFORM_ABSORBS",
+    mappingVersion: 1,
+    termsAcceptedAt: new Date(),
+    termsAcceptedBy: owner._id,
+    termsVersion: "integration-v1",
+    verifiedAt: new Date(),
   });
   await RoleAssignment.create({
     userId: owner._id,
@@ -463,14 +493,56 @@ try {
     "post",
     "/checkout/orders",
     memberToken,
-    { quoteId: quote.data.publicId },
-    503,
+    {
+      quoteId: quote.data.publicId,
+      account: "acc_AttackerSelected",
+      transferAmountMinor: 1,
+      commissionMinor: 99_999,
+    },
+    422,
   );
-  const pendingPayment = await Payment.findOne({ quoteId: quote.data._id });
-  assert.ok(pendingPayment, "Order attempt persisted a payment record");
-  pendingPayment.providerOrderId = "order_isolated_fixture";
-  pendingPayment.status = "PENDING";
-  await pendingPayment.save();
+  const pendingPayment = await Payment.create({
+    publicId: "payment-isolated-fixture",
+    purpose: "MEMBERSHIP",
+    payerId: user._id,
+    gymId: gym._id,
+    quoteId: quote.data._id,
+    amountMinor: quote.data.totalMinor,
+    currency: "INR",
+    provider: "RAZORPAY",
+    providerEnvironment: "TEST",
+    providerOrderId: "order_isolated_fixture",
+    status: "PENDING",
+    allocationStatus: "CREATED",
+    beneficiarySnapshot: {
+      paymentConnectionId: paymentConnection._id,
+      paymentConnectionPublicId: paymentConnection.publicId,
+      linkedAccountId: paymentConnection.linkedAccountId,
+      mappingVersion: 1,
+      businessLegalName: paymentConnection.businessLegalName,
+      feeBearerPolicy: "PLATFORM_ABSORBS",
+      customerPaidMinor: quote.data.totalMinor,
+      commissionMinor: 0,
+      transferAmountMinor: quote.data.totalMinor,
+    },
+    metadata: { quoteSnapshot: quote.data },
+  });
+  await RouteTransfer.create({
+    publicId: "transfer-isolated-fixture",
+    paymentId: pendingPayment._id,
+    gymId: gym._id,
+    paymentConnectionId: paymentConnection._id,
+    environment: "TEST",
+    providerOrderId: pendingPayment.providerOrderId,
+    providerTransferId: "trf_isolated_fixture",
+    linkedAccountId: paymentConnection.linkedAccountId,
+    beneficiaryMappingVersion: 1,
+    amountMinor: quote.data.totalMinor,
+    currency: "INR",
+    status: "CREATED",
+    settlementStatus: "PENDING",
+    beneficiarySnapshot: pendingPayment.beneficiarySnapshot,
+  });
   await PlanQuote.deleteOne({ _id: quote.data._id });
   const payload = JSON.stringify({
     event: "payment.captured",
@@ -537,6 +609,17 @@ try {
       amount: 100000,
       currency: "INR",
       status: "created",
+      transfers: [
+        {
+          id: "trf_first_join",
+          source: "order_first_join",
+          recipient: "acc_IntegrationGymA",
+          amount: 100000,
+          currency: "INR",
+          status: "created",
+          settlement_status: "pending",
+        },
+      ],
     }) as any;
   paymentProvider.verifyCheckout = ({ signature }) =>
     signature === "valid-signature-for-first-join-check";

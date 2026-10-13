@@ -23,6 +23,7 @@
     "test:registration": "tsx src/scripts/registration-flow-check.ts",
     "test:gym-profile": "tsx src/scripts/gym-profile-check.ts",
     "db:migrate-registration": "tsx src/scripts/migrate-payment-registration.ts",
+    "db:migrate-razorpay-route": "tsx src/scripts/migrate-razorpay-route.ts",
     "test:storage": "tsx src/scripts/check-storage.ts",
     "db:inspect": "node src/scripts/inspect-database.mjs",
     "db:migrate": "tsx src/scripts/migrate-indexes.ts",
