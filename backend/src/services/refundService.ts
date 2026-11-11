@@ -3,6 +3,7 @@ import mongoose, { type ClientSession } from "mongoose";
 import { nanoid } from "nanoid";
 import { Payment } from "../models/Commerce.js";
 import { Refund, RouteTransfer } from "../models/Business.js";
+import { gymOAuthClientForConnection } from "./paymentMerchantService.js";
 import { AuditLog } from "../models/Operations.js";
 import { AppError } from "../utils/AppError.js";
 import { sha256 } from "../utils/crypto.js";
@@ -366,7 +367,9 @@ export async function submitRefund(req: Request) {
   let reversalSubmitted = false;
   try {
     let reverseAll = false;
-    if (result.payment.purpose === "MEMBERSHIP") {
+    const oauthMembership = result.payment.purpose === "MEMBERSHIP" &&
+      result.payment.beneficiarySnapshot?.credentialType === "OAUTH_BEARER";
+    if (result.payment.purpose === "MEMBERSHIP" && !oauthMembership) {
       const transfer = await RouteTransfer.findOne({
         paymentId: result.payment._id,
         provider: "RAZORPAY",
@@ -415,12 +418,21 @@ export async function submitRefund(req: Request) {
         );
       }
     }
-    const provider: any = await paymentProvider.refundPayment(
-      result.payment.providerPaymentId,
-      result.refund.amountMinor,
-      result.refund.publicId,
-      { reverseAll },
-    );
+    const provider: any = oauthMembership
+      ? await (await gymOAuthClientForConnection(
+          String(result.payment.beneficiarySnapshot.paymentConnectionId),
+          String(result.payment.beneficiarySnapshot.merchantAccountId),
+        )).refundPayment(
+          result.payment.providerPaymentId,
+          result.refund.amountMinor,
+          result.refund.publicId,
+        )
+      : await paymentProvider.refundPayment(
+          result.payment.providerPaymentId,
+          result.refund.amountMinor,
+          result.refund.publicId,
+          { reverseAll },
+        );
     const reconciled = await reconcileRefundEvent("refund.created", {
       ...provider,
       receipt: result.refund.publicId,
@@ -495,7 +507,8 @@ export async function submitRefund(req: Request) {
       {
         $set: {
           reconciliationRequired: true,
-          transferReversalStatus: result.payment.purpose === "MEMBERSHIP"
+          transferReversalStatus: result.payment.purpose === "MEMBERSHIP" &&
+            result.payment.beneficiarySnapshot?.credentialType !== "OAUTH_BEARER"
             ? "RECONCILIATION_REQUIRED"
             : "NOT_APPLICABLE",
           failureReason:
@@ -519,9 +532,13 @@ export async function reconcileReservedRefund(publicId: string) {
       "REFUND_RECONCILIATION_UNAVAILABLE",
       "Only a Razorpay refund with an original provider payment can be reconciled here.",
     );
-  const providerRefunds = await paymentProvider.getPaymentRefunds(
-    payment.providerPaymentId,
-  );
+  const providerRefunds = payment.purpose === "MEMBERSHIP" &&
+    payment.beneficiarySnapshot?.credentialType === "OAUTH_BEARER"
+    ? await (await gymOAuthClientForConnection(
+        String(payment.beneficiarySnapshot.paymentConnectionId),
+        String(payment.beneficiarySnapshot.merchantAccountId),
+      )).getPaymentRefunds(payment.providerPaymentId)
+    : await paymentProvider.getPaymentRefunds(payment.providerPaymentId);
   const entity = providerRefunds.find(
     (candidate) =>
       candidate.id === refund.providerRefundId ||

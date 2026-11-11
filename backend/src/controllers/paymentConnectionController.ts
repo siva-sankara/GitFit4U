@@ -4,16 +4,23 @@ import { env } from "../config/env.js";
 import { PaymentConnection, Refund, RouteTransfer } from "../models/Business.js";
 import { Gym } from "../models/Gym.js";
 import { writeAudit } from "../services/auditService.js";
-import { routeConfigurationBlockers, membershipCollectionReadiness } from "../services/paymentConnectionService.js";
 import { AppError } from "../utils/AppError.js";
 import { paymentProvider } from "../integrations/payments/index.js";
 import { reconcileRouteTransfer } from "./checkoutController.js";
 import { reconcileReservedRefund } from "../services/refundService.js";
+import { membershipMerchantReadiness } from "../services/paymentMerchantService.js";
+import { oauthConfigurationBlockers } from "../integrations/payments/razorpayOAuthProvider.js";
 
 function publicConnection(connection: any) {
   if (!connection) return null;
   const value = connection.toObject ? connection.toObject() : connection;
   delete value.credentialReference;
+  delete value.publicToken;
+  delete value.accessTokenCiphertext;
+  delete value.refreshTokenCiphertext;
+  delete value.tokenFingerprint;
+  delete value.tokenRefreshLeaseId;
+  delete value.tokenRefreshLeaseUntil;
   return value;
 }
 
@@ -35,15 +42,14 @@ function providerSettlementSummary(product: Record<string, any>) {
 }
 
 export async function ownerPaymentConnection(req: Request, res: Response) {
-  const readiness = await membershipCollectionReadiness(req.auth!.gymId!);
+  const readiness = await membershipMerchantReadiness(req.auth!.gymId!);
   res.json({
     success: true,
     data: {
       connection: publicConnection(readiness.connection),
       onlineMembershipPaymentsAvailable: readiness.available,
       blockers: readiness.blockers,
-      routeEnabled: env.RAZORPAY_ROUTE_ENABLED,
-      feeBearerPolicy: env.RAZORPAY_GYM_FEE_BEARER,
+      oauthEnabled: env.RAZORPAY_GYM_OAUTH_ENABLED,
       provider: "RAZORPAY",
       environment: readiness.environment,
     },
@@ -117,9 +123,9 @@ export async function listPaymentConnections(_req: Request, res: Response) {
     success: true,
     data: {
       items: rows.map(publicConnection),
-      routeEnabled: env.RAZORPAY_ROUTE_ENABLED,
-      feeBearerPolicy: env.RAZORPAY_GYM_FEE_BEARER,
-      configurationBlockers: routeConfigurationBlockers(),
+      oauthEnabled: env.RAZORPAY_GYM_OAUTH_ENABLED,
+      legacyRouteEnabled: env.RAZORPAY_ROUTE_ENABLED,
+      configurationBlockers: oauthConfigurationBlockers(),
     },
   });
 }
@@ -136,6 +142,51 @@ export async function reviewPaymentConnection(req: Request, res: Response) {
       "HISTORICAL_CONNECTION_READ_ONLY",
       "Historical or different-environment provider mappings are read-only.",
     );
+  if (connection.connectionType === "OAUTH_MERCHANT") {
+    const before = publicConnection(connection);
+    const eligibility = req.body.paymentEligibilityStatus || connection.paymentEligibilityStatus;
+    const settlement = req.body.settlementReadinessStatus || connection.settlementReadinessStatus;
+    const evidence = req.body.providerEvidenceReference || connection.providerEvidenceReference;
+    if (
+      req.body.collectionEnabled === true &&
+      (connection.authorizationStatus !== "CONNECTED" || eligibility !== "ELIGIBLE" ||
+        settlement !== "READY" || !evidence)
+    ) throw new AppError(
+      409,
+      "RAZORPAY_MERCHANT_NOT_READY",
+      "Connected authorization, verified payment eligibility, settlement readiness and provider evidence are required.",
+    );
+    connection.onboardingStatus = req.body.onboardingStatus;
+    connection.paymentEligibilityStatus = eligibility;
+    connection.settlementReadinessStatus = settlement;
+    connection.qrCapability = req.body.qrCapability || connection.qrCapability;
+    connection.providerEvidenceReference = evidence;
+    connection.collectionEnabled = Boolean(
+      req.body.collectionEnabled === true &&
+      connection.authorizationStatus === "CONNECTED" &&
+      eligibility === "ELIGIBLE" && settlement === "READY" && evidence,
+    );
+    connection.verifiedAt = connection.collectionEnabled ? new Date() : connection.verifiedAt;
+    connection.lastProviderSyncAt = new Date();
+    if (["DISABLED", "REJECTED", "ACTION_REQUIRED"].includes(req.body.onboardingStatus))
+      connection.collectionEnabled = false;
+    await connection.save();
+    await writeAudit(req, {
+      action: "payment.oauth_connection.reviewed",
+      entityType: "PaymentConnection",
+      entityId: connection.publicId,
+      reason: req.body.reason,
+      before,
+      after: publicConnection(connection),
+    });
+    return res.json({
+      success: true,
+      data: publicConnection(connection),
+      message: connection.collectionEnabled
+        ? "Gym OAuth merchant collection is enabled."
+        : "OAuth merchant status saved; collection remains disabled.",
+    });
+  }
   const before = publicConnection(connection);
   const approved = req.body.onboardingStatus === "APPROVED";
   if (

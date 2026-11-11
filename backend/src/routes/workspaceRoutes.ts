@@ -88,9 +88,10 @@ workspaceRoutes.get("/registration-options", requireGymRegistration, (_req, res)
     success: true,
     data: {
       paymentsAvailable: Boolean(
-        env.RAZORPAY_KEY_ID?.trim() &&
-        env.RAZORPAY_KEY_SECRET?.trim() &&
-        env.RAZORPAY_WEBHOOK_SECRET?.trim(),
+        env.RAZORPAY_PLATFORM_PAYMENTS_ENABLED &&
+        env.RAZORPAY_PLATFORM_KEY_ID?.trim() &&
+        env.RAZORPAY_PLATFORM_KEY_SECRET?.trim() &&
+        env.RAZORPAY_PLATFORM_WEBHOOK_SECRET?.trim(),
       ),
       activationMode: "VERIFIED_PAYMENT",
     },

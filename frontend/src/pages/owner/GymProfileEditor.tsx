@@ -4,7 +4,7 @@ import { Modal } from "../../components/Modal";
 import { GymLogoEditor } from "./GymLogoEditor";
 import { GymTermsEditor } from "./GymTermsEditor";
 import { WhatsAppConnectionSettings } from "../../components/WhatsAppConnectionSettings";
-import { PaymentConnectionSettings } from "../../components/PaymentConnectionSettings";
+import { RazorpayOAuthSettings } from "../../components/RazorpayOAuthSettings";
 import { Link } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useCurrentUser } from "../../api/hooks";
@@ -166,7 +166,7 @@ export function GymProfileEditor({
               </div>
             </SectionAccordion>
             <SectionAccordion id="gym-payments" title="Membership payment beneficiary" description="Razorpay Route onboarding, linked-account readiness and masked settlement information.">
-              <PaymentConnectionSettings gym={gym.data.data} disabled={!canEdit} />
+              <RazorpayOAuthSettings gym={gym.data.data} disabled={!canEdit} />
             </SectionAccordion>
             <SectionAccordion id="gym-terms" title="Social and public page settings" description="Gym-specific terms and public information.">
               <GymTermsEditor terms={gym.data.data.terms} disabled={!canEdit} />

@@ -21,7 +21,12 @@ import {
 import { sha256 } from "../utils/crypto.js";
 import { AppError } from "../utils/AppError.js";
 import { paymentProvider } from "../integrations/payments/index.js";
-import { Refund, RouteTransfer } from "../models/Business.js";
+import { Refund, RouteTransfer, PaymentConnection } from "../models/Business.js";
+import {
+  verifyOAuthCheckoutSignature,
+  verifyRazorpayWebhook,
+} from "../integrations/payments/razorpayOAuthProvider.js";
+import { gymOAuthClientForConnection } from "../services/paymentMerchantService.js";
 import { ensurePaymentInvoice } from "../services/invoiceService.js";
 import {
   submitRefund,
@@ -173,7 +178,10 @@ export async function createOrder(req: Request, res: Response) {
       amountMinor: payment.amountMinor,
       currency: payment.currency,
       status: payment.status,
-      razorpayKeyId: env.RAZORPAY_KEY_ID,
+      razorpayKeyId:
+        payment.purpose === "MEMBERSHIP"
+          ? payment.beneficiarySnapshot?.merchantPublicToken
+          : env.RAZORPAY_PLATFORM_KEY_ID,
       prefill: {
         name: purchaser?.name,
         email: purchaser?.email,
@@ -219,7 +227,13 @@ async function reconcileGatewayPayment(
   payment: any,
   providerPaymentId: string,
 ) {
-  const entity = await paymentProvider.getPaymentStatus(providerPaymentId);
+  const entity = payment.purpose === "MEMBERSHIP" &&
+    payment.beneficiarySnapshot?.credentialType === "OAUTH_BEARER"
+      ? await (await gymOAuthClientForConnection(
+        String(payment.beneficiarySnapshot.paymentConnectionId),
+        String(payment.beneficiarySnapshot.merchantAccountId),
+      )).getPayment(providerPaymentId)
+    : await paymentProvider.getPaymentStatus(providerPaymentId);
   if (
     entity.id !== providerPaymentId ||
     entity.order_id !== payment.providerOrderId ||
@@ -233,8 +247,18 @@ async function reconcileGatewayPayment(
     );
   if (entity.status === "captured" || entity.status === "failed") {
     await acceptProviderEvent(
-      { event: `payment.${entity.status}`, payload: { payment: { entity } } },
+      {
+        event: `payment.${entity.status}`,
+        ...(payment.beneficiarySnapshot?.merchantAccountId
+          ? { account_id: payment.beneficiarySnapshot.merchantAccountId }
+          : {}),
+        payload: { payment: { entity } },
+      },
       `query:${entity.id}:${entity.status}`,
+      payment.purpose === "MEMBERSHIP" &&
+        payment.beneficiarySnapshot?.credentialType === "OAUTH_BEARER"
+        ? "OAUTH"
+        : "PLATFORM",
     );
   }
 }
@@ -246,13 +270,19 @@ export async function verifyCheckout(req: Request, res: Response) {
   });
   if (!payment || payment.providerOrderId !== req.body.providerOrderId)
     throw new AppError(404, "PAYMENT_NOT_FOUND", "Payment not found.");
-  if (
-    !paymentProvider.verifyCheckout({
+  const signatureValid = payment.purpose === "MEMBERSHIP" &&
+    payment.beneficiarySnapshot?.credentialType === "OAUTH_BEARER"
+    ? verifyOAuthCheckoutSignature({
+        orderId: req.body.providerOrderId,
+        paymentId: req.body.providerPaymentId,
+        signature: req.body.signature,
+      })
+    : paymentProvider.verifyCheckout({
       orderId: req.body.providerOrderId,
       paymentId: req.body.providerPaymentId,
       signature: req.body.signature,
-    })
-  )
+    });
+  if (!signatureValid)
     throw new AppError(
       401,
       "PAYMENT_SIGNATURE_INVALID",
@@ -476,11 +506,82 @@ async function processProviderEvent(
   await providerEvent.save();
 
   if (
+    [
+      "account.app.authorization_revoked",
+      "account.activated",
+      "account.under_review",
+      "account.needs_clarification",
+      "account.suspended",
+      "account.rejected",
+    ].includes(payload.event)
+  ) {
+    const merchantAccountId = String(payload.account_id || "");
+    const connection: any = merchantAccountId
+      ? await PaymentConnection.findOne({
+          provider: "RAZORPAY",
+          environment: env.RAZORPAY_MODE.toUpperCase(),
+          merchantAccountId,
+          connectionType: "OAUTH_MERCHANT",
+        }).select("+accessTokenCiphertext +refreshTokenCiphertext +tokenFingerprint")
+      : null;
+    if (!connection || providerEvent.sourceEndpoint !== "OAUTH") {
+      providerEvent.status = "PROCESSED";
+      providerEvent.lastError = "Signed account event did not match an OAuth merchant connection.";
+      providerEvent.processedAt = new Date();
+      await providerEvent.save();
+      return;
+    }
+    if (payload.event === "account.app.authorization_revoked") {
+      connection.authorizationStatus = "REVOKED";
+      connection.collectionEnabled = false;
+      connection.onboardingStatus = "ACTION_REQUIRED";
+      connection.revokedAt = new Date();
+      connection.accessTokenCiphertext = undefined;
+      connection.refreshTokenCiphertext = undefined;
+      connection.tokenFingerprint = undefined;
+    } else if (payload.event === "account.activated") {
+      connection.paymentEligibilityStatus = "ELIGIBLE";
+      connection.onboardingStatus = "PENDING";
+      connection.lastProviderStatus = "ACTIVATED";
+    } else {
+      connection.paymentEligibilityStatus = ["account.suspended", "account.rejected"].includes(payload.event)
+        ? "INELIGIBLE"
+        : "UNKNOWN";
+      connection.onboardingStatus = payload.event === "account.rejected" ? "REJECTED" : "ACTION_REQUIRED";
+      connection.collectionEnabled = false;
+      connection.lastProviderStatus = String(payload.event).replace("account.", "").toUpperCase();
+    }
+    connection.lastProviderSyncAt = new Date();
+    await connection.save({ validateBeforeSave: false });
+    providerEvent.status = "PROCESSED";
+    providerEvent.processedAt = new Date();
+    await providerEvent.save();
+    return;
+  }
+
+  if (
     ["refund.created", "refund.processed", "refund.failed"].includes(
       payload.event,
     )
   ) {
-    await reconcileRefundEvent(payload.event, payload.payload?.refund?.entity);
+    const refundEntity = payload.payload?.refund?.entity;
+    const original = refundEntity?.payment_id
+      ? await Payment.findOne({ providerPaymentId: refundEntity.payment_id })
+      : null;
+    const expectedSource = original?.purpose === "MEMBERSHIP" &&
+      original?.beneficiarySnapshot?.credentialType === "OAUTH_BEARER"
+      ? "OAUTH"
+      : "PLATFORM";
+    if (!original || providerEvent.sourceEndpoint !== expectedSource ||
+      (expectedSource === "OAUTH" && String(payload.account_id || "") !==
+        String(original.beneficiarySnapshot?.merchantAccountId || ""))) {
+      providerEvent.status = "PROCESSED";
+      providerEvent.lastError = "Signed refund event did not match the committed merchant context.";
+      providerEvent.processedAt = new Date();
+      await providerEvent.save();
+      return;
+    }
+    await reconcileRefundEvent(payload.event, refundEntity);
     providerEvent.status = "PROCESSED";
     providerEvent.processedAt = new Date();
     await providerEvent.save();
@@ -540,8 +641,27 @@ async function processProviderEvent(
     );
   let payment = await Payment.findOne({ providerOrderId });
   if (!payment) {
-    providerEvent.status = "FAILED";
-    providerEvent.lastError = "Payment record not found";
+    // Application webhooks can legitimately contain unrelated merchant
+    // activity. Preserve the evidence without retrying or crediting a member.
+    providerEvent.status = "PROCESSED";
+    providerEvent.lastError = "Signed payment event did not match a GETFIT4U order.";
+    providerEvent.processedAt = new Date();
+    await providerEvent.save();
+    return;
+  }
+  const expectedSource = payment.purpose === "MEMBERSHIP" &&
+    payment.beneficiarySnapshot?.credentialType === "OAUTH_BEARER"
+    ? "OAUTH"
+    : "PLATFORM";
+  const expectedMerchant = payment.beneficiarySnapshot?.merchantAccountId;
+  if (
+    providerEvent.sourceEndpoint !== expectedSource ||
+    (expectedSource === "OAUTH" &&
+      (!payload.account_id || String(payload.account_id) !== String(expectedMerchant)))
+  ) {
+    providerEvent.status = "PROCESSED";
+    providerEvent.lastError = "Webhook merchant context did not match the committed purchase.";
+    providerEvent.processedAt = new Date();
     await providerEvent.save();
     return;
   }
@@ -800,7 +920,7 @@ async function processProviderEvent(
         { _id: payment._id, status: "CAPTURED", subscriptionId: { $exists: true } },
         { $set: { fulfillmentStatus: "APPLIED" } },
       );
-      if (payment.purpose === "MEMBERSHIP")
+      if (payment.purpose === "MEMBERSHIP" && payment.beneficiarySnapshot?.linkedAccountId)
         await RouteTransfer.updateOne(
           { paymentId: payment._id },
           { $set: { providerPaymentId } },
@@ -863,8 +983,15 @@ async function processProviderEvent(
   await providerEvent.save();
 }
 
-export async function razorpayWebhook(req: Request, res: Response) {
-  if (!env.RAZORPAY_WEBHOOK_SECRET) {
+async function handleRazorpayWebhook(
+  req: Request,
+  res: Response,
+  sourceEndpoint: "PLATFORM" | "OAUTH",
+) {
+  const webhookSecret = sourceEndpoint === "OAUTH"
+    ? env.RAZORPAY_OAUTH_WEBHOOK_SECRET
+    : env.RAZORPAY_PLATFORM_WEBHOOK_SECRET || env.RAZORPAY_WEBHOOK_SECRET;
+  if (!webhookSecret) {
     throw new AppError(
       503,
       "WEBHOOK_NOT_CONFIGURED",
@@ -873,7 +1000,7 @@ export async function razorpayWebhook(req: Request, res: Response) {
   }
   const signature = req.header("x-razorpay-signature") || "";
   const raw = req.body as Buffer;
-  if (!Buffer.isBuffer(raw) || !paymentProvider.verifyWebhook(raw, signature)) {
+  if (!Buffer.isBuffer(raw) || !verifyRazorpayWebhook(raw, signature, webhookSecret)) {
     throw new AppError(
       401,
       "INVALID_WEBHOOK_SIGNATURE",
@@ -886,19 +1013,30 @@ export async function razorpayWebhook(req: Request, res: Response) {
   } catch {
     throw new AppError(400, "WEBHOOK_JSON_INVALID", "Webhook payload is not valid JSON.");
   }
-  const eventKey =
-    req.header("x-razorpay-event-id") || sha256(raw.toString("utf8"));
-  res.status(200).json(await acceptProviderEvent(payload, eventKey));
+  const providerEventId = req.header("x-razorpay-event-id") || sha256(raw.toString("utf8"));
+  const eventKey = `${sourceEndpoint.toLowerCase()}:${providerEventId}`;
+  res.status(200).json(await acceptProviderEvent(payload, eventKey, sourceEndpoint));
 }
+
+export const razorpayPlatformWebhook = (req: Request, res: Response) =>
+  handleRazorpayWebhook(req, res, "PLATFORM");
+export const razorpayOAuthWebhook = (req: Request, res: Response) =>
+  handleRazorpayWebhook(req, res, "OAUTH");
+// Backward-compatible platform endpoint for already registered deliveries.
+export const razorpayWebhook = razorpayPlatformWebhook;
 
 async function acceptProviderEvent(
   payload: Record<string, any>,
   eventKey: string,
+  sourceEndpoint: "PLATFORM" | "OAUTH" | "RECONCILIATION" = "RECONCILIATION",
 ) {
   let event;
   try {
     event = await ProviderEvent.create({
       provider: "RAZORPAY",
+      sourceEndpoint,
+      environment: env.RAZORPAY_MODE.toUpperCase(),
+      merchantAccountId: payload.account_id,
       eventKey,
       eventType: payload.event,
       payloadHash: sha256(JSON.stringify(payload)),

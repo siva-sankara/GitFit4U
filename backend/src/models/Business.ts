@@ -301,6 +301,50 @@ const paymentConnectionSchema = new Schema(
     businessContactEmail: { type: String, required: true, lowercase: true, trim: true },
     businessContactPhone: { type: String, trim: true, maxlength: 18 },
     linkedAccountId: { type: String, trim: true },
+    // OAuth merchant fields. Legacy Route fields above remain readable for
+    // historical orders, refunds and reconciliation only.
+    connectionType: {
+      type: String,
+      enum: ["OAUTH_MERCHANT", "LEGACY_ROUTE"],
+      default: "OAUTH_MERCHANT",
+      index: true,
+    },
+    merchantAccountId: { type: String, trim: true },
+    publicToken: { type: String, trim: true },
+    accessTokenCiphertext: { type: String, select: false },
+    refreshTokenCiphertext: { type: String, select: false },
+    tokenFingerprint: { type: String, select: false },
+    tokenEncryptionKeyVersion: { type: Number, min: 1 },
+    accessTokenExpiresAt: Date,
+    refreshTokenExpiresAt: Date,
+    tokenRefreshLeaseId: { type: String, select: false },
+    tokenRefreshLeaseUntil: { type: Date, select: false },
+    authorizationStatus: {
+      type: String,
+      enum: ["NOT_CONNECTED", "CONNECTED", "ACTION_REQUIRED", "REVOKED", "DISCONNECTED"],
+      default: "NOT_CONNECTED",
+      index: true,
+    },
+    paymentEligibilityStatus: {
+      type: String,
+      enum: ["UNKNOWN", "ELIGIBLE", "INELIGIBLE"],
+      default: "UNKNOWN",
+    },
+    settlementReadinessStatus: {
+      type: String,
+      enum: ["UNKNOWN", "READY", "ACTION_REQUIRED"],
+      default: "UNKNOWN",
+    },
+    qrCapability: {
+      type: String,
+      enum: ["UNKNOWN", "ENABLED", "DISABLED"],
+      default: "UNKNOWN",
+    },
+    connectionRevision: { type: Number, default: 1, min: 1 },
+    connectedAt: Date,
+    revokedAt: Date,
+    disconnectedAt: Date,
+    disconnectedBy: { type: Schema.Types.ObjectId, ref: "User" },
     productConfigurationId: { type: String, trim: true },
     settlementAccountId: { type: String, trim: true },
     providerMerchantReference: String,
@@ -343,6 +387,38 @@ paymentConnectionSchema.index(
   { gymId: 1, provider: 1, environment: 1 },
   { unique: true },
 );
+paymentConnectionSchema.index(
+  { merchantAccountId: 1, provider: 1, environment: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { merchantAccountId: { $type: "string" } },
+  },
+);
+
+const paymentOAuthStateSchema = new Schema(
+  {
+    publicId: { type: String, required: true, unique: true },
+    stateHash: { type: String, required: true, select: false },
+    browserNonceHash: { type: String, required: true, select: false },
+    ownerId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
+    gymId: { type: Schema.Types.ObjectId, ref: "Gym", required: true, index: true },
+    sessionId: { type: String, required: true },
+    provider: { type: String, enum: ["RAZORPAY"], default: "RAZORPAY" },
+    environment: { type: String, enum: ["TEST", "LIVE"], required: true },
+    returnTo: { type: String, required: true },
+    status: {
+      type: String,
+      enum: ["PENDING", "PROCESSING", "COMPLETED", "DENIED", "FAILED"],
+      default: "PENDING",
+      index: true,
+    },
+    expiresAt: { type: Date, required: true, index: { expires: 0 } },
+    consumedAt: Date,
+    failureCode: String,
+  },
+  { timestamps: true },
+);
+paymentOAuthStateSchema.index({ gymId: 1, status: 1, createdAt: -1 });
 paymentConnectionSchema.index(
   { linkedAccountId: 1, provider: 1, environment: 1 },
   {
@@ -442,6 +518,8 @@ export const BankAccount =
   models.BankAccount || model("BankAccount", bankAccountSchema);
 export const PaymentConnection =
   models.PaymentConnection || model("PaymentConnection", paymentConnectionSchema);
+export const PaymentOAuthState =
+  models.PaymentOAuthState || model("PaymentOAuthState", paymentOAuthStateSchema);
 export const RouteTransfer =
   models.RouteTransfer || model("RouteTransfer", routeTransferSchema);
 export const Settlement =

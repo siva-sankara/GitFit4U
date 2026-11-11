@@ -14,8 +14,10 @@ import { uploadRoutes } from "./uploadRoutes.js";
 import { socialRoutes } from "./socialRoutes.js";
 import { workspaceRoutes } from "./workspaceRoutes.js";
 import { whatsappRoutes } from "./whatsappRoutes.js";
+import { razorpayConnectionRoutes } from "./razorpayConnectionRoutes.js";
 
 export const apiRoutes = Router();
+apiRoutes.use(razorpayConnectionRoutes);
 apiRoutes.use("/workspace", workspaceRoutes);
 apiRoutes.use("/auth", authRoutes);
 apiRoutes.use("/public", publicRoutes);

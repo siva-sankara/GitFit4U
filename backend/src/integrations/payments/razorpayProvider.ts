@@ -12,11 +12,13 @@ import type {
 } from "./paymentProvider.js";
 
 function configurationBlocker() {
-  if (!env.RAZORPAY_KEY_ID || !env.RAZORPAY_KEY_SECRET)
-    return "Razorpay server credentials are not configured.";
+  const keyId = env.RAZORPAY_PLATFORM_KEY_ID || env.RAZORPAY_KEY_ID;
+  const keySecret = env.RAZORPAY_PLATFORM_KEY_SECRET || env.RAZORPAY_KEY_SECRET;
+  if (!keyId || !keySecret)
+    return "Razorpay platform merchant credentials are not configured.";
   const expectedPrefix = env.RAZORPAY_MODE === "live" ? "rzp_live_" : "rzp_test_";
-  if (!env.RAZORPAY_KEY_ID.startsWith(expectedPrefix))
-    return `RAZORPAY_KEY_ID does not match RAZORPAY_MODE=${env.RAZORPAY_MODE}.`;
+  if (!keyId.startsWith(expectedPrefix))
+    return `RAZORPAY_PLATFORM_KEY_ID does not match RAZORPAY_MODE=${env.RAZORPAY_MODE}.`;
   return null;
 }
 
@@ -34,7 +36,7 @@ async function request<T>(path: string, init: RequestInit): Promise<T> {
       ...init,
       signal: AbortSignal.timeout(15_000),
       headers: {
-        authorization: `Basic ${Buffer.from(`${env.RAZORPAY_KEY_ID}:${env.RAZORPAY_KEY_SECRET}`).toString("base64")}`,
+        authorization: `Basic ${Buffer.from(`${env.RAZORPAY_PLATFORM_KEY_ID || env.RAZORPAY_KEY_ID}:${env.RAZORPAY_PLATFORM_KEY_SECRET || env.RAZORPAY_KEY_SECRET}`).toString("base64")}`,
         "content-type": "application/json",
         ...init.headers,
       },
@@ -129,9 +131,10 @@ export class RazorpayProvider implements PaymentProvider {
     paymentId: string;
     signature: string;
   }) {
-    if (!env.RAZORPAY_KEY_SECRET) return false;
+    const secret = env.RAZORPAY_PLATFORM_KEY_SECRET || env.RAZORPAY_KEY_SECRET;
+    if (!secret) return false;
     const expected = crypto
-      .createHmac("sha256", env.RAZORPAY_KEY_SECRET)
+      .createHmac("sha256", secret)
       .update(`${input.orderId}|${input.paymentId}`)
       .digest("hex");
     return safeHexEqual(input.signature, expected);
@@ -220,9 +223,10 @@ export class RazorpayProvider implements PaymentProvider {
     return response.items || [];
   }
   verifyWebhook(rawBody: Buffer, signature: string) {
-    if (!env.RAZORPAY_WEBHOOK_SECRET) return false;
+    const secret = env.RAZORPAY_PLATFORM_WEBHOOK_SECRET || env.RAZORPAY_WEBHOOK_SECRET;
+    if (!secret) return false;
     const expected = crypto
-      .createHmac("sha256", env.RAZORPAY_WEBHOOK_SECRET)
+      .createHmac("sha256", secret)
       .update(rawBody)
       .digest("hex");
     return safeHexEqual(signature, expected);

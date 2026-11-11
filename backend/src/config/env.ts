@@ -66,11 +66,24 @@ const schema = z
       z.string().regex(/^(?:\.)?[A-Za-z0-9.-]+$/).optional(),
     ),
     REDIS_URL: z.string().default("redis://127.0.0.1:6379"),
-    RAZORPAY_KEY_ID: z.string().optional(),
-    RAZORPAY_KEY_SECRET: z.string().optional(),
-    RAZORPAY_WEBHOOK_SECRET: z.string().optional(),
+    // Legacy names are retained as platform-merchant aliases during migration.
+    RAZORPAY_KEY_ID: z.preprocess((value) => value || undefined, z.string().optional()),
+    RAZORPAY_KEY_SECRET: z.preprocess((value) => value || undefined, z.string().optional()),
+    RAZORPAY_WEBHOOK_SECRET: z.preprocess((value) => value || undefined, z.string().optional()),
     PAYMENT_PROVIDER: z.literal("razorpay").default("razorpay"),
     RAZORPAY_MODE: z.enum(["test", "live"]).default("test"),
+    RAZORPAY_PLATFORM_PAYMENTS_ENABLED: z
+      .enum(["true", "false"])
+      .default("false")
+      .transform((value) => value === "true"),
+    RAZORPAY_GYM_OAUTH_ENABLED: z
+      .enum(["true", "false"])
+      .default("false")
+      .transform((value) => value === "true"),
+    RAZORPAY_GYM_QR_ENABLED: z
+      .enum(["true", "false"])
+      .default("false")
+      .transform((value) => value === "true"),
     RAZORPAY_ROUTE_ENABLED: z
       .enum(["true", "false"])
       .default("false")
@@ -83,6 +96,21 @@ const schema = z
       (value) => value || undefined,
       z.enum(["platform_absorbs", "gym_deducts_actual"]).optional(),
     ),
+    RAZORPAY_PLATFORM_KEY_ID: z.preprocess((value) => value || undefined, z.string().optional()),
+    RAZORPAY_PLATFORM_KEY_SECRET: z.preprocess((value) => value || undefined, z.string().optional()),
+    RAZORPAY_PLATFORM_ACCOUNT_ID: z.preprocess((value) => value || undefined, z.string().optional()),
+    RAZORPAY_PLATFORM_WEBHOOK_SECRET: z.preprocess((value) => value || undefined, z.string().optional()),
+    RAZORPAY_OAUTH_CLIENT_ID: z.preprocess((value) => value || undefined, z.string().optional()),
+    RAZORPAY_OAUTH_CLIENT_SECRET: z.preprocess((value) => value || undefined, z.string().optional()),
+    RAZORPAY_OAUTH_REDIRECT_URI: z.preprocess((value) => value || undefined, z.string().url().optional()),
+    RAZORPAY_OAUTH_WEBHOOK_SECRET: z.preprocess((value) => value || undefined, z.string().optional()),
+    PAYMENT_TOKEN_ENCRYPTION_KEY: z.preprocess(
+      (value) => value || undefined,
+      z.string().regex(/^[a-f\d]{64}$/i, "PAYMENT_TOKEN_ENCRYPTION_KEY must be 64 hexadecimal characters.").optional(),
+    ),
+    PAYMENT_TOKEN_ENCRYPTION_KEY_VERSION: z.coerce.number().int().min(1).default(1),
+    FRONTEND_URL: z.preprocess((value) => value || undefined, z.string().url().optional()),
+    BACKEND_PUBLIC_URL: z.preprocess((value) => value || undefined, z.string().url().optional()),
     GOOGLE_CLIENT_ID: z.string().optional(),
     RESEND_API_KEY: z.string().optional(),
     EMAIL_FROM: z.string().optional(),
@@ -154,13 +182,39 @@ const schema = z
     LOG_LEVEL: z.string().default("info"),
   })
   .superRefine((value, context) => {
-    if (value.RAZORPAY_ROUTE_ENABLED && !value.RAZORPAY_GYM_FEE_BEARER) {
-      context.addIssue({
+    if (value.RAZORPAY_PLATFORM_PAYMENTS_ENABLED) {
+      for (const key of [
+        "RAZORPAY_PLATFORM_KEY_ID",
+        "RAZORPAY_PLATFORM_KEY_SECRET",
+        "RAZORPAY_PLATFORM_WEBHOOK_SECRET",
+      ] as const) if (!value[key]) context.addIssue({
         code: "custom",
-        path: ["RAZORPAY_GYM_FEE_BEARER"],
-        message: "RAZORPAY_GYM_FEE_BEARER is required when RAZORPAY_ROUTE_ENABLED=true.",
+        path: [key],
+        message: `${key} is required when RAZORPAY_PLATFORM_PAYMENTS_ENABLED=true.`,
       });
     }
+    if (value.RAZORPAY_GYM_OAUTH_ENABLED) {
+      for (const key of [
+        "RAZORPAY_OAUTH_CLIENT_ID",
+        "RAZORPAY_OAUTH_CLIENT_SECRET",
+        "RAZORPAY_OAUTH_REDIRECT_URI",
+        "RAZORPAY_OAUTH_WEBHOOK_SECRET",
+        "PAYMENT_TOKEN_ENCRYPTION_KEY",
+        "FRONTEND_URL",
+      ] as const) if (!value[key]) context.addIssue({
+        code: "custom",
+        path: [key],
+        message: `${key} is required when RAZORPAY_GYM_OAUTH_ENABLED=true.`,
+      });
+    }
+    if (value.RAZORPAY_GYM_QR_ENABLED && !value.RAZORPAY_GYM_OAUTH_ENABLED)
+      context.addIssue({
+        code: "custom",
+        path: ["RAZORPAY_GYM_QR_ENABLED"],
+        message: "RAZORPAY_GYM_QR_ENABLED requires RAZORPAY_GYM_OAUTH_ENABLED=true.",
+      });
+    // Route is historical/reconciliation-only in the OAuth release. A missing
+    // fee policy must not crash unrelated application startup.
     if (value.AUTH_OTP_DUAL_DELIVERY_ENABLED) {
       for (const key of [
         "AUTH_OTP_DELIVERY_ENCRYPTION_KEY",
@@ -251,6 +305,19 @@ export function parseEnvironment(input: NodeJS.ProcessEnv) {
   const awsRegion = input.OBJECT_STORAGE_REGION || input.AWS_REGION;
   return schema.parse({
     ...input,
+    RAZORPAY_PLATFORM_PAYMENTS_ENABLED:
+      input.RAZORPAY_PLATFORM_PAYMENTS_ENABLED ??
+      (input.RAZORPAY_KEY_ID && input.RAZORPAY_KEY_SECRET && input.RAZORPAY_WEBHOOK_SECRET
+        ? "true"
+        : "false"),
+    // Old variables remain valid but are explicitly scoped to the platform
+    // merchant. New deployments should use the RAZORPAY_PLATFORM_* names.
+    RAZORPAY_PLATFORM_KEY_ID: input.RAZORPAY_PLATFORM_KEY_ID || input.RAZORPAY_KEY_ID,
+    RAZORPAY_PLATFORM_KEY_SECRET: input.RAZORPAY_PLATFORM_KEY_SECRET || input.RAZORPAY_KEY_SECRET,
+    RAZORPAY_PLATFORM_WEBHOOK_SECRET: input.RAZORPAY_PLATFORM_WEBHOOK_SECRET || input.RAZORPAY_WEBHOOK_SECRET,
+    RAZORPAY_KEY_ID: input.RAZORPAY_KEY_ID || input.RAZORPAY_PLATFORM_KEY_ID,
+    RAZORPAY_KEY_SECRET: input.RAZORPAY_KEY_SECRET || input.RAZORPAY_PLATFORM_KEY_SECRET,
+    RAZORPAY_WEBHOOK_SECRET: input.RAZORPAY_WEBHOOK_SECRET || input.RAZORPAY_PLATFORM_WEBHOOK_SECRET,
     OBJECT_STORAGE_REGION: awsRegion,
     OBJECT_STORAGE_BUCKET: input.OBJECT_STORAGE_BUCKET || input.AWS_S3_BUCKET_NAME,
     OBJECT_STORAGE_ACCESS_KEY: input.OBJECT_STORAGE_ACCESS_KEY || input.AWS_ACCESS_KEY_ID,

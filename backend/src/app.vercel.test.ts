@@ -27,6 +27,8 @@ vi.mock("./middleware/httpLogging.js", () => ({
 vi.mock("./docs/openapi.js", () => ({ openapi: {} }));
 vi.mock("./controllers/checkoutController.js", () => ({
   razorpayWebhook: mocks.webhook,
+  razorpayPlatformWebhook: mocks.webhook,
+  razorpayOAuthWebhook: mocks.webhook,
 }));
 vi.mock("./routes/index.js", async () => {
   const { Router } = await import("express");

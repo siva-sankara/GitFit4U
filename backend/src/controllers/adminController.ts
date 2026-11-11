@@ -253,13 +253,14 @@ export async function healthOverview(_req: Request, res: Response) {
       },
       paymentProvider: {
         status:
-          env.RAZORPAY_KEY_ID &&
-          env.RAZORPAY_KEY_SECRET &&
-          env.RAZORPAY_WEBHOOK_SECRET
+          env.RAZORPAY_PLATFORM_PAYMENTS_ENABLED &&
+          env.RAZORPAY_PLATFORM_KEY_ID &&
+          env.RAZORPAY_PLATFORM_KEY_SECRET &&
+          env.RAZORPAY_PLATFORM_WEBHOOK_SECRET
             ? "CONFIGURED"
             : "NOT_CONFIGURED",
         detail:
-          "Configuration presence only; provider availability is not measured.",
+          `Platform payments: ${env.RAZORPAY_PLATFORM_PAYMENTS_ENABLED ? "enabled" : "disabled"}; gym OAuth: ${env.RAZORPAY_GYM_OAUTH_ENABLED ? "enabled" : "disabled"}. Configuration presence only; provider availability is not measured.`,
       },
       storage: {
         provider: storageProvider(),

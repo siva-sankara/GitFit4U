@@ -54,27 +54,35 @@ export function AdminPaymentConnectionsPage() {
     query.data?.data.configurationBlockers || [];
   return (
     <div className="page-stack">
-      <PageHeader><div><span className="eyebrow">Finance operations</span><h1>Gym payment onboarding</h1><p>Record provider-confirmed vendor approvals and monitor beneficiary-routing blockers.</p></div></PageHeader>
+      <PageHeader><div><span className="eyebrow">Finance operations</span><h1>Gym payment connections</h1><p>Review OAuth authorization, payment eligibility and settlement evidence without handling merchant secrets.</p></div></PageHeader>
       {configurationBlockers.length > 0 && <div className="form-alert" role="status"><strong>Live gym collection is intentionally disabled.</strong>{configurationBlockers.map((blocker: string) => <p key={blocker}>{blocker}</p>)}<p>Platform subscriptions can use ordinary Razorpay Checkout independently and never include a gym transfer.</p></div>}
       {query.isLoading && <section className="state-card">Loading payment connections…</section>}
       {query.isError && <section className="state-card" role="alert">{query.error.message}</section>}
-      {!query.isLoading && rows.length === 0 && <section className="state-card">No gym has requested Razorpay Route onboarding.</section>}
+      {!query.isLoading && rows.length === 0 && <section className="state-card">No gym has connected a Razorpay merchant account.</section>}
       {rows.map((row: Row) => (
         <article className="panel form-section page-stack" key={row.publicId}>
           <div className="section-heading"><div><h2>{row.gymId?.name || "Gym"}</h2><p>{row.businessLegalName} · {row.businessContactEmail}</p></div><StatusBadge status={row.onboardingStatus} /></div>
           <div className="detail-grid">
             <p><strong>Owner</strong><br />{row.authorizedOwnerId?.name || "—"}</p>
             <p><strong>Environment</strong><br />{row.environment}</p>
-            <p><strong>Linked account</strong><br />{row.linkedAccountId || "Not assigned"}</p>
-            <p><strong>Settlement account</strong><br />{row.maskedSettlementAccount || "Not supplied"}</p>
+            <p><strong>{row.connectionType === "OAUTH_MERCHANT" ? "Merchant account" : "Legacy linked account"}</strong><br />{row.merchantAccountId || row.linkedAccountId || "Not assigned"}</p>
+            <p><strong>Authorization</strong><br />{row.authorizationStatus || "Legacy Route"}</p>
             <p><strong>Collection</strong><br />{row.collectionEnabled ? "Enabled" : "Disabled"}</p>
-            <p><strong>Allocation</strong><br />{row.allocationCapability}</p>
+            <p><strong>{row.connectionType === "OAUTH_MERCHANT" ? "Payment eligibility" : "Allocation"}</strong><br />{row.paymentEligibilityStatus || row.allocationCapability}</p>
           </div>
           <form onSubmit={(event) => {
             event.preventDefault();
             const values = new FormData(event.currentTarget);
             const optional = (key: string) => String(values.get(key) || "").trim() || undefined;
-            review.mutate({ id: row.publicId, body: {
+            review.mutate({ id: row.publicId, body: row.connectionType === "OAUTH_MERCHANT" ? {
+              onboardingStatus: values.get("onboardingStatus"),
+              paymentEligibilityStatus: values.get("paymentEligibilityStatus"),
+              settlementReadinessStatus: values.get("settlementReadinessStatus"),
+              qrCapability: values.get("qrCapability"),
+              providerEvidenceReference: optional("providerEvidenceReference"),
+              collectionEnabled: values.get("collectionEnabled") === "on",
+              reason: values.get("reason"),
+            } : {
               onboardingStatus: values.get("onboardingStatus"),
               linkedAccountId: optional("linkedAccountId"),
               productConfigurationId: optional("productConfigurationId"),
@@ -84,9 +92,15 @@ export function AdminPaymentConnectionsPage() {
           }}>
             <fieldset className="form-grid" disabled={review.isPending}>
               <label className="field"><span>Review status</span><select className="input" name="onboardingStatus" defaultValue={row.onboardingStatus}>{["PENDING", "ACTION_REQUIRED", "APPROVED", "REJECTED", "DISABLED"].map(value => <option key={value}>{value}</option>)}</select></label>
-              <label className="field"><span>Razorpay linked account</span><input className="input" name="linkedAccountId" pattern="^acc_[A-Za-z0-9]+$" defaultValue={row.linkedAccountId || ""} /></label>
-              <label className="field"><span>Route product configuration</span><input className="input" name="productConfigurationId" pattern="^acc_prd_[A-Za-z0-9]+$" defaultValue={row.productConfigurationId || ""} /></label>
-              <p className="field"><span>Provider verification</span><strong>{row.providerEvidenceReference || "Not verified"}</strong><small>Approval fetches the linked account and Route product directly from Razorpay. Capabilities cannot be enabled manually.</small></p>
+              {row.connectionType === "OAUTH_MERCHANT" ? <>
+                <label className="field"><span>Payment eligibility</span><select className="input" name="paymentEligibilityStatus" defaultValue={row.paymentEligibilityStatus || "UNKNOWN"}>{["UNKNOWN", "ELIGIBLE", "INELIGIBLE"].map(value => <option key={value}>{value}</option>)}</select></label>
+                <label className="field"><span>Settlement readiness</span><select className="input" name="settlementReadinessStatus" defaultValue={row.settlementReadinessStatus || "UNKNOWN"}>{["UNKNOWN", "READY", "ACTION_REQUIRED"].map(value => <option key={value}>{value}</option>)}</select></label>
+                <label className="field"><span>QR capability</span><select className="input" name="qrCapability" defaultValue={row.qrCapability || "UNKNOWN"}>{["UNKNOWN", "ENABLED", "DISABLED"].map(value => <option key={value}>{value}</option>)}</select></label>
+                <label className="field"><span>Provider evidence reference</span><input className="input" name="providerEvidenceReference" minLength={5} maxLength={300} defaultValue={row.providerEvidenceReference || ""} /><small>Record a controlled Razorpay dashboard/webhook evidence reference. OAuth consent alone is insufficient.</small></label>
+              </> : <>
+                <label className="field"><span>Razorpay linked account</span><input className="input" name="linkedAccountId" pattern="^acc_[A-Za-z0-9]+$" defaultValue={row.linkedAccountId || ""} /></label>
+                <label className="field"><span>Route product configuration</span><input className="input" name="productConfigurationId" pattern="^acc_prd_[A-Za-z0-9]+$" defaultValue={row.productConfigurationId || ""} /></label>
+              </>}
               <label><input type="checkbox" name="collectionEnabled" defaultChecked={row.collectionEnabled} /> Enable only after live provider verification</label>
               <label className="field"><span>Audit reason</span><textarea className="input" name="reason" minLength={5} maxLength={1000} required /></label>
               <button className="btn btn-primary" type="submit">Save provider review</button>
@@ -95,7 +109,7 @@ export function AdminPaymentConnectionsPage() {
         </article>
       ))}
       {review.isError && <p className="form-alert" role="alert">{review.error.message}</p>}
-      {review.isSuccess && <p role="status">Razorpay Route review saved. The server will keep collection disabled while any readiness blocker remains.</p>}
+      {review.isSuccess && <p role="status">Razorpay connection review saved. The server keeps collection disabled while any readiness blocker remains.</p>}
       <section className="panel form-section page-stack">
         <div className="section-heading">
           <div>

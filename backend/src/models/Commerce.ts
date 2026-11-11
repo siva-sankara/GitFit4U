@@ -263,6 +263,9 @@ paymentSchema.index({ offerId: 1, offerReservationStatus: 1, payerId: 1 });
 const providerEventSchema = new Schema(
   {
     provider: { type: String, required: true },
+    sourceEndpoint: { type: String, enum: ["PLATFORM", "OAUTH", "RECONCILIATION"], default: "PLATFORM" },
+    environment: { type: String, enum: ["TEST", "LIVE"] },
+    merchantAccountId: String,
     eventKey: { type: String, required: true },
     eventType: String,
     payloadHash: { type: String, required: true },

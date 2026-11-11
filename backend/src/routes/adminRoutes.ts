@@ -82,6 +82,10 @@ adminRoutes.patch(
           linkedAccountId: z.string().trim().regex(/^acc_[A-Za-z0-9]+$/).optional(),
           productConfigurationId: z.string().trim().regex(/^acc_prd_[A-Za-z0-9]+$/).optional(),
           collectionEnabled: z.boolean().optional(),
+          paymentEligibilityStatus: z.enum(["UNKNOWN", "ELIGIBLE", "INELIGIBLE"]).optional(),
+          settlementReadinessStatus: z.enum(["UNKNOWN", "READY", "ACTION_REQUIRED"]).optional(),
+          qrCapability: z.enum(["UNKNOWN", "ENABLED", "DISABLED"]).optional(),
+          providerEvidenceReference: z.string().trim().min(5).max(300).optional(),
           reason: z.string().trim().min(5).max(1000),
         })
         .strict(),
