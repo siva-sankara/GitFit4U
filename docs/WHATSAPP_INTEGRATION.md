@@ -15,7 +15,7 @@ This integration is an additive business-communication channel and the authorita
 | Live provider verification | Not performed | Requires approved assets, credentials and explicitly authorised test recipients |
 | Real-device certification | Not performed | Complete the checklist in “Live certification” for platform and at least one gym sender |
 
-Do not set `WHATSAPP_MODE=live` until every required external gate is complete. A successful API request means provider acceptance, not delivery or read.
+Use `WHATSAPP_ENABLED=false` until the required sender credentials and approved templates are ready. A successful API request means provider acceptance, not delivery or read. This update has not changed the real `.env`, subscribed any live Meta account, sent a live message, or migrated a production database.
 
 ## Sender architecture
 
@@ -33,13 +33,23 @@ Credentials returned by Embedded Signup are exchanged server-side and stored usi
 Names only are committed in `backend/.env.example`:
 
 ```text
-WHATSAPP_MODE=disabled
+WHATSAPP_ENABLED=false
+WHATSAPP_AUTH_OTP_ENABLED=false
 WHATSAPP_APP_ID=
 WHATSAPP_APP_SECRET=
 WHATSAPP_VERIFY_TOKEN=
-WHATSAPP_API_VERSION=v26.0
+WHATSAPP_GRAPH_API_VERSION=
 WHATSAPP_DEFAULT_LANGUAGE=en_US
-WHATSAPP_AUTH_TEMPLATE_NAME=getfit4u_verification_code
+WHATSAPP_TEMPLATE_LANGUAGE=en_US
+WHATSAPP_TEMPLATE_AUTH_OTP=getfit4u_otp
+WHATSAPP_TEMPLATE_WELCOME=member_welcome_message
+WHATSAPP_TEMPLATE_MEMBERSHIP_ACTIVATED=membership_activated
+WHATSAPP_TEMPLATE_MEMBERSHIP_RENEWAL=membership_renewal_reminder
+WHATSAPP_TEMPLATE_MEMBERSHIP_EXPIRED=membership_expired
+WHATSAPP_TEMPLATE_PAYMENT_SUCCESS=membership_payment_confirmation
+WHATSAPP_TEMPLATE_CLASS_BOOKED=class_booking_confirmation
+WHATSAPP_TEMPLATE_CLASS_CANCELLED=class_booking_cancelled
+WHATSAPP_TEMPLATE_PLATFORM_RENEWAL=gym_platform_renewal_reminder
 WHATSAPP_AUTH_TEMPLATE_LANGUAGE=en_US
 WHATSAPP_EMBEDDED_SIGNUP_CONFIG_ID=
 WHATSAPP_COEXISTENCE_ENABLED=false
@@ -47,12 +57,16 @@ WHATSAPP_COEXISTENCE_CONFIG_ID=
 WHATSAPP_CREDENTIAL_ENCRYPTION_KEY=
 WHATSAPP_ACCESS_TOKEN=
 WHATSAPP_PHONE_NUMBER_ID=
-WHATSAPP_WABA_ID=
+WHATSAPP_BUSINESS_ACCOUNT_ID=
 WHATSAPP_WEBHOOK_RETENTION_DAYS=30
 WHATSAPP_WORKER_ENABLED=false
 ```
 
-`WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID` and `WHATSAPP_WABA_ID` bootstrap only the platform connection and are optional for gym onboarding. App Secret, webhook verify token and access tokens are different credentials.
+`WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID` and `WHATSAPP_BUSINESS_ACCOUNT_ID` bootstrap only the platform connection. With the new `WHATSAPP_ENABLED=true` configuration, startup requires them, an explicit Graph version, App ID, App Secret, verify token and credential-encryption key. Embedded Signup configuration is required only to onboard gym accounts. App Secret, webhook verify token and access tokens are different credentials.
+
+Existing deployments without `WHATSAPP_ENABLED` continue using their `WHATSAPP_MODE`, `WHATSAPP_WABA_ID`, `WHATSAPP_API_VERSION`, `WHATSAPP_AUTH_TEMPLATE_NAME` and previously configured authentication behavior. New aliases take precedence. An explicit `WHATSAPP_ENABLED=false` overrides the old live mode. Legacy template names are centralized in `backend/src/config/whatsappConfiguration.ts`; new deployments explicitly configure the desired names. An omitted optional template disables that event. The complete optional mapping is in `.env.example`.
+
+Set `WHATSAPP_ENABLED=true` for live mode. For a rehearsal, additionally set `WHATSAPP_MODE=dry_run`; remove that override before live sends. Authentication remains off until `WHATSAPP_AUTH_OTP_ENABLED=true`. Utility messaging does not depend on Authentication approval. If only the five-value welcome template is configured, activation sends it once. If distinct welcome and activation templates are configured, each is queued once for that subscription; configure only one if two messages are not desired.
 
 Modes:
 
@@ -69,12 +83,16 @@ Authentication OTPs always use GETFIT4U's platform-owned `WHATSAPP_ACCESS_TOKEN`
 1. In WhatsApp Manager, open the platform WABA and create a message template.
 2. Select category **Authentication**, choose the exact language placed in `WHATSAPP_AUTH_TEMPLATE_LANGUAGE`, enable the optional security recommendation if desired, and set **code expiration to 5 minutes**.
 3. Add the **Copy Code** OTP button. Do not create a custom utility template for the code.
-4. Use a lowercase/underscore name such as `getfit4u_verification_code`, wait for status **Approved**, then set the exact name in `WHATSAPP_AUTH_TEMPLATE_NAME`.
+4. Use a lowercase/underscore name such as `getfit4u_otp`, wait for status **Approved**, then set the exact name in `WHATSAPP_TEMPLATE_AUTH_OTP`. Keep `WHATSAPP_AUTH_OTP_ENABLED=false` until this approval is available.
 5. Set the template's message-send TTL to 300 seconds where Meta exposes that option, so Meta does not intentionally deliver a code after the backend expiry.
 6. Grant the platform system-user token the WABA/phone assets and `whatsapp_business_messaging` plus `whatsapp_business_management` permissions. Configure the platform WABA and phone-number IDs; the phone must report `CONNECTED`.
 7. Generate a separate random production `AUTH_OTP_HMAC_SECRET` (at least 48 characters). Keep it, the Meta token, app secret and verify token only in backend/Vercel secrets.
 8. Subscribe the app to the WABA `messages` webhook field. The public callback is `https://<api-host>/api/v1/webhooks/whatsapp`; its verify token must exactly match `WHATSAPP_VERIFY_TOKEN`. Enable the WhatsApp worker so durable receipts are processed.
-9. Restart/redeploy the backend. The OTP endpoint performs a live Meta asset/template readiness check before every submission and returns a specific configuration, permission, sender, template, rate or recipient error instead of simulating success.
+9. Enable `WHATSAPP_AUTH_OTP_ENABLED=true` and restart/redeploy the backend. The OTP service checks approved Authentication category, Copy Code format, expiry and platform sender eligibility before submission. The browser receives safe delivery errors; internal configuration details are not exposed by the mobile delivery wrapper.
+
+With Authentication disabled, no WhatsApp Authentication API call is made. The same backend-generated code uses configured MSG91 SMS, or the existing Microsoft 365 email delivery queue. `AUTH_OTP_DUAL_DELIVERY_ENABLED=true` continues sending the shared code through both eligible channels. When WhatsApp Authentication is disabled and the M365 credentials plus `AUTH_OTP_DELIVERY_ENCRYPTION_KEY` are configured, verified email fallback also works with dual delivery off. OTP login/recovery destinations still come exclusively from enrolled, independently verified account contacts. A provider acceptance does not prove which contact was read.
+
+The OTP remains a six-digit, single-use HMAC proof with a default 300-second expiry, five failed attempts, resend cooldown and request limits. Existing short-lived delivery envelopes remain AES-GCM encrypted and are cleared on completion; no plaintext OTP is persisted or logged. A successfully submitted replacement invalidates earlier challenges for the same subject/purpose. A failed replacement preserves the previous usable code. Password login and other existing authentication methods are unchanged. If no verification delivery provider is configured, the app reports that verification is unavailable rather than pretending to send a code.
 
 The send payload supplies the same six-digit code to the template body and the index-0 URL parameter used by Meta's Copy Code authentication button. Meta's accepted response is only `SUBMITTED`; `SENT`, `DELIVERED`, `READ` and `FAILED` come from signed webhook events.
 
@@ -110,7 +128,7 @@ Safe rollback is to set `WHATSAPP_COEXISTENCE_ENABLED=false` and redeploy. This 
 2. Complete the current Meta business verification and any App Review/Data Use Checkup required for the implemented permissions. Approval is controlled by Meta and is not automatic.
 3. Add WhatsApp, register the production phone, complete display-name review, confirm phone/account quality and attach the correct billing method. Development/test-number restrictions still apply until Meta removes them.
 4. Request only `whatsapp_business_messaging` and `whatsapp_business_management` for the baseline. Add no broader permission unless a reviewed feature needs it.
-5. Create the Tech Provider Embedded Signup v4 configuration in the same app. Use the official supported flow, allowed domains and the deployed HTTPS origin. Put its public configuration ID only in server configuration; the API returns it to an authenticated connection screen when needed. Configure the optional Coexistence path separately as described above.
+5. For existing per-gym account onboarding, create the Tech Provider Embedded Signup v4 configuration in the same app. A directly configured platform Cloud API sender does not require Embedded Signup. Put the public configuration ID in server configuration; the authenticated connection screen receives it when needed. Configure optional Coexistence separately as described above.
 6. Configure the webhook callback as `https://<api-host>/api/v1/webhooks/whatsapp`. Set the same random server-only value in Meta and `WHATSAPP_VERIFY_TOKEN`. Subscribe the app/WABAs to `messages` and, when Coexistence is enabled, `smb_message_echoes`. The connection service also calls `subscribed_apps` after validating the returned assets.
 7. Set the App Secret and a separate 32+ character credential-encryption key in the deployment secret manager. Never paste them into source, frontend variables or logs.
 8. Submit the required templates in the platform WABA and separately in each gym WABA. Sync them from GETFIT4U after provider review.
@@ -139,7 +157,8 @@ Official references:
 - `WhatsAppMessage`: direction/source, provider ID, content/template metadata and independent lifecycle timestamps.
 - `WhatsAppOutbox`: stable dedupe key, original sender scope, recipient, expiry, lease, attempts, policy decision and result.
 - `WhatsAppWebhookReceipt`: signed raw-event normalization, durable lease and configurable TTL (default 30 days).
-- `WhatsAppTemplate`: per-connection WABA/name/language status and components.
+- `WhatsAppTemplate`: per-connection WABA/name/language status and components; `providerUpdatedAt` prevents older template-status webhooks from overwriting newer updates.
+- `Notification`: existing collection extended with `whatsappStatus`, `whatsappOccurrenceId`, attempts, availability and lease fields. Business transactions store an intent in their existing notification write. Only the dedicated worker creates WhatsApp conversation/outbox/message records after commit; WhatsApp database/provider failures cannot roll back captured payments or membership changes. The worker skips intents older than 48 hours and retries queue failures at most six times.
 - `Campaign`: the existing model is reused with `channel=WHATSAPP`; delivery remains individual, consent-filtered and bounded.
 
 Provider IDs are strings. Unique indexes cover tenant bindings, phone-number bindings, provider message IDs, consent scope and dedupe keys. Transcript/content retention and deletion must follow the approved GETFIT4U privacy schedule. Keep minimal suppression evidence after an account deletion if legally approved and necessary to prevent re-contact. Never log tokens, full phone numbers, message bodies, invoice contents or activation links.
@@ -181,7 +200,74 @@ retain their existing zero-variable templates. Otherwise the API returns the
 manual `wa.me` hand-off while still creating the in-app message, notification,
 and audit record. Single-use activation links are not injected into templates.
 
-## Approved membership templates
+## Configurable transactional template contracts
+
+The following are application contracts, not a claim that Meta has approved these names. Approve them in each sending WABA and sync the catalog. Use Utility category and the exact language in `WHATSAPP_TEMPLATE_LANGUAGE` (default `en_US`). Bodies use positional parameters in this order; only static headers, footers and buttons are supported for these contracts.
+
+| Environment key | Example name | Ordered body values |
+| --- | --- | --- |
+| `WHATSAPP_TEMPLATE_WELCOME` | `member_welcome_message` | Member name, gym name, membership plan, start date, expiry date |
+| `WHATSAPP_TEMPLATE_MEMBERSHIP_ACTIVATED` | `membership_activated` | Member name, gym name, membership plan, start date, expiry date |
+| `WHATSAPP_TEMPLATE_MEMBERSHIP_RENEWAL` | `membership_renewal_reminder` | Member name, gym name, expiry date, renewal amount in rupees |
+| `WHATSAPP_TEMPLATE_MEMBERSHIP_EXPIRED` | `membership_expired` | Member name, gym name, expiry date, renewal amount in rupees; wording must describe an expired membership |
+| `WHATSAPP_TEMPLATE_PAYMENT_SUCCESS` | `membership_payment_confirmation` | Member name, gym name, captured amount in rupees, plan name, GETFIT4U payment reference, membership start date, expiry date |
+| `WHATSAPP_TEMPLATE_CLASS_BOOKED` | `class_booking_confirmation` | Member name, gym name, class name, class date, local class time, trainer name (or Gym team) |
+| `WHATSAPP_TEMPLATE_CLASS_CANCELLED` | `class_booking_cancelled` | Same six class values |
+| `WHATSAPP_TEMPLATE_PLATFORM_RENEWAL` | `gym_platform_renewal_reminder` | Owner name, gym name, platform expiry date, renewal amount in rupees |
+
+Offline captured membership payments use `WHATSAPP_TEMPLATE_PAYMENT_OFFLINE` when configured, otherwise the configured payment-success template in new deployments. Previously configured static templates keep their legacy contracts. Optional class update/reminder templates use the same six class values. Other optional event templates currently support approved static bodies without variables; they are skipped if their components need unspecified data.
+
+Amounts are derived from payment/subscription snapshots, without a second currency symbol. Payment confirmations require a CAPTURED membership payment linked to the recipient and gym. Class messages require a booking linked to that recipient's member profile and gym. Values are recomputed before dispatch; changed/refunded payments, cancelled/superseded bookings and stale membership cycles are suppressed. Names are bounded and whitespace-normalized. No payment amount, membership dates, arbitrary recipient or parameter array is accepted from the browser.
+
+The existing gym-scoped manual reminder action remains at `POST /api/v1/owner/members/:id/communication/whatsapp-reminder`, with an idempotency key and business-level reason. Existing inbox/campaign screens now submit a local catalog ID, not a Meta template name. For compatibility, older clients may still select by name/language, but the server resolves that selection against the sender's approved catalog and rejects variable arrays; business notifications always use the server-side builders. The existing Embedded Signup callback remains a special authorized asset-validation flow, not a message-sending API.
+
+## Notification and webhook delivery guarantees
+
+The existing reminder scheduler keeps its current gym-local cadence and stable subscription/cycle/day keys. Expiry notifications reuse the membership lifecycle's expiry event; no second scheduler was introduced. The dedicated WhatsApp worker projects committed notification intents and delivers the existing outbox while the app is closed. Run it alongside the always-on API process; starting only the API is insufficient.
+
+Webhook POSTs authenticate the raw body using the App Secret and persist a deduplicated receipt before acknowledgment. The worker handles text, button/list replies, unsupported inbound types, message statuses and template status/quality events. Sender matching uses WABA plus phone-number ID. Message status, outbox status, manual communication history and campaign counters update in one MongoDB transaction; duplicate/out-of-order receipts do not regress READ to SENT/FAILED or count a transition twice. Unknown templates require catalog sync before use.
+
+HTTP 429 and temporary 5xx sends retry with existing bounded exponential backoff. Invalid credentials, recipients, templates and parameters do not retry. A timed-out send with no provider acknowledgment is marked UNKNOWN_OUTCOME rather than blindly resending and risking duplicate delivery. Missing consent/configuration never changes a successful payment or membership result. Marketing consent remains independent from service consent and cannot be obtained merely by supplying a phone number.
+
+## Local checks and controlled acceptance tests
+
+From the repository root, use separate terminals:
+
+```powershell
+Set-Location backend
+npm.cmd ci
+npm.cmd run lint
+npm.cmd test
+npm.cmd run build
+npm.cmd run test:vercel-types
+npm.cmd run dev
+# Separate backend terminal, with WHATSAPP_WORKER_ENABLED=true in its environment:
+npm.cmd run worker:whatsapp
+# When the existing OTP retry worker is needed, in another backend terminal:
+npm.cmd run worker:auth-otp
+# Separate frontend terminal, from the repository root:
+Set-Location frontend
+npm.cmd ci
+npm.cmd run lint
+npm.cmd test
+npm.cmd run build
+npm.cmd run dev
+```
+
+Automated tests mock Meta, email and SMS. They do not prove real delivery, permissions, account eligibility or current template approval. Physical tests below require an authorized test recipient with explicit service consent and a connected, unpaused sender.
+
+1. **Webhook verification:** with the API running, set the current shell's `WHATSAPP_VERIFY_TOKEN` privately and run `curl.exe -G 'http://localhost:5000/api/v1/webhooks/whatsapp' --data-urlencode 'hub.mode=subscribe' --data-urlencode "hub.verify_token=$env:WHATSAPP_VERIFY_TOKEN" --data-urlencode 'hub.challenge=verification-test'`. Expect exactly `verification-test`. Use an incorrect token and expect HTTP 403. For Meta verification use the public HTTPS callback, not localhost. The signature/body/status replay paths are covered by `npm.cmd test -- whatsappWebhook`.
+2. **Member welcome:** sync the gym's approved catalog, grant the test member service consent, then activate their paid membership through existing verified Razorpay capture or authorized recorded offline payment. Start the worker and check the conversation/outbox for the configured welcome/activation, correct plan/date values, `wamid`, and subsequent webhook delivery states. Replaying the same business event must not queue another welcome for that subscription.
+3. **Membership renewal:** in an isolated test database, use a current active membership within the existing reminder window, then let the existing maintenance job run. Verify four ordered values and the gym sender. Repeat the job on the same gym-local day: no duplicate outbox message. The owner's member-list renewal action provides a manual, gym-authorized test. Verify a different gym's member is rejected.
+4. **Platform renewal:** use a test gym with a current platform subscription in the reminder window. Connect the PLATFORM sender and record the owner's consent for that sender. The existing maintenance job queues `platform.expiring`; verify it uses the admin/platform sender, owner recipient, actual gym name and platform amount, rather than the gym membership template.
+5. **OTP:** while `WHATSAPP_AUTH_OTP_ENABLED=false`, request a signup/login code and verify configured email/SMS delivery with no WhatsApp Authentication call. After approval of the Authentication template, enable the flag, restart the API/OTP worker and request a code from an eligible non-admin account. Verify the same code once, verify reuse/expiry/attempt limits/resend throttling, and confirm an existing email channel still succeeds if WhatsApp submission is rejected. Use only existing verified contacts for login/recovery.
+6. **Class/payment:** create and cancel a test booking using the existing application actions; verify the six class values. Complete a test capture/offline payment and verify the seven payment values. Pending/failed payments and another member's booking must not generate these confirmations.
+
+Production uses `npm.cmd run build`, `npm.cmd start`, `npm.cmd run start:whatsapp-worker` and, when configured, `npm.cmd run start:auth-otp-worker` from the backend. Supervise processes with restart policies. Use a MongoDB replica set. Run the additive index migration in dry-run mode before `--apply`; it now includes the Notification intent scan index and does not replay old notifications or rewrite payments/users. Do not copy over an existing `.env` during an upgrade. Keep tokens in the backend secret manager and keep Authentication disabled until Meta approves it.
+
+Official message/authentication examples: [Meta template send](https://www.postman.com/meta/whatsapp-business-platform/request/o65u5m5/send-message-template-text), [Meta Copy Code authentication template](https://www.postman.com/meta/whatsapp-business-platform/request/6vkv46u/create-authentication-template-w-otp-copy-code-button).
+
+## Previously approved membership templates (compatibility)
 
 These exact Meta template names use **English (US), `en_US`**, independently of
 the default language for other messages. The approved body, welcome footer, and

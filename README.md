@@ -36,6 +36,12 @@ Restrict the browser maps key by domain and API. Keep the backend key server-res
 
 REST persists conversations/messages and Socket.IO delivers new messages, typing and read receipts. A socket can join only conversations containing the authenticated user. Configure Firebase service-account variables for push; in-app notifications work independently. WhatsApp uses the Cloud API template endpoint and requires approved templates and consent.
 
+WhatsApp setup: use the backend-only variables in `backend/.env.example`. Start with `WHATSAPP_ENABLED=false` and `WHATSAPP_AUTH_OTP_ENABLED=false`. Utility messaging and Authentication OTP can be enabled independently; existing verified email/SMS delivery remains available. Template names are configurable and checked against the sender's approved Meta catalog.
+
+After deployment, in **Meta Developer App → WhatsApp → Configuration → Webhook**, set callback `https://api.getfit4u.in/api/v1/webhooks/whatsapp` and the same private verify token as `WHATSAPP_VERIFY_TOKEN`. Subscribe the app/WABA to `messages`, `message_template_status_update`, and `message_template_quality_update` (plus `smb_message_echoes` for existing Coexistence connections). Keep raw-body signature verification enabled.
+
+Run `npm run db:migrate-whatsapp` to inspect indexes, then `npm run db:migrate-whatsapp -- --apply` against the intended database before enabling the worker. On the existing always-on server, supervise `npm run start:whatsapp-worker` from `backend` with `WHATSAPP_WORKER_ENABLED=true`, alongside the API. It processes committed notification intents, webhook receipts and the existing outbox even when the website is closed. No additional Redis queue or browser process is required. See [WhatsApp integration setup and testing](docs/WHATSAPP_INTEGRATION.md) and [implementation report](docs/whatsapp-implementation-report.txt).
+
 ## Files
 
 Uploads use short-lived S3-compatible presigned URLs. The API validates MIME type/size, creates randomized tenant/user keys, verifies object existence on completion and authorizes deletion. Configure the `OBJECT_STORAGE_*` variables.

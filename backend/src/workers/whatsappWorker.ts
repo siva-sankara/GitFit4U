@@ -3,6 +3,7 @@ import { logger } from "../config/logger.js";
 import { env } from "../config/env.js";
 import { processWhatsAppCampaignBatch, processWhatsAppOutbox } from "../services/whatsappDeliveryService.js";
 import { processWhatsAppWebhooks } from "../services/whatsappWebhookService.js";
+import { processWhatsAppNotificationIntents } from "../services/whatsappNotificationService.js";
 
 let stopping = false;
 for (const signal of ["SIGINT", "SIGTERM"] as const)
@@ -23,9 +24,10 @@ try {
     }
     try {
       const webhooks = await processWhatsAppWebhooks(50);
+      const intents = await processWhatsAppNotificationIntents(25);
       const campaign = await processWhatsAppCampaignBatch();
       const deliveries = await processWhatsAppOutbox(25);
-      if (!webhooks && !campaign && !deliveries) await wait(1_500);
+      if (!webhooks && !intents && !campaign && !deliveries) await wait(1_500);
     } catch (error) {
       logger.error({ err: error }, "WhatsApp worker cycle failed");
       await wait(5_000);

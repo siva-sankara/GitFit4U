@@ -6,7 +6,7 @@ import { sendMicrosoftGraphOtpEmail } from "../integrations/notifications/micros
 import { AuthOtpDelivery, OtpChallenge } from "../models/Auth.js";
 import { AppError } from "../utils/AppError.js";
 import { hashOtpContext } from "../utils/crypto.js";
-import { sendWhatsAppAuthenticationOtp } from "./whatsappAuthOtpService.js";
+import { sendMobileAuthenticationOtp } from "./authOtpMobileService.js";
 import type { OtpPurpose } from "./otpService.js";
 
 type DeliveryChannel = "MOBILE" | "EMAIL";
@@ -145,6 +145,8 @@ export async function queueAuthOtpDeliveries(input: {
 }
 
 const permanentDeliveryErrors = new Set([
+  "OTP_TEMPLATE_DISABLED",
+  "OTP_MOBILE_UNAVAILABLE",
   "M365_OTP_NOT_CONFIGURED",
   "M365_CLIENT_CREDENTIAL_INVALID",
   "M365_ACCESS_TOKEN_REJECTED",
@@ -289,7 +291,7 @@ async function processDelivery(filter: Record<string, unknown>, now: Date) {
       throw new AppError(409, "OTP_DELIVERY_STALE", "The OTP delivery is no longer current.");
     let providerReference: string;
     if (row.channel === "MOBILE") {
-      const sent = await sendWhatsAppAuthenticationOtp(
+      const sent = await sendMobileAuthenticationOtp(
         payload.destination,
         payload.code,
       );

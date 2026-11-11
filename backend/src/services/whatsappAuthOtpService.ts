@@ -9,6 +9,8 @@ import { normalizeWhatsAppRecipient } from "./whatsappConnectionService.js";
 const provider = new WhatsAppProvider();
 
 function configuration() {
+  if (env.WHATSAPP_AUTH_OTP_ENABLED === false)
+    throw new AppError(503, "OTP_TEMPLATE_DISABLED", "WhatsApp authentication is not enabled.");
   if (env.WHATSAPP_MODE !== "live")
     throw new AppError(
       503,

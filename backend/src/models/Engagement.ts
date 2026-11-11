@@ -175,6 +175,12 @@ const notificationSchema = new Schema(
     pushLeaseUntil: Date,
     pushLeaseId: String,
     pushDeliveredTokens: { type: [String], select: false },
+    whatsappStatus: { type: String, enum: ["NOT_REQUESTED", "QUEUED", "ENQUEUED", "SKIPPED", "FAILED"], default: "NOT_REQUESTED" },
+    whatsappOccurrenceId: String,
+    whatsappAttempts: { type: Number, default: 0 },
+    whatsappAvailableAt: Date,
+    whatsappLeaseUntil: Date,
+    whatsappLeaseId: String,
     readAt: Date,
     archivedAt: Date,
     deliveredAt: Date,
@@ -189,6 +195,7 @@ notificationSchema.index({
   pushLeaseUntil: 1,
 });
 notificationSchema.index({ userId: 1, readAt: 1, createdAt: -1 });
+notificationSchema.index({ whatsappStatus: 1, whatsappAvailableAt: 1, whatsappLeaseUntil: 1 });
 notificationSchema.index({ userId: 1, archivedAt: 1, createdAt: -1, _id: -1 });
 notificationSchema.index(
   { userId: 1, dedupeKey: 1 },

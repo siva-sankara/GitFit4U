@@ -1,4 +1,5 @@
 import { Router } from "express";
+import rateLimit from "express-rate-limit";
 import { z } from "zod";
 import { requireAuth, requirePermission, requireRole } from "../middleware/auth.js";
 import { validate } from "../middleware/validate.js";
@@ -6,6 +7,7 @@ import * as controller from "../controllers/whatsappController.js";
 
 export const whatsappRoutes = Router();
 whatsappRoutes.use(requireAuth);
+const sendLimit = rateLimit({ windowMs: 15 * 60_000, limit: 30, keyGenerator: req => req.auth!.userId, standardHeaders: true, legacyHeaders: false });
 
 const envelope = (body: z.ZodType = z.object({}), params: z.ZodType = z.object({}), query: z.ZodType = z.object({})) =>
   validate(z.object({ body, params, query }));
@@ -120,15 +122,17 @@ whatsappRoutes.get(
 whatsappRoutes.post(
   "/conversations/:id/messages",
   ...inbox,
+  sendLimit,
   envelope(
     z.object({
       idempotencyKey: z.string().uuid(),
       purpose: z.enum(["SERVICE", "MARKETING"]).default("SERVICE"),
       text: z.string().trim().max(5000).optional(),
+      templateId: z.string().regex(/^[a-f0-9]{24}$/i).optional(),
       templateName: z.string().regex(/^[a-z0-9_]{1,512}$/).optional(),
       language: z.string().regex(/^[a-z]{2}(?:_[A-Z]{2})?$/).optional(),
-      parameters: z.array(z.unknown()).max(20).optional(),
-    }).refine((value) => Boolean(value.text) !== Boolean(value.templateName), "Choose message text or one approved template."),
+      parameters: z.array(z.unknown()).max(0).optional(),
+    }).strict().refine((value) => Boolean(value.text) !== Boolean(value.templateId || value.templateName), "Choose message text or one approved template."),
     z.object({ id }),
   ),
   controller.sendMessage,
@@ -141,21 +145,23 @@ whatsappRoutes.patch(
   controller.archive,
 );
 const campaignAudience = z.object({
-  templateName: z.string().regex(/^[a-z0-9_]{1,512}$/),
-  language: z.string().regex(/^[a-z]{2}(?:_[A-Z]{2})?$/),
+  templateId: z.string().regex(/^[a-f0-9]{24}$/i).optional(),
+  templateName: z.string().regex(/^[a-z0-9_]{1,512}$/).optional(),
+  language: z.string().regex(/^[a-z]{2}(?:_[A-Z]{2})?$/).optional(),
   roles: z.array(z.enum(["USER", "GYM_OWNER", "TRAINER", "GYM_STAFF"])).min(1).max(4).transform((roles) => [...new Set(roles)]),
 });
 whatsappRoutes.get("/campaigns", ...campaignManage, controller.campaigns);
-whatsappRoutes.post("/campaigns/preview", ...campaignManage, envelope(campaignAudience), controller.campaignPreview);
+whatsappRoutes.post("/campaigns/preview", ...campaignManage, sendLimit, envelope(campaignAudience.strict().refine(value => Boolean(value.templateId || value.templateName), "Choose an approved template.")), controller.campaignPreview);
 whatsappRoutes.post(
   "/campaigns",
   ...campaignManage,
+  sendLimit,
   envelope(campaignAudience.extend({
     name: z.string().trim().min(3).max(120),
     scheduledAt: z.string().datetime().optional(),
     idempotencyKey: z.string().uuid(),
     confirmed: z.literal(true),
-  })),
+  }).strict().refine(value => Boolean(value.templateId || value.templateName), "Choose an approved template.")),
   controller.createCampaign,
 );
 whatsappRoutes.post("/campaigns/:id/cancel", ...campaignManage, envelope(z.object({}), z.object({ id })), controller.cancelCampaign);

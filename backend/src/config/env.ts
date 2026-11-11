@@ -2,6 +2,7 @@ import "dotenv/config";
 import { z } from "zod";
 import { normalizeClientOrigins } from "./clientOrigins.js";
 import { assertSafeOtpPreview } from "./otpPreviewPolicy.js";
+import { normalizeWhatsAppEnvironment, whatsappTemplateFields } from "./whatsappConfiguration.js";
 
 const schema = z
   .object({
@@ -124,6 +125,11 @@ const schema = z
     MSG91_AUTH_KEY: z.string().optional(),
     MSG91_TEMPLATE_ID: z.string().optional(),
     WHATSAPP_MODE: z.enum(["disabled", "dry_run", "live"]).default("disabled"),
+    WHATSAPP_ENABLED: z.enum(["true", "false"]).default("false").transform(value => value === "true"),
+    WHATSAPP_AUTH_OTP_ENABLED: z.enum(["true", "false"]).default("false").transform(value => value === "true"),
+    WHATSAPP_CONFIGURATION_LEGACY: z.boolean().default(false),
+    WHATSAPP_GRAPH_API_VERSION: z.preprocess(value => value || undefined, z.string().regex(/^v\d+\.\d+$/).optional()),
+    ...whatsappTemplateFields,
     WHATSAPP_APP_ID: z.string().optional(),
     WHATSAPP_APP_SECRET: z.string().optional(),
     WHATSAPP_ACCESS_TOKEN: z.string().optional(),
@@ -135,6 +141,7 @@ const schema = z
       .regex(/^v\d+\.\d+$/)
       .default("v26.0"),
     WHATSAPP_DEFAULT_LANGUAGE: z.string().min(2).max(20).default("en_US"),
+    WHATSAPP_TEMPLATE_LANGUAGE: z.string().min(2).max(20).default("en_US"),
     WHATSAPP_AUTH_TEMPLATE_NAME: z.preprocess(
       (value) => value || undefined,
       z.string().regex(/^[a-z0-9_]+$/).optional(),
@@ -240,7 +247,6 @@ const schema = z
         "WHATSAPP_APP_ID",
         "WHATSAPP_APP_SECRET",
         "WHATSAPP_VERIFY_TOKEN",
-        "WHATSAPP_EMBEDDED_SIGNUP_CONFIG_ID",
         "WHATSAPP_CREDENTIAL_ENCRYPTION_KEY",
       ] as const) {
         if (!value[key]) {
@@ -251,6 +257,13 @@ const schema = z
           });
         }
       }
+      // Direct Cloud API platform senders do not require Embedded Signup.
+      if (!value.WHATSAPP_CONFIGURATION_LEGACY) {
+        for (const key of ["WHATSAPP_ACCESS_TOKEN", "WHATSAPP_PHONE_NUMBER_ID", "WHATSAPP_WABA_ID", "WHATSAPP_GRAPH_API_VERSION"] as const)
+          if (!value[key]) context.addIssue({ code: "custom", path: [key], message: `${key} is required when WHATSAPP_ENABLED=true.` });
+      }
+      if (value.WHATSAPP_AUTH_OTP_ENABLED && !value.WHATSAPP_AUTH_TEMPLATE_NAME)
+        context.addIssue({ code: "custom", path: ["WHATSAPP_AUTH_TEMPLATE_NAME"], message: "Configure WHATSAPP_TEMPLATE_AUTH_OTP before enabling authentication delivery." });
     }
     if (value.NODE_ENV !== "production") return;
     const secretKeys = [
@@ -304,7 +317,7 @@ export function parseEnvironment(input: NodeJS.ProcessEnv) {
   // Existing names retain precedence; standard AWS names are supported server-side.
   const awsRegion = input.OBJECT_STORAGE_REGION || input.AWS_REGION;
   return schema.parse({
-    ...input,
+    ...normalizeWhatsAppEnvironment(input),
     RAZORPAY_PLATFORM_PAYMENTS_ENABLED:
       input.RAZORPAY_PLATFORM_PAYMENTS_ENABLED ??
       (input.RAZORPAY_KEY_ID && input.RAZORPAY_KEY_SECRET && input.RAZORPAY_WEBHOOK_SECRET

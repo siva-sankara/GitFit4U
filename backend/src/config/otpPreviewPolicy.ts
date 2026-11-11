@@ -10,7 +10,7 @@ export function assertSafeOtpPreview(input: NodeJS.ProcessEnv) {
   const liveIntegration = ["RAZORPAY_KEY_SECRET", "RESEND_API_KEY", "FIREBASE_PRIVATE_KEY", "WHATSAPP_ACCESS_TOKEN", "OBJECT_STORAGE_SECRET_KEY", "AWS_SECRET_ACCESS_KEY", "CLOUDINARY_API_SECRET"].some(key => Boolean(input[key]));
   if (input.OTP_MODE !== "development_preview" || input.OTP_DEV_PREVIEW_ENABLED !== "true" ||
       !["development", "test"].includes(input.NODE_ENV || "") || input.OTP_PREVIEW_TIER !== "local" ||
-      !isolatedDatabase || deployed || liveIntegration || input.WHATSAPP_MODE === "live" ||
+      !isolatedDatabase || deployed || liveIntegration || input.WHATSAPP_MODE === "live" || input.WHATSAPP_ENABLED === "true" ||
       !(input.CLIENT_ORIGIN || "").split(",").every(value => localOrigin(value.trim())))
     throw new Error("Unsafe OTP preview configuration. Preview requires an explicit local tier, loopback-only origins, an isolated gfu_otp_test_* loopback database and no live integration credentials or deployment markers.");
 }

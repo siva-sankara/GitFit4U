@@ -10,6 +10,37 @@ vi.mock("../../config/env.js", () => ({
 }));
 
 import { WhatsAppProvider } from "./whatsappProvider.js";
+import { env } from "../../config/env.js";
+
+describe("Cloud API message transport", () => {
+  const input = { token: "unit-token", phoneNumberId: "123456789", to: "9876543210", template: "approved_utility", language: "en_US" };
+  afterEach(() => { vi.unstubAllGlobals(); env.WHATSAPP_MODE = "live"; });
+  it("stores a provider id from a correctly normalized template request", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ messages: [{ id: "wamid.utility" }] }) }); vi.stubGlobal("fetch", fetchMock);
+    expect(await new WhatsAppProvider().sendTemplate(input)).toHaveProperty("providerMessageId", "wamid.utility");
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({ messaging_product: "whatsapp", to: "919876543210", template: { name: "approved_utility", language: { code: "en_US" } } });
+    expect(fetchMock.mock.calls[0][1].headers.authorization).toBe("Bearer unit-token");
+  });
+  it.each([[429, true, "RATE_OR_BUDGET_LIMIT"], [503, true, "RECIPIENT_OR_PROVIDER_FAILURE"], [401, false, "TOKEN_OR_PERMISSION_INVALID"], [400, false, "RECIPIENT_OR_PROVIDER_FAILURE"]])("classifies HTTP %s without leaking Meta response details", async (status, retryable, category) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status, json: async () => ({ error: { code: status, message: "credential-or-otp-that-must-not-escape" } }) }));
+    await expect(new WhatsAppProvider().sendTemplate(input)).rejects.toMatchObject({ category, retryable, message: "WhatsApp provider request failed." });
+  });
+  it("records an uncertain network outcome instead of claiming delivery", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("timeout")));
+    await expect(new WhatsAppProvider().sendTemplate(input)).rejects.toMatchObject({ category: "UNKNOWN_OUTCOME", uncertain: true });
+  });
+  it("rejects invalid phones and missing sender configuration before fetch", async () => {
+    const fetchMock = vi.fn(); vi.stubGlobal("fetch", fetchMock);
+    await expect(new WhatsAppProvider().sendTemplate({ ...input, to: "text9876543210" })).rejects.toMatchObject({ code: "WHATSAPP_PHONE_INVALID" });
+    await expect(new WhatsAppProvider().sendTemplate({ ...input, token: "" })).rejects.toMatchObject({ category: "CONFIGURATION_MISSING" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+  it.each(["disabled", "dry_run"] as const)("never sends in %s mode", async mode => {
+    env.WHATSAPP_MODE = mode; const fetchMock = vi.fn(); vi.stubGlobal("fetch", fetchMock);
+    await expect(new WhatsAppProvider().sendTemplate(input)).rejects.toMatchObject({ category: "WHATSAPP_DISABLED" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
 
 describe("WhatsAppProvider Embedded Signup exchange", () => {
   afterEach(() => vi.unstubAllGlobals());

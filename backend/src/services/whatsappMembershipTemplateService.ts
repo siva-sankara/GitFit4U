@@ -3,17 +3,26 @@ import { Subscription } from "../models/Commerce.js";
 import { Gym } from "../models/Gym.js";
 import { MemberProfile } from "../models/Member.js";
 import { AppError } from "../utils/AppError.js";
+import { env } from "../config/env.js";
+import { configuredWhatsAppTemplate, legacyWelcomeContract } from "./whatsappTemplateConfiguration.js";
 
-// Exact names and locale of the approved Meta Utility templates.
+// Preserve the previously approved six-value welcome contract during upgrades.
+function activationTemplate(welcome = false) {
+  const template = (!welcome && configuredWhatsAppTemplate("WHATSAPP_TEMPLATE_MEMBERSHIP_ACTIVATED")) || configuredWhatsAppTemplate("WHATSAPP_TEMPLATE_WELCOME");
+  return { scope: "GYM", template, language: env.WHATSAPP_TEMPLATE_LANGUAGE || "en_US", bodyParameters: legacyWelcomeContract(template) ? 6 : 5 } as const;
+}
 export const membershipWhatsAppTemplates = {
-  "membership.activated": { scope: "GYM", template: "welcome_msg_template", language: "en_US", bodyParameters: 6 },
-  "membership.renewal_reminder": { scope: "GYM", template: "appointment_reminder", language: "en_US", bodyParameters: 4 },
-  "membership.expiring": { scope: "GYM", template: "appointment_reminder", language: "en_US", bodyParameters: 4 },
-  "platform.expiring": { scope: "PLATFORM", template: "platform_renewal", language: "en_US", bodyParameters: 4 },
+  get "membership.activated"() { return activationTemplate(); },
+  get "membership.welcome"() { return activationTemplate(true); },
+  get "membership.renewal_reminder"() { return { scope: "GYM", template: configuredWhatsAppTemplate("WHATSAPP_TEMPLATE_MEMBERSHIP_RENEWAL"), language: env.WHATSAPP_TEMPLATE_LANGUAGE || "en_US", bodyParameters: 4 } as const; },
+  get "membership.expiring"() { return this["membership.renewal_reminder"]; },
+  get "membership.expired"() { return { scope: "GYM", template: configuredWhatsAppTemplate("WHATSAPP_TEMPLATE_MEMBERSHIP_EXPIRED"), language: env.WHATSAPP_TEMPLATE_LANGUAGE || "en_US", bodyParameters: 4 } as const; },
+  get "platform.expiring"() { return { scope: "PLATFORM", template: configuredWhatsAppTemplate("WHATSAPP_TEMPLATE_PLATFORM_RENEWAL"), language: env.WHATSAPP_TEMPLATE_LANGUAGE || "en_US", bodyParameters: 4 } as const; },
 } as const;
 
 export type MembershipWhatsAppEvent = keyof typeof membershipWhatsAppTemplates;
 export function membershipWhatsAppTemplate(event: string) {
+  if (event === "membership.expired" && !env.WHATSAPP_TEMPLATE_MEMBERSHIP_EXPIRED) return undefined;
   return membershipWhatsAppTemplates[event as MembershipWhatsAppEvent];
 }
 
@@ -65,11 +74,12 @@ export function buildMembershipWhatsAppComponents(
   const plan = subscription.planSnapshot;
   const timezone = gym.timezone || "Asia/Kolkata";
   const expiry = membershipWhatsAppDate(subscription.endsAt, timezone);
-  const values = event === "membership.activated"
+  const activation = ["membership.activated", "membership.welcome"].includes(event);
+  const values = activation
     ? [name, textValue(gym.name), textValue(plan?.name),
         membershipWhatsAppDate(subscription.startsAt, timezone), expiry,
-        textValue(gym.contact?.phone || gym.contact?.whatsapp)]
-    : [name, textValue(event === "platform.expiring" ? plan?.name : gym.name), expiry,
+        ...(membershipWhatsAppTemplate(event)?.bodyParameters === 6 ? [textValue(gym.contact?.phone || gym.contact?.whatsapp)] : [])]
+    : [name, textValue(event === "platform.expiring" && !env.WHATSAPP_TEMPLATE_PLATFORM_RENEWAL ? plan?.name : gym.name), expiry,
         renewalAmount(plan, plan?.currency || gym.currency || "INR")];
   return [{ type: "body", parameters: values.map((text) => ({ type: "text", text })) }];
 }
@@ -109,10 +119,10 @@ async function membershipContext(input: MembershipEventInput, now: Date) {
     gymId: input.gymId,
     userId: input.userId,
     type: template.scope === "PLATFORM" ? "PLATFORM" : "GYM_MEMBERSHIP",
-    status: { $in: input.event === "membership.activated" ? ["ACTIVE"] : ["ACTIVE", "GRACE"] },
+    status: { $in: ["membership.activated", "membership.welcome"].includes(input.event) ? ["ACTIVE"] : input.event === "membership.expired" ? ["EXPIRED"] : ["ACTIVE", "GRACE"] },
   }).session(input.session || null).lean();
   // All three approved messages describe an active, unexpired subscription.
-  if (!subscription?.endsAt || new Date(subscription.endsAt) <= now) return null;
+  if (!subscription?.endsAt || (input.event === "membership.expired" ? new Date(subscription.endsAt) > now : new Date(subscription.endsAt) <= now)) return null;
   const gym = await Gym.findOne({
     _id: input.gymId,
     deletedAt: null,
@@ -144,7 +154,7 @@ export async function resolveMembershipWhatsAppTemplate(input: MembershipEventIn
   return {
     parameters: buildMembershipWhatsAppComponents(input.event as MembershipWhatsAppEvent, user, gym, subscription),
     membershipContext: { subscriptionId: subscription.publicId, endsAt },
-    expiresAt: new Date(Math.min(now.getTime() + 48 * 60 * 60_000, endsAt.getTime())),
+    expiresAt: new Date(input.event === "membership.expired" ? now.getTime() + 48 * 60 * 60_000 : Math.min(now.getTime() + 48 * 60 * 60_000, endsAt.getTime())),
   };
 }
 

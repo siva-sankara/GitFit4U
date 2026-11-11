@@ -45,6 +45,10 @@ type ConnectionState = {
     coexistenceReady: boolean;
     embeddedSignupVersion: "v4";
     webhookReady: boolean;
+    enabled?: boolean;
+    authenticationOtpEnabled?: boolean;
+    platformSenderConfigured?: boolean;
+    maskedPhoneNumberId?: string;
   };
   connection: Connection | null;
 };
@@ -229,6 +233,12 @@ export function WhatsAppConnectionSettings() {
     {query.isPending && <p role="status">Loading WhatsApp status…</p>}
     {query.isError && <p role="alert">{query.error.message}</p>}
     {data?.configuration.mode === "disabled" && <p className="form-alert">WhatsApp is disabled for this deployment. Configure the server before connecting Meta.</p>}
+    {data?.configuration.authenticationOtpEnabled !== undefined && <section className="state-card" aria-label="WhatsApp integration status">
+      <p><strong>WhatsApp integration:</strong> {data.configuration.enabled ? "Enabled" : "Disabled"}</p>
+      <p><strong>Platform sender:</strong> {data.configuration.platformSenderConfigured ? "Configured" : "Not configured"} · Phone Number ID: {data.configuration.maskedPhoneNumberId}</p>
+      <p><strong>Authentication OTP:</strong> {data.configuration.authenticationOtpEnabled ? "Enabled (approved Authentication template required)" : "Disabled — configured email/SMS verification remains available"}</p>
+      <p><strong>Webhook:</strong> {data.configuration.webhookReady ? "Configured" : "Not configured"}</p>
+    </section>}
     {data && !data.configuration.embeddedSignupReady && data.configuration.mode !== "disabled" && <p className="form-alert">Meta Embedded Signup configuration is incomplete on the server.</p>}
     {connection ? <div className="whatsapp-connection-card">
       <div><strong>{connection.verifiedName || "WhatsApp Business"}</strong><p>{connection.displayPhoneNumber || "Phone number pending"} · {(connection.readinessStatus || connection.status).toLowerCase().replaceAll("_", " ")}</p></div>

@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   updateOne: vi.fn(),
   findOneAndUpdate: vi.fn(),
   send: vi.fn(),
+  mobileAvailable: vi.fn(),
   queueDeliveries: vi.fn(),
   deliverChallenge: vi.fn(),
   recordMobileStatus: vi.fn(),
@@ -25,8 +26,9 @@ vi.mock("../models/Auth.js", () => ({
     findOneAndUpdate: mocks.findOneAndUpdate,
   },
 }));
-vi.mock("./whatsappAuthOtpService.js", () => ({
-  sendWhatsAppAuthenticationOtp: mocks.send,
+vi.mock("./authOtpMobileService.js", () => ({
+  sendMobileAuthenticationOtp: mocks.send,
+  whatsappOtpAvailable: mocks.mobileAvailable,
 }));
 vi.mock("./authOtpDeliveryService.js", () => ({
   queueAuthOtpDeliveries: mocks.queueDeliveries,
@@ -73,6 +75,7 @@ function challenge(overrides: Record<string, unknown> = {}) {
 beforeEach(() => {
   vi.resetAllMocks();
   env.AUTH_OTP_DUAL_DELIVERY_ENABLED = false;
+  mocks.mobileAvailable.mockReturnValue(true);
   requestQuery();
   mocks.countDocuments.mockResolvedValue(0);
   mocks.updateMany.mockResolvedValue({ modifiedCount: 0 });
@@ -95,6 +98,17 @@ afterEach(() => {
 });
 
 describe("normalizePhone", () => {
+  it("uses the existing email delivery queue when WhatsApp Authentication is disabled", async () => {
+    const previous = { AUTH_OTP_DELIVERY_ENCRYPTION_KEY: env.AUTH_OTP_DELIVERY_ENCRYPTION_KEY, M365_TENANT_ID: env.M365_TENANT_ID, M365_CLIENT_ID: env.M365_CLIENT_ID, M365_CLIENT_SECRET: env.M365_CLIENT_SECRET };
+    try {
+      Object.assign(env, { AUTH_OTP_DELIVERY_ENCRYPTION_KEY: "test-delivery-key", M365_TENANT_ID: "test-tenant", M365_CLIENT_ID: "test-client", M365_CLIENT_SECRET: "test-secret" });
+      mocks.mobileAvailable.mockReturnValue(false);
+      const result = await requestOtp("9876543210", "SIGNUP", { email: "member@example.com" });
+      expect(result.deliveryStatus).toBe("SUBMITTED");
+      expect(mocks.queueDeliveries).toHaveBeenCalledWith(expect.objectContaining({ email: "member@example.com", code: expect.stringMatching(/^\d{6}$/) }));
+      expect(mocks.send).not.toHaveBeenCalled();
+    } finally { Object.assign(env, previous); }
+  });
   it("normalizes an Indian local mobile number", () => {
     expect(normalizePhone("098765 43210")).toBe("+919876543210");
   });

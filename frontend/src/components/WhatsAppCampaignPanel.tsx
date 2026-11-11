@@ -4,7 +4,7 @@ import { Megaphone } from "lucide-react";
 import { useCurrentUser } from "../api/hooks";
 import { apiRequest, type ApiEnvelope } from "../services/apiClient";
 
-type Template = { name: string; language: string; category: string; status: string; components?: unknown };
+type Template = { _id: string; name: string; language: string; category: string; status: string; components?: unknown };
 type Preview = { totalAudience: number; withVerifiedContact: number; eligibleNow: number; suppressedNow: number; campaignCap: number; billingNotice: string };
 type Campaign = { publicId: string; name: string; templateId: string; status: string; scheduledAt?: string; analytics?: Record<string, number> };
 
@@ -27,7 +27,7 @@ export function WhatsAppCampaignPanel() {
     queryFn: () => apiRequest<ApiEnvelope<Campaign[]>>("/api/v1/whatsapp/campaigns"),
   });
   const selected = (templates.data?.data || []).find((template) => `${template.name}:${template.language}` === templateKey);
-  const payload = () => ({ templateName: selected!.name, language: selected!.language, roles });
+  const payload = () => ({ templateId: selected!._id, roles });
   const previewMutation = useMutation({
     mutationFn: () => apiRequest<ApiEnvelope<Preview>>("/api/v1/whatsapp/campaigns/preview", { method: "POST", body: JSON.stringify(payload()) }),
     onSuccess: (response) => setPreview(response.data),

@@ -685,10 +685,10 @@ export function AuthDesktopPage() {
                 <p>
                   {challenge!.channelDelivery?.mobile?.status === "FAILED" &&
                   otpChannelAccepted(challenge!.channelDelivery?.email?.status)
-                    ? "WhatsApp could not accept this request, so your six-digit code was submitted by email."
+                    ? "Your six-digit code was submitted by email because mobile verification is unavailable."
                     : challenge!.channelDelivery?.email?.status === "FAILED" &&
                         otpChannelAccepted(challenge!.channelDelivery?.mobile?.status)
-                      ? "Email could not accept this request, so your six-digit code was submitted by WhatsApp."
+                      ? "Email could not accept this request, so your six-digit code was submitted through the configured mobile channel."
                       : "We requested the same six-digit code for both signup contacts:"}
                 </p>
                 <p><strong>Mobile:</strong> {challenge!.maskedPhone}</p>
@@ -705,10 +705,10 @@ export function AuthDesktopPage() {
                 </strong>
                 .
                 {recovery
-                  ? " Check your verified email and WhatsApp channels. After verification, you can create a new password."
+                  ? " Check your verified email and available mobile verification channel. After verification, you can create a new password."
                   : signupOtp
                     ? " Check the configured mobile channel."
-                    : " Check your verified email and WhatsApp channels. GETFIT4U uses only contacts already enrolled for this account."}
+                    : " Check your verified email and available mobile verification channel. GETFIT4U uses only contacts already enrolled for this account."}
               </p>
             )}
             {signupOtp && challenge!.dualDelivery && challenge!.channelDelivery && (

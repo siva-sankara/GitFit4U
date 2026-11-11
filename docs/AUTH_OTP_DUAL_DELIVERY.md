@@ -106,7 +106,7 @@ Roll out in this order:
 5. Confirm mobile and email contain the identical code, verify once, reject replay, and record delivery timing.
 6. Enable production only after mailbox/device tests pass. A Graph `202 Accepted` is submission, not recipient delivery.
 
-Rollback by setting `AUTH_OTP_DUAL_DELIVERY_ENABLED=false` and redeploying. Existing sessions remain valid. In-flight dual challenges remain verifiable until their original five-minute expiry; no new email intents are created.
+Setting `AUTH_OTP_DUAL_DELIVERY_ENABLED=false` disables normal dual-channel delivery. If WhatsApp Authentication is also disabled and M365 credentials plus the delivery encryption key remain configured, verified email fallback still creates email intents. To withdraw that fallback too, remove its server-side delivery configuration. Existing sessions remain valid and in-flight challenges remain verifiable until their original five-minute expiry. See `WHATSAPP_INTEGRATION.md` for the independent WhatsApp flags.
 
 ## Troubleshooting and rotation
 

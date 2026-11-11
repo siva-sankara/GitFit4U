@@ -323,6 +323,7 @@ const templateSchema = new Schema(
     status: { type: String, enum: ["APPROVED", "PENDING", "REJECTED", "PAUSED", "DISABLED", "UNKNOWN"], default: "UNKNOWN", index: true },
     components: Schema.Types.Mixed,
     qualityScore: String,
+    providerUpdatedAt: Date,
     syncedAt: { type: Date, default: Date.now },
   },
   { timestamps: true },

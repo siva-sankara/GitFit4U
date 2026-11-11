@@ -81,9 +81,7 @@ export function WhatsAppInbox() {
         body: JSON.stringify(template ? {
           idempotencyKey: crypto.randomUUID(),
           purpose: template.category === "MARKETING" ? "MARKETING" : "SERVICE",
-          templateName: template.name,
-          language: template.language,
-          parameters: [],
+          templateId: template._id,
         } : { idempotencyKey: crypto.randomUUID(), purpose: "SERVICE", text: text.trim() }),
       });
     },

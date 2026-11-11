@@ -14,6 +14,8 @@ import {
   WhatsAppTemplate,
 } from "../models/WhatsApp.js";
 import { AppError } from "../utils/AppError.js";
+import { normalizeWhatsAppRecipient } from "../utils/whatsappPhone.js";
+export { normalizeWhatsAppRecipient } from "../utils/whatsappPhone.js";
 import {
   decryptWhatsAppCredential,
   encryptWhatsAppCredential,
@@ -29,19 +31,6 @@ export type WhatsAppActor = {
   gymId?: string;
   permissions: string[];
 };
-
-export function normalizeWhatsAppRecipient(value: string) {
-  let digits = value.replace(/\D/g, "");
-  if (/^[6-9]\d{9}$/.test(digits)) digits = `91${digits}`;
-  else if (/^0[6-9]\d{9}$/.test(digits)) digits = `91${digits.slice(1)}`;
-  if (!/^\d{8,15}$/.test(digits))
-    throw new AppError(
-      422,
-      "WHATSAPP_PHONE_INVALID",
-      "A verified international phone number is required.",
-    );
-  return digits;
-}
 
 export function maskedWhatsAppPhone(value?: string) {
   const digits = value?.replace(/\D/g, "") || "";
@@ -142,6 +131,12 @@ export async function getCurrentConnection(actor: WhatsAppActor) {
   return {
     configuration: {
       mode: env.WHATSAPP_MODE,
+      enabled: env.WHATSAPP_MODE !== "disabled",
+      ...(context.scope === "PLATFORM" ? {
+        authenticationOtpEnabled: env.WHATSAPP_MODE === "live" && env.WHATSAPP_AUTH_OTP_ENABLED,
+        platformSenderConfigured: Boolean(env.WHATSAPP_ACCESS_TOKEN && env.WHATSAPP_PHONE_NUMBER_ID && env.WHATSAPP_WABA_ID),
+        maskedPhoneNumberId: maskedWhatsAppPhone(env.WHATSAPP_PHONE_NUMBER_ID),
+      } : {}),
       graphApiVersion: env.WHATSAPP_API_VERSION,
       embeddedSignupReady: Boolean(
         env.WHATSAPP_MODE !== "disabled" &&

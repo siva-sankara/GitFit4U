@@ -1,4 +1,5 @@
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
+import mongoose from "mongoose";
 import { nanoid } from "nanoid";
 import { env } from "../config/env.js";
 import { logger } from "../config/logger.js";
@@ -12,6 +13,7 @@ import {
   WhatsAppMessage,
   WhatsAppOutbox,
   WhatsAppWebhookReceipt,
+  WhatsAppTemplate,
 } from "../models/WhatsApp.js";
 import { AppError } from "../utils/AppError.js";
 import { sha256 } from "../utils/crypto.js";
@@ -84,6 +86,9 @@ export async function recordWhatsAppWebhook(rawBody: Buffer, signature?: string)
 }
 
 function inboundContent(message: any) {
+  const reply = message.type === "button" ? message.button?.text
+    : message.type === "interactive" ? message.interactive?.button_reply?.title || message.interactive?.list_reply?.title : undefined;
+  if (typeof reply === "string") return { contentType: "TEXT", text: reply.slice(0, 5000) };
   const type = String(message.type || "unsupported").toUpperCase();
   const supported = ["TEXT", "IMAGE", "DOCUMENT", "AUDIO", "VIDEO", "LOCATION", "CONTACT"];
   const contentType = supported.includes(type) ? type : "UNSUPPORTED";
@@ -332,86 +337,124 @@ const statusRank: Record<string, number> = {
   SENT: 2,
   DELIVERED: 3,
   READ: 4,
-  FAILED: 5,
+  FAILED: 2.5,
 };
 
 async function processStatus(connection: any, statusEvent: any) {
   const providerMessageId = String(statusEvent?.id || "");
   const nextStatus = String(statusEvent?.status || "").toUpperCase();
   if (!providerMessageId || !statusRank[nextStatus]) return;
-  const message: any = await WhatsAppMessage.findOne({
-    connectionId: connection._id,
-    providerMessageId,
-  });
-  const previousRank = statusRank[message?.status] ?? 0;
-  if (!message || statusRank[nextStatus] <= previousRank) return;
-  const timestamp = statusEvent.timestamp
-    ? new Date(Number(statusEvent.timestamp) * 1000)
-    : new Date();
-  const timestampField: Record<string, string> = {
-    SENT: "sentAt",
-    DELIVERED: "deliveredAt",
-    READ: "readAt",
-    FAILED: "failedAt",
-  };
-  const failure = Array.isArray(statusEvent.errors) ? statusEvent.errors[0] : undefined;
-  const update = {
-    status: nextStatus,
-    ...(timestampField[nextStatus] ? { [timestampField[nextStatus]]: timestamp } : {}),
-    ...(failure
-      ? {
-          errorCategory: String(failure.title || failure.message || "PROVIDER_FAILURE").slice(0, 160),
-          providerErrorCode: String(failure.code || ""),
-        }
-      : {}),
-  };
-  await Promise.all([
-    WhatsAppMessage.updateOne({ _id: message._id }, { $set: update }),
-    WhatsAppOutbox.updateOne(
-      { _id: message.outboxId, connectionId: connection._id },
-      {
-        $set: {
-          ...update,
-          ...(nextStatus === "FAILED" ? { completedAt: timestamp } : {}),
-        },
-      },
-    ),
-    MemberCommunication.updateOne(
-      { whatsappOutboxId: message.outboxId },
-      {
-        $set: {
-          status: nextStatus,
-          providerMessageId,
-          ...(failure
-            ? {
-                failureCode: String(
-                  failure.code || failure.title || "PROVIDER_FAILURE",
-                ).slice(0, 120),
-              }
-            : {}),
-        },
-      },
-    ),
-  ]);
-  const outbox = message.outboxId
-    ? await WhatsAppOutbox.findById(message.outboxId).select("businessEvent businessEntityId").lean()
-    : null;
-  if (outbox?.businessEvent === "whatsapp.campaign" && outbox.businessEntityId) {
-    const increments: Record<string, number> = {};
-    if (nextStatus === "FAILED") increments["analytics.failed"] = 1;
-    else {
-      if (previousRank < statusRank.SENT && statusRank[nextStatus] >= statusRank.SENT) increments["analytics.sent"] = 1;
-      if (previousRank < statusRank.DELIVERED && statusRank[nextStatus] >= statusRank.DELIVERED) increments["analytics.delivered"] = 1;
-      if (previousRank < statusRank.READ && statusRank[nextStatus] >= statusRank.READ) increments["analytics.read"] = 1;
+  // Keep state and analytics atomic even when the worker crashes or another
+  // receipt races this one. Mongo retries conflicting transactions.
+  return mongoose.connection.transaction(async session => {
+    const message: any = await WhatsAppMessage.findOne({
+      connectionId: connection._id,
+      providerMessageId,
+    }).session(session);
+    const previousRank = statusRank[message?.status] ?? 0;
+    if (!message || statusRank[nextStatus] <= previousRank) return;
+    const timestamp = statusEvent.timestamp
+      ? new Date(Number(statusEvent.timestamp) * 1000)
+      : new Date();
+    const timestampField: Record<string, string> = {
+      SENT: "sentAt",
+      DELIVERED: "deliveredAt",
+      READ: "readAt",
+      FAILED: "failedAt",
+    };
+    const failure = Array.isArray(statusEvent.errors) ? statusEvent.errors[0] : undefined;
+    const update = {
+      status: nextStatus,
+      ...(timestampField[nextStatus] ? { [timestampField[nextStatus]]: timestamp } : {}),
+      ...(failure
+        ? {
+            errorCategory: "PROVIDER_DELIVERY_FAILED",
+            providerErrorCode: String(failure.code || ""),
+          }
+        : {}),
+    };
+    // Distinct webhook receipts can contain the same status. Only the process
+    // winning this compare-and-set transition may increment campaign analytics.
+    const claimed = await WhatsAppMessage.updateOne({ _id: message._id, status: message.status }, { $set: update }, { session });
+    if (!claimed.modifiedCount) return;
+    const earlierStatuses = Object.keys(statusRank).filter(status => statusRank[status] < statusRank[nextStatus]);
+    if (message.outboxId) {
+      await WhatsAppOutbox.updateOne(
+        { _id: message.outboxId, connectionId: connection._id, status: { $in: [...earlierStatuses, "SENDING"] } },
+        {
+          $set: {
+            ...update,
+            ...(nextStatus === "FAILED" ? { completedAt: timestamp } : {}),
+          },
+        }, { session },
+      );
+      await MemberCommunication.updateOne(
+        { whatsappOutboxId: message.outboxId, status: { $in: earlierStatuses } },
+        {
+          $set: {
+            status: nextStatus,
+            providerMessageId,
+            ...(failure
+              ? {
+                  failureCode: String(
+                    failure.code || "PROVIDER_FAILURE",
+                  ).slice(0, 120),
+                }
+              : {}),
+          },
+        }, { session },
+      );
     }
-    if (Object.keys(increments).length)
-      await Campaign.updateOne({ publicId: outbox.businessEntityId }, { $inc: increments });
+    const outbox = message.outboxId
+      ? await WhatsAppOutbox.findById(message.outboxId).select("businessEvent businessEntityId").session(session).lean()
+      : null;
+    if (outbox?.businessEvent === "whatsapp.campaign" && outbox.businessEntityId) {
+      const increments: Record<string, number> = {};
+      if (nextStatus === "FAILED") increments["analytics.failed"] = 1;
+      else {
+        if (previousRank < statusRank.SENT && statusRank[nextStatus] >= statusRank.SENT) increments["analytics.sent"] = 1;
+        if (previousRank < statusRank.DELIVERED && statusRank[nextStatus] >= statusRank.DELIVERED) increments["analytics.delivered"] = 1;
+        if (previousRank < statusRank.READ && statusRank[nextStatus] >= statusRank.READ) increments["analytics.read"] = 1;
+      }
+      if (Object.keys(increments).length)
+        await Campaign.updateOne({ publicId: outbox.businessEntityId }, { $inc: increments }, { session });
+    }
+  });
+}
+
+async function processTemplateUpdate(wabaId: string, field: string, value: Record<string, unknown>, entryTime?: number) {
+  const providerTemplateId = String(value.message_template_id || "");
+  const name = String(value.message_template_name || "");
+  const language = String(value.message_template_language || "");
+  if (!wabaId || (!providerTemplateId && (!name || !language))) return;
+  const occurredAt = entryTime ? new Date(entryTime * 1000) : new Date();
+  if (!Number.isFinite(occurredAt.getTime())) return;
+  const update: Record<string, unknown> = { providerUpdatedAt: occurredAt };
+  if (field === "message_template_status_update") {
+    const status = String(value.event || "").toUpperCase();
+    if (!["APPROVED", "PENDING", "REJECTED", "PAUSED", "DISABLED", "DELETED"].includes(status)) return;
+    update.status = status === "DELETED" ? "DISABLED" : status;
+  } else {
+    const score = String(value.new_quality_score || "").toUpperCase();
+    if (!["GREEN", "YELLOW", "RED", "UNKNOWN"].includes(score)) return;
+    update.qualityScore = score;
   }
+  // Only update already-synced templates belonging to the webhook's WABA.
+  // Unknown templates require an authenticated sync to load their components.
+  await WhatsAppTemplate.updateMany({
+    wabaId,
+    ...(providerTemplateId ? { providerTemplateId } : { name, language }),
+    $or: [{ providerUpdatedAt: null }, { providerUpdatedAt: { $lte: occurredAt } }],
+  }, { $set: update });
 }
 
 async function processReceiptPayload(payload: any) {
   for (const entry of payload.entry || []) {
     for (const change of entry.changes || []) {
+      if (["message_template_status_update", "message_template_quality_update"].includes(change.field)) {
+        await processTemplateUpdate(String(entry.id || ""), change.field, change.value || {}, Number(entry.time) || undefined);
+        continue;
+      }
       if (!["messages", "smb_message_echoes"].includes(change.field)) continue;
       const value = change.value || {};
       const phoneNumberId = String(value.metadata?.phone_number_id || "");

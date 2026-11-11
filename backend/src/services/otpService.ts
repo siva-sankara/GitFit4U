@@ -9,7 +9,7 @@ import {
 } from "../utils/crypto.js";
 import { AppError } from "../utils/AppError.js";
 import { normalizeAccountPhone } from "../utils/accountIdentity.js";
-import { sendWhatsAppAuthenticationOtp } from "./whatsappAuthOtpService.js";
+import { sendMobileAuthenticationOtp, whatsappOtpAvailable } from "./authOtpMobileService.js";
 import { env } from "../config/env.js";
 import { normalizeEmail } from "../utils/accountIdentity.js";
 import {
@@ -71,7 +71,8 @@ export async function requestOtp(
   const requestedEmail = options.email ? normalizeEmail(options.email) : undefined;
   const sendMobile = options.sendMobile !== false && Boolean(phone);
   const managedDelivery =
-    env.AUTH_OTP_DUAL_DELIVERY_ENABLED &&
+    (env.AUTH_OTP_DUAL_DELIVERY_ENABLED ||
+      (!whatsappOtpAvailable() && env.AUTH_OTP_DELIVERY_ENCRYPTION_KEY && env.M365_TENANT_ID && env.M365_CLIENT_ID && env.M365_CLIENT_SECRET)) &&
     !preview &&
     !suppressDelivery &&
     ["SIGNUP", "LOGIN", "ACCOUNT_RECOVERY"].includes(purpose) &&
@@ -244,7 +245,7 @@ export async function requestOtp(
   } else try {
     const sent = preview
       ? undefined
-      : await sendWhatsAppAuthenticationOtp(phone!, code);
+      : await sendMobileAuthenticationOtp(phone!, code);
     await OtpChallenge.updateOne(
       { publicId, consumedAt: null },
       {

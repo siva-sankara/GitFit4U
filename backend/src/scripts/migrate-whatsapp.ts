@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
 import { env } from "../config/env.js";
+import { Notification } from "../models/Engagement.js";
 import {
   WhatsAppConnection,
   WhatsAppConsent,
@@ -13,6 +14,7 @@ import {
 
 const apply = process.argv.includes("--apply");
 const models = [
+  Notification,
   WhatsAppConnection,
   WhatsAppConsent,
   WhatsAppConversation,

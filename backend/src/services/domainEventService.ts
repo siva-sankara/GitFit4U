@@ -1,7 +1,8 @@
 import type { ClientSession, Types } from "mongoose";
 import { Notification } from "../models/Engagement.js";
 import { User } from "../models/User.js";
-import { enqueueWhatsAppDomainEvent } from "./whatsappDeliveryService.js";
+import { whatsappEventMatrix } from "./whatsappDeliveryService.js";
+import { env } from "../config/env.js";
 
 // Copy belongs here, not in controllers or browser event handlers. Messages
 // intentionally exclude amounts, diagnoses, message contents and contact data.
@@ -240,6 +241,13 @@ function storedNotification(input: DomainEventInput, user: any) {
     actionUrl,
     channels: push ? ["IN_APP", "PUSH"] : ["IN_APP"],
     pushStatus: push ? "QUEUED" : "NOT_REQUESTED",
+    // This intent commits with the existing notification. The worker projects
+    // it into the WhatsApp outbox only after the business transaction commits.
+    ...(env.WHATSAPP_MODE !== "disabled" && user.phone && input.event in whatsappEventMatrix ? {
+      whatsappStatus: "QUEUED",
+      whatsappOccurrenceId: input.occurrenceId || "once",
+      whatsappAvailableAt: new Date(),
+    } : {}),
     deliveredAt: new Date(),
   };
 }
@@ -280,15 +288,6 @@ export async function emitDomainEvents(inputs: DomainEventInput[]) {
       ...(inputs[0].session ? { session: inputs[0].session } : {}),
       ordered: true,
     });
-  for (let index = 0; index < inputs.length; index += 25) {
-    const batch = inputs.slice(index, index + 25);
-    await Promise.all(
-      batch.map((input) => {
-        const user = byId.get(String(input.userId));
-        return user ? enqueueWhatsAppDomainEvent(input, user) : undefined;
-      }),
-    );
-  }
   return result;
 }
 export async function emitDomainEvent(input: DomainEventInput) {
@@ -306,6 +305,5 @@ export async function emitDomainEvent(input: DomainEventInput) {
     },
     { upsert: true, ...(input.session ? { session: input.session } : {}) },
   );
-  await enqueueWhatsAppDomainEvent(input, user);
   return result;
 }

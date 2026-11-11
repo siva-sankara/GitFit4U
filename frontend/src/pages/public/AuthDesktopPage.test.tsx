@@ -268,7 +268,7 @@ describe("account screens", () => {
     await signupFields();
     await submit();
     expect(host.textContent).toContain(
-      "WhatsApp could not accept this request, so your six-digit code was submitted by email.",
+      "Your six-digit code was submitted by email because mobile verification is unavailable.",
     );
     expect(host.textContent).toContain("Mobile request: failed");
     expect(host.textContent).toContain("Email request: submitted");

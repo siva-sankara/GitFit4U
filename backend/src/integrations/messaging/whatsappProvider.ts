@@ -1,7 +1,9 @@
 import { createHmac } from "node:crypto";
 import { env } from "../../config/env.js";
+import { normalizeWhatsAppRecipient } from "../../utils/whatsappPhone.js";
 
 export type WhatsAppProviderErrorCategory =
+  | "WHATSAPP_DISABLED"
   | "CONFIGURATION_MISSING"
   | "TOKEN_OR_PERMISSION_INVALID"
   | "SENDER_DISCONNECTED"
@@ -27,6 +29,14 @@ export class WhatsAppProviderError extends Error {
 type GraphResponse = Record<string, any>;
 type SendResult = { providerMessageId: string; raw: GraphResponse };
 
+function messageDestination(input: { token: string; phoneNumberId: string; to: string }) {
+  if (env.WHATSAPP_MODE === "disabled" || env.WHATSAPP_MODE === "dry_run")
+    throw new WhatsAppProviderError("WHATSAPP_DISABLED", "WhatsApp sending is disabled.");
+  if (!input.token || !input.phoneNumberId)
+    throw new WhatsAppProviderError("CONFIGURATION_MISSING", "WhatsApp sender configuration is incomplete.");
+  return normalizeWhatsAppRecipient(input.to);
+}
+
 function graphUrl(path: string) {
   return `https://graph.facebook.com/${env.WHATSAPP_API_VERSION}/${path.replace(/^\//, "")}`;
 }
@@ -42,11 +52,15 @@ function providerError(
   uncertain = false,
 ) {
   const code = String(body?.error?.code || body?.error?.error_subcode || status);
-  const message = String(body?.error?.message || "WhatsApp provider request failed.").slice(0, 500);
+  // Do not propagate arbitrary provider messages, which may echo credentials or
+  // submitted parameters. Retain only the known OAuth redirect compatibility hint.
+  const message = code === "100" && String(body?.error?.message || "").includes("redirect_uri")
+    ? "Meta rejected the redirect_uri configuration."
+    : "WhatsApp provider request failed.";
   const category: WhatsAppProviderErrorCategory =
     status === 401 || status === 403 || [10, 190, 200].includes(Number(code))
       ? "TOKEN_OR_PERMISSION_INVALID"
-      : [130429, 131048, 4, 17, 613].includes(Number(code))
+      : status === 429 || [130429, 131048, 4, 17, 613].includes(Number(code))
         ? "RATE_OR_BUDGET_LIMIT"
         : [132000, 132001].includes(Number(code))
           ? "TEMPLATE_UNAVAILABLE"
@@ -231,7 +245,7 @@ export class WhatsAppProvider {
       body: {
         messaging_product: "whatsapp",
         recipient_type: "individual",
-        to: input.to,
+        to: messageDestination(input),
         type: "template",
         template: {
           name: input.template,
@@ -294,7 +308,7 @@ export class WhatsAppProvider {
       body: {
         messaging_product: "whatsapp",
         recipient_type: "individual",
-        to: input.to,
+        to: messageDestination(input),
         type: "text",
         text: { body: input.text, preview_url: false },
       },

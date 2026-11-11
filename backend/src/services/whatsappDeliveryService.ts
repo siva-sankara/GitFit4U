@@ -20,6 +20,9 @@ import {
 } from "../models/WhatsApp.js";
 import { logger } from "../config/logger.js";
 import { AppError } from "../utils/AppError.js";
+import { configuredWhatsAppTemplate } from "./whatsappTemplateConfiguration.js";
+import type { WhatsAppTemplateKey } from "../config/whatsappConfiguration.js";
+import { resolveTransactionalWhatsAppTemplate, transactionalWhatsAppParameterCount } from "./whatsappTransactionalTemplateService.js";
 import { sha256 } from "../utils/crypto.js";
 import {
   membershipWhatsAppTemplates,
@@ -40,35 +43,37 @@ import {
 
 const provider = new WhatsAppProvider();
 
+function eventTemplate(scope: "GYM" | "PLATFORM" | "DYNAMIC", key: WhatsAppTemplateKey) {
+  return { scope, get template() { return configuredWhatsAppTemplate(key) || (key === "WHATSAPP_TEMPLATE_PAYMENT_OFFLINE" ? configuredWhatsAppTemplate("WHATSAPP_TEMPLATE_PAYMENT_SUCCESS") : undefined); } };
+}
 export const whatsappEventMatrix = {
-  "invoice.ready": { scope: "GYM", template: "gfu_invoice_available" },
-  "membership.renewed": { scope: "GYM", template: "gfu_membership_renewed" },
-  "member.activation_invitation": { scope: "GYM", template: "gfu_member_invitation" },
-  "membership.payment_reminder": { scope: "GYM", template: "gfu_payment_reminder" },
-  "member.general_followup": { scope: "GYM", template: "gfu_member_followup" },
-  "class.booked": { scope: "GYM", template: "gfu_class_booking_confirmed" },
-  "class.cancelled": { scope: "GYM", template: "gfu_class_cancelled" },
-  "class.updated": { scope: "GYM", template: "gfu_class_updated" },
-  "class.trainer_changed": { scope: "GYM", template: "gfu_class_updated" },
-  "class.reminder": { scope: "GYM", template: "gfu_class_reminder" },
-  "account.registered": { scope: "PLATFORM", template: "gfu_account_welcome" },
-  "account.verified": { scope: "GYM", template: "gfu_member_invitation" },
-  "membership.created": { scope: "GYM", template: "gfu_membership_created" },
-  "membership.frozen": { scope: "GYM", template: "gfu_membership_frozen" },
-  "membership.reactivated": { scope: "GYM", template: "gfu_membership_reactivated" },
-  "membership.deactivated": { scope: "GYM", template: "gfu_membership_deactivated" },
-  "membership.expired": { scope: "GYM", template: "gfu_membership_expired" },
-  "membership.cancelled": { scope: "GYM", template: "gfu_membership_cancelled" },
-  "payment.successful": { scope: "GYM", template: "gfu_payment_confirmed" },
-  "payment.offline": { scope: "GYM", template: "gfu_offline_payment_recorded" },
-  "payment.refunded": { scope: "GYM", template: "gfu_refund_updated" },
-  "trainer.assigned": { scope: "GYM", template: "gfu_trainer_assigned" },
-  "support.updated": { scope: "DYNAMIC", template: "gfu_support_updated" },
+  "invoice.ready": eventTemplate("GYM", "WHATSAPP_TEMPLATE_INVOICE"),
+  "membership.renewed": eventTemplate("GYM", "WHATSAPP_TEMPLATE_MEMBERSHIP_RENEWED"),
+  "member.activation_invitation": eventTemplate("GYM", "WHATSAPP_TEMPLATE_MEMBER_INVITATION"),
+  "membership.payment_reminder": eventTemplate("GYM", "WHATSAPP_TEMPLATE_PAYMENT_REMINDER"),
+  "member.general_followup": eventTemplate("GYM", "WHATSAPP_TEMPLATE_MEMBER_FOLLOWUP"),
+  "class.booked": eventTemplate("GYM", "WHATSAPP_TEMPLATE_CLASS_BOOKED"),
+  "class.cancelled": eventTemplate("GYM", "WHATSAPP_TEMPLATE_CLASS_CANCELLED"),
+  "class.updated": eventTemplate("GYM", "WHATSAPP_TEMPLATE_CLASS_UPDATED"),
+  "class.trainer_changed": eventTemplate("GYM", "WHATSAPP_TEMPLATE_CLASS_UPDATED"),
+  "class.reminder": eventTemplate("GYM", "WHATSAPP_TEMPLATE_CLASS_REMINDER"),
+  "account.registered": eventTemplate("PLATFORM", "WHATSAPP_TEMPLATE_ACCOUNT_WELCOME"),
+  "account.verified": eventTemplate("GYM", "WHATSAPP_TEMPLATE_MEMBER_INVITATION"),
+  "membership.created": eventTemplate("GYM", "WHATSAPP_TEMPLATE_MEMBERSHIP_CREATED"),
+  "membership.frozen": eventTemplate("GYM", "WHATSAPP_TEMPLATE_MEMBERSHIP_FROZEN"),
+  "membership.reactivated": eventTemplate("GYM", "WHATSAPP_TEMPLATE_MEMBERSHIP_REACTIVATED"),
+  "membership.deactivated": eventTemplate("GYM", "WHATSAPP_TEMPLATE_MEMBERSHIP_DEACTIVATED"),
+  "membership.cancelled": eventTemplate("GYM", "WHATSAPP_TEMPLATE_MEMBERSHIP_CANCELLED"),
+  "payment.successful": eventTemplate("GYM", "WHATSAPP_TEMPLATE_PAYMENT_SUCCESS"),
+  "payment.offline": eventTemplate("GYM", "WHATSAPP_TEMPLATE_PAYMENT_OFFLINE"),
+  "payment.refunded": eventTemplate("GYM", "WHATSAPP_TEMPLATE_PAYMENT_REFUNDED"),
+  "trainer.assigned": eventTemplate("GYM", "WHATSAPP_TEMPLATE_TRAINER_ASSIGNED"),
+  "support.updated": eventTemplate("DYNAMIC", "WHATSAPP_TEMPLATE_SUPPORT_UPDATED"),
   ...membershipWhatsAppTemplates,
-  "gym.activated": { scope: "PLATFORM", template: "gfu_gym_status_updated" },
-  "gym.suspended": { scope: "PLATFORM", template: "gfu_gym_status_updated" },
-  "gym.archived": { scope: "PLATFORM", template: "gfu_gym_status_updated" },
-} as const;
+  "gym.activated": eventTemplate("PLATFORM", "WHATSAPP_TEMPLATE_GYM_STATUS"),
+  "gym.suspended": eventTemplate("PLATFORM", "WHATSAPP_TEMPLATE_GYM_STATUS"),
+  "gym.archived": eventTemplate("PLATFORM", "WHATSAPP_TEMPLATE_GYM_STATUS"),
+};
 
 type DomainEventForWhatsApp = {
   event: string;
@@ -79,6 +84,7 @@ type DomainEventForWhatsApp = {
   occurrenceId?: string;
   actionUrl?: string;
   session?: ClientSession;
+  propagateQueueErrors?: boolean;
 };
 
 function eventScope(input: DomainEventForWhatsApp, configured: string): WhatsAppScope {
@@ -133,8 +139,15 @@ export async function enqueueWhatsAppDomainEvent(
   input: DomainEventForWhatsApp,
   user: any,
 ) {
-  const configured = whatsappEventMatrix[input.event as keyof typeof whatsappEventMatrix];
-  if (!configured || env.WHATSAPP_MODE === "disabled" || !user?.phone) return;
+  const primary = await enqueueSingleWhatsAppDomainEvent(input, user);
+  if (input.event === "membership.activated" && env.WHATSAPP_TEMPLATE_MEMBERSHIP_ACTIVATED && env.WHATSAPP_TEMPLATE_WELCOME && env.WHATSAPP_TEMPLATE_MEMBERSHIP_ACTIVATED !== env.WHATSAPP_TEMPLATE_WELCOME)
+    await enqueueSingleWhatsAppDomainEvent({ ...input, event: "membership.welcome" }, user);
+  return primary;
+}
+
+async function enqueueSingleWhatsAppDomainEvent(input: DomainEventForWhatsApp, user: any) {
+  const configured = membershipWhatsAppTemplate(input.event) || whatsappEventMatrix[input.event as keyof typeof whatsappEventMatrix];
+  if (!configured?.template || env.WHATSAPP_MODE === "disabled" || !user?.phone) return;
   const scope = eventScope(input, configured.scope);
   if (scope === "GYM" && !input.gymId) return;
   try {
@@ -147,7 +160,7 @@ export async function enqueueWhatsAppDomainEvent(
     if (!connection) return;
     if (connection.eventPreferences?.disabledEvents?.includes(input.event)) return;
     const membershipTemplate = membershipWhatsAppTemplate(input.event);
-    const language = membershipTemplate?.language || env.WHATSAPP_DEFAULT_LANGUAGE;
+    const language = membershipTemplate?.language || (env.WHATSAPP_CONFIGURATION_LEGACY === false ? env.WHATSAPP_TEMPLATE_LANGUAGE : env.WHATSAPP_DEFAULT_LANGUAGE);
     const approvedTemplate = await WhatsAppTemplate.findOne({
       connectionId: connection._id,
       name: configured.template,
@@ -159,9 +172,12 @@ export async function enqueueWhatsAppDomainEvent(
       .session(input.session || null)
       .lean();
     if (!approvedTemplate) return;
+    const transactionalCount = transactionalWhatsAppParameterCount(input.event);
+    const dynamicTransaction = transactionalCount !== undefined && JSON.stringify(approvedTemplate.components || []).includes("{{");
     if (membershipTemplate
       ? !membershipTemplateMatches(approvedTemplate.components, membershipTemplate.bodyParameters)
-      : JSON.stringify(approvedTemplate.components || []).includes("{{")) {
+      : dynamicTransaction ? !membershipTemplateMatches(approvedTemplate.components, transactionalCount!)
+        : JSON.stringify(approvedTemplate.components || []).includes("{{")) {
       logger.warn({ event: input.event, template: configured.template }, "WhatsApp template components do not match the configured event");
       return;
     }
@@ -169,6 +185,8 @@ export async function enqueueWhatsAppDomainEvent(
       ? await resolveMembershipWhatsAppTemplate(input, user)
       : undefined;
     if (membershipTemplate && !membershipPayload) return;
+    const transactionalPayload = dynamicTransaction ? await resolveTransactionalWhatsAppTemplate(input, user) : undefined;
+    if (dynamicTransaction && !transactionalPayload) return;
     const phoneHash = sha256(phone);
     const consent = await WhatsAppConsent.findOne({
       connectionId: connection._id,
@@ -186,7 +204,7 @@ export async function enqueueWhatsAppDomainEvent(
     const dedupeKey = [
       input.event,
       input.entityId,
-      input.event === "membership.activated" ? "once" : input.occurrenceId || "once",
+      ["membership.activated", "membership.welcome"].includes(input.event) ? "once" : input.occurrenceId || "once",
       connection.publicId,
       phoneHash,
       "WHATSAPP",
@@ -213,14 +231,14 @@ export async function enqueueWhatsAppDomainEvent(
           template: {
             name: configured.template,
             language,
-            parameters: membershipPayload?.parameters || [],
+            parameters: membershipPayload?.parameters || transactionalPayload?.parameters || [],
           },
           membershipContext: membershipPayload?.membershipContext,
           actionUrl: input.actionUrl,
           status: allowed ? "QUEUED" : "SUPPRESSED",
           policyDecision: allowed ? "PENDING_DISPATCH_RECHECK" : "CONSENT_MISSING",
           availableAt: now,
-          expiresAt: membershipPayload?.expiresAt || new Date(now.getTime() + 48 * 60 * 60_000),
+          expiresAt: membershipPayload?.expiresAt || transactionalPayload?.expiresAt || new Date(now.getTime() + 48 * 60 * 60_000),
           completedAt: allowed ? undefined : now,
           correlationId: nanoid(16),
         },
@@ -255,9 +273,10 @@ export async function enqueueWhatsAppDomainEvent(
     // WhatsApp is an additive channel; configuration or policy failure must not
     // roll back the authoritative business operation or other notification channels.
     logger.warn(
-      { err: error, eventId: `${input.event}:${input.entityId}` },
+      { errorCode: error instanceof AppError ? error.code : "WHATSAPP_QUEUE_FAILED", eventId: `${input.event}:${input.entityId}` },
       "WhatsApp event was not queued; core business event remains committed",
     );
+    if (input.propagateQueueErrors && !(error instanceof AppError)) throw error;
   }
 }
 
@@ -328,6 +347,15 @@ export async function evaluateWhatsAppDeliveryPolicy(outbox: any, connection: an
         return { allowed: false, final: true, reason: "TEMPLATE_PARAMETERS_MISMATCH" };
       if (!(await membershipWhatsAppStillCurrent(outbox, now)))
         return { allowed: false, final: true, reason: "MEMBERSHIP_CHANGED" };
+    }
+    const transactionalCount = transactionalWhatsAppParameterCount(outbox.businessEvent);
+    if (transactionalCount && JSON.stringify(template.components || []).includes("{{")) {
+      if (template.category !== "UTILITY" || !membershipTemplateMatches(template.components, transactionalCount))
+        return { allowed: false, final: true, reason: "TEMPLATE_PARAMETERS_MISMATCH" };
+      const user = await User.findById(outbox.recipientUserId).select("name").lean();
+      const current = user && await resolveTransactionalWhatsAppTemplate({ event: outbox.businessEvent, entityId: outbox.businessEntityId, userId: outbox.recipientUserId, gymId: outbox.gymId }, user, now);
+      if (!current || JSON.stringify(current.parameters) !== JSON.stringify(outbox.template?.parameters))
+        return { allowed: false, final: true, reason: "TRANSACTION_CHANGED" };
     }
     if (outbox.purpose === "MARKETING" && template.category !== "MARKETING")
       return { allowed: false, final: true, reason: "TEMPLATE_CATEGORY_MISMATCH" };
@@ -500,6 +528,7 @@ export async function queueWhatsAppConversationMessage(
     idempotencyKey: string;
     purpose: "SERVICE" | "MARKETING";
     text?: string;
+    templateId?: string;
     templateName?: string;
     language?: string;
     parameters?: unknown[];
@@ -512,8 +541,13 @@ export async function queueWhatsAppConversationMessage(
   }).select("+providerContactId");
   if (!conversation)
     throw new AppError(404, "WHATSAPP_CONVERSATION_NOT_FOUND", "Conversation not found.");
-  const contentType = input.templateName ? "TEMPLATE" : "TEXT";
+  const contentType = input.templateId || input.templateName ? "TEMPLATE" : "TEXT";
+  if (input.parameters?.length)
+    throw new AppError(422, "WHATSAPP_PARAMETERS_NOT_ALLOWED", "Use a member notification action for messages with membership or payment details.");
+  const template = contentType === "TEMPLATE" ? await approvedStaticTemplate(connection._id, input, input.purpose === "MARKETING" ? "MARKETING" : "UTILITY") : undefined;
   if (contentType === "TEXT") {
+    if (input.purpose === "MARKETING")
+      throw new AppError(422, "WHATSAPP_MARKETING_TEMPLATE_REQUIRED", "Marketing messages require an approved template and separate marketing consent.");
     if (!input.text?.trim())
       throw new AppError(422, "WHATSAPP_MESSAGE_EMPTY", "Enter a message.");
     if (
@@ -550,9 +584,9 @@ export async function queueWhatsAppConversationMessage(
         template:
           contentType === "TEMPLATE"
             ? {
-                name: input.templateName,
-                language: input.language || env.WHATSAPP_DEFAULT_LANGUAGE,
-                parameters: input.parameters || [],
+                name: template!.name,
+                language: template!.language,
+                parameters: [],
               }
             : undefined,
         status: "QUEUED",
@@ -627,22 +661,33 @@ async function campaignConnection(actor: WhatsAppActor) {
   return { context, connection };
 }
 
-export async function previewWhatsAppCampaign(
-  actor: WhatsAppActor,
-  input: { templateName: string; language: string; roles: string[] },
-) {
-  const { context, connection } = await campaignConnection(actor);
+type TemplateSelection = { templateId?: string; templateName?: string; language?: string };
+
+async function approvedStaticTemplate(connectionId: Types.ObjectId, input: TemplateSelection, category: "UTILITY" | "MARKETING") {
+  if (!input.templateId && !input.templateName)
+    throw new AppError(422, "WHATSAPP_TEMPLATE_UNAVAILABLE", "Choose an approved template from this business's catalog.");
+  if (input.templateId && !/^[a-f0-9]{24}$/i.test(input.templateId))
+    throw new AppError(422, "WHATSAPP_TEMPLATE_UNAVAILABLE", "Choose an approved template from this business's catalog.");
   const template = await WhatsAppTemplate.findOne({
-    connectionId: connection._id,
-    name: input.templateName,
-    language: input.language,
-    category: "MARKETING",
-    status: "APPROVED",
+    connectionId,
+    // The id belongs to our catalog, never to Meta. Legacy clients may select
+    // by name, but the server still resolves the same authorized catalog row.
+    ...(input.templateId ? { _id: input.templateId } : { name: input.templateName, language: input.language || env.WHATSAPP_DEFAULT_LANGUAGE }),
+    status: "APPROVED", category,
   }).lean();
   if (!template)
-    throw new AppError(409, "WHATSAPP_TEMPLATE_UNAVAILABLE", "Choose an approved Marketing template for this sender.");
-  if (JSON.stringify(template.components || []).includes("{{"))
-    throw new AppError(409, "WHATSAPP_TEMPLATE_PARAMETERS_REQUIRED", "This campaign screen currently supports approved templates without variables.");
+    throw new AppError(409, "WHATSAPP_TEMPLATE_UNAVAILABLE", "Choose an approved template for this sender and message purpose.");
+  if (JSON.stringify(template.components || []).includes("{{") || (template.components || []).some((component: { type?: string; format?: string }) => component.type?.toUpperCase() === "HEADER" && component.format?.toUpperCase() !== "TEXT"))
+    throw new AppError(409, "WHATSAPP_TEMPLATE_PARAMETERS_REQUIRED", "Use a business notification action for templates with variables or media.");
+  return template;
+}
+
+export async function previewWhatsAppCampaign(
+  actor: WhatsAppActor,
+  input: TemplateSelection & { roles: string[] },
+) {
+  const { context, connection } = await campaignConnection(actor);
+  await approvedStaticTemplate(connection._id, input, "MARKETING");
   const audiencePipeline: any[] = context.scope === "PLATFORM"
     ? [
         { $match: { roles: { $in: input.roles }, status: "ACTIVE" } },
@@ -708,10 +753,8 @@ export async function previewWhatsAppCampaign(
 
 export async function createWhatsAppCampaign(
   actor: WhatsAppActor,
-  input: {
+  input: TemplateSelection & {
     name: string;
-    templateName: string;
-    language: string;
     roles: string[];
     scheduledAt?: string;
     idempotencyKey: string;
@@ -726,6 +769,8 @@ export async function createWhatsAppCampaign(
   if (preview.outboundPaused)
     throw new AppError(409, "WHATSAPP_SENDER_PAUSED", "Enable outbound delivery before scheduling campaigns.");
   const context = communicationScope(actor);
+  const { connection } = await campaignConnection(actor);
+  const template = await approvedStaticTemplate(connection._id, input, "MARKETING");
   const scheduledAt = input.scheduledAt ? new Date(input.scheduledAt) : new Date();
   const key = `whatsapp-campaign:${context.scope}:${context.gymId || "platform"}:${actor.userId}:${input.idempotencyKey}`;
   const campaign = await Campaign.findOneAndUpdate(
@@ -741,8 +786,8 @@ export async function createWhatsAppCampaign(
         channel: "WHATSAPP",
         audience: { roles: input.roles },
         audienceSnapshot: { createdBefore: new Date(), preview },
-        templateId: `${input.templateName}:${input.language}`,
-        message: `Approved template: ${input.templateName}`,
+        templateId: `${template.name}:${template.language}`,
+        message: `Approved template: ${template.name}`,
         scheduledAt,
         status: scheduledAt > new Date() ? "SCHEDULED" : "QUEUED",
       },
@@ -752,7 +797,7 @@ export async function createWhatsAppCampaign(
   if (
     !campaign ||
     campaign.name !== input.name ||
-    campaign.templateId !== `${input.templateName}:${input.language}` ||
+    campaign.templateId !== `${template.name}:${template.language}` ||
     JSON.stringify([...(campaign.audience?.roles || [])].sort()) !== JSON.stringify([...input.roles].sort()) ||
     (input.scheduledAt && campaign.scheduledAt?.toISOString() !== scheduledAt.toISOString())
   )
