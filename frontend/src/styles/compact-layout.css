@@ -1,5 +1,5 @@
 /* Shared density rules keep controls usable without stretching mobile pages. */
-.page-stack { gap: 20px; }
+.page-stack { gap: var(--page-gap, 12px); }
 .shared-page-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin: 0; }
 .shared-page-heading > div:not(.workspace-breadcrumb-header):not(.heading-actions) { min-width: 0; flex: 1 1 200px; order: 1; }
 .shared-page-heading h1 { margin: 0; line-height: 1.18; }
@@ -30,7 +30,7 @@
 .dashboard-chart-grid.member-activity-chart { grid-template-columns: minmax(0, 1fr); }
 @media (max-width: 680px) {
   .workspace-content { padding: 0 12px 24px; }
-  .page-stack { gap: 16px; }
+  .page-stack { gap: var(--page-gap, 12px); }
   .shared-page-heading { gap: 8px; align-items: flex-start; }
   .shared-page-heading h1 { font-size: clamp(1.35rem, 6vw, 1.75rem); }
   .shared-page-heading > div:not(.workspace-breadcrumb-header):not(.heading-actions) { flex-basis: calc(100% - 84px); }
@@ -39,7 +39,7 @@
   .compact-filters { flex-basis: auto; width: 100%; }
   .compact-filter-content { flex-direction: column; align-items: stretch; padding: 12px; margin-top: 8px; border: 1px solid var(--border); border-radius: var(--radius-md, 12px); background: var(--surface); }
   .compact-filter-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .compact-filter-fields input, .compact-filter-fields select { font-size: 16px; }
+  .compact-filter-fields input, .compact-filter-fields select { font-size: 1rem; }
   .compact-filter-actions { justify-content: flex-end; }
   .explore-filter-toolbar.table-toolbar { gap: 8px; }
   .explore-filter-toolbar .explore-search { flex-basis: 100%; }

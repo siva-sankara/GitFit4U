@@ -1,6 +1,7 @@
 import { Gym } from "../models/Gym.js";
 
 interface NotificationLink {
+  _id?: unknown;
   event?: string | null;
   gymId?: unknown;
   actionUrl?: string | null;
@@ -13,7 +14,7 @@ function legacyPlatformReminder(notification: NotificationLink) {
 /** Upgrade legacy destinations on read without mutating immutable event/dedupe data.
  * Call only after the notification query has enforced recipient ownership.
  */
-export async function withNotificationLinks<T extends NotificationLink>(notifications: readonly T[]): Promise<T[]> {
+async function legacyLinks<T extends NotificationLink>(notifications: readonly T[]): Promise<T[]> {
   const legacy = notifications.filter(legacyPlatformReminder);
   if (!legacy.length) return [...notifications];
   const ids = [...new Set(legacy.map((notification) => String(notification.gymId || "")))]
@@ -27,4 +28,9 @@ export async function withNotificationLinks<T extends NotificationLink>(notifica
       ? `/platform-renewal?gym=${encodeURIComponent(publicId)}`
       : "/notifications" };
   });
+}
+
+export async function withNotificationLinks<T extends NotificationLink>(notifications: readonly T[]): Promise<T[]> {
+  const linked = await legacyLinks(notifications);
+  return linked.map(row => row._id ? { ...row, actionUrl: `/notification-open/${String(row._id)}` } : row);
 }

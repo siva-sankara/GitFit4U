@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest, type ApiEnvelope } from "../../services/apiClient";
 import { uploadDocumentBytes } from "../../services/documentUpload";
 import { GymIdentity } from "../../components/GymIdentity";
+import { ImagePlus, Trash2, Upload } from "lucide-react";
 import type { Row } from "../live/LiveData";
 
 export function GymLogoEditor({
@@ -82,22 +83,27 @@ export function GymLogoEditor({
   return (
     <section className={`${embedded ? "" : "panel form-section "}page-stack gym-logo-editor`} id={embedded ? undefined : "gym-logo"}>
       <div className="gym-logo-layout">
-        <div className="gym-logo-current">
+        <div className="gym-logo-current" aria-label="Gym logo preview">
           <GymIdentity
             name={gym.name}
             logoUrl={preview || gym.logoUrl}
-            subtitle={file ? "Unsaved preview" : "Current gym identity"}
+            subtitle={file ? "Unsaved preview" : gym.logoUrl ? "Current logo" : "No logo uploaded"}
             className="gym-logo-preview"
           />
         </div>
       <fieldset
         disabled={disabled || save.isPending}
-        className="profile-fieldset page-stack"
+        className="profile-fieldset gym-logo-controls"
       >
-        <label className="field">
-          <span>Upload or replace logo</span>
+        <div className="gym-logo-picker">
+          <span className="gym-logo-upload-icon" aria-hidden="true"><ImagePlus size={22} /></span>
+          <div className="gym-logo-picker-copy"><strong>Upload or replace logo</strong><small>JPG, PNG or WebP · Up to 5 MB<br />Recommended size: 800 × 800 px</small></div>
+          <button type="button" className="btn btn-secondary" onClick={() => input.current?.click()}><Upload size={16} aria-hidden="true" />Choose logo</button>
           <input
             ref={input}
+            className="sr-only"
+            tabIndex={-1}
+            aria-label="Upload or replace logo"
             type="file"
             accept="image/jpeg,image/png,image/webp"
             onChange={(event) => {
@@ -107,11 +113,9 @@ export function GymLogoEditor({
               save.reset();
             }}
           />
-        </label>
-        <small>
-          JPG, PNG or WebP, maximum 5 MB. Recommended: 800 × 800 px square.
-        </small>
-        <div className="heading-actions">
+        </div>
+        {file && <div className="gym-logo-selection"><span title={file.name}>{file.name}</span><button type="button" className="btn btn-ghost" onClick={() => { setFile(null); staged.current = null; setProgress(0); save.reset(); if (input.current) input.current.value = ""; }}>Discard</button></div>}
+        <div className="heading-actions gym-logo-actions">
           <button
             className="btn btn-primary"
             disabled={!file || save.isPending}
@@ -124,7 +128,7 @@ export function GymLogoEditor({
             disabled={!gym.logoUrl || save.isPending}
             onClick={() => save.mutate(true)}
           >
-            Remove logo
+            <Trash2 size={16} aria-hidden="true" />Remove logo
           </button>
         </div>
       </fieldset>

@@ -8,6 +8,7 @@ const userSchema = new Schema(
     publicId: { type: String, required: true, unique: true, index: true },
     name: { type: String, trim: true, maxlength: 120 },
     registrationRevision: { type: Number, default: 0, select: false },
+    developmentTestAccount: { type: Boolean, default: false },
     phone: {
       type: String,
       trim: true,
@@ -25,6 +26,8 @@ const userSchema = new Schema(
       sparse: true,
       index: true,
     },
+    phoneVerifiedAt: Date,
+    emailVerifiedAt: Date,
     avatarUrl: { type: String },
     avatarAttachmentId: { type: Schema.Types.ObjectId, ref: "Attachment" },
     social: {

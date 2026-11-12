@@ -30,7 +30,7 @@ export function OwnerDashboardPage() {
     ["activeMembers", "Active members"],
     ["expiringMemberships", "Expiring in 7 days"],
     ["todayAttendance", "Today's check-ins"],
-    ["classesToday", "Today's classes"],
+    // ["classesToday", "Today's classes"],
     ...(finance ? [["monthlyRevenueMinor", "This month's net revenue"]] : []),
   ];
   return (

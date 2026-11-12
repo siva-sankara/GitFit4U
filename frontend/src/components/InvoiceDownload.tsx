@@ -1,6 +1,6 @@
 import { useMutation } from "@tanstack/react-query";
 import { useRef } from "react";
-import { Download } from "lucide-react";
+import { Download, Mail, MailCheck } from "lucide-react";
 import { apiDownload, apiRequest, type ApiEnvelope } from "../services/apiClient";
 type Delivery = { status: string; configured: boolean; emailAvailable: boolean; sentAt?: string; deliveredAt?: string };
 export function invoiceEmailLabel(delivery: Delivery) {
@@ -11,7 +11,7 @@ export function invoiceEmailLabel(delivery: Delivery) {
   if (["QUEUED", "SENDING"].includes(delivery.status)) return delivery.configured ? "Invoice email queued for delivery." : "Invoice email queued. Email delivery is temporarily unavailable.";
   return "Invoice email has not been sent.";
 }
-export function InvoiceDownload({ payment }: { payment: { publicId: string; status: string } }) {
+export function InvoiceDownload({ payment, compact = false }: { payment: { publicId: string; status: string }; compact?: boolean }) {
   const emailRequestKey = useRef(crypto.randomUUID());
   const email = useMutation({ mutationFn: (resend: boolean) => apiRequest<ApiEnvelope<Delivery>>(`/api/v1/workspace/payments/${encodeURIComponent(payment.publicId)}/invoice/email`, resend ? { method: "POST", body: "{}", idempotencyKey: emailRequestKey.current } : {}), onSuccess: (_data, resend) => { if (resend) emailRequestKey.current = crypto.randomUUID(); } });
   const download = useMutation({ mutationFn: async () => {
@@ -22,5 +22,10 @@ export function InvoiceDownload({ payment }: { payment: { publicId: string; stat
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   } });
   if (!["CAPTURED", "PARTIALLY_REFUNDED", "REFUNDED", "REFUND_PENDING", "DISPUTED"].includes(payment.status)) return null;
-  return <span><button type="button" className="btn btn-secondary" disabled={download.isPending} onClick={() => download.mutate()}><Download size={16} aria-hidden="true" />{download.isPending ? "Preparing invoice…" : "Download Invoice"}</button><button type="button" className="btn btn-secondary" disabled={email.isPending} onClick={() => email.mutate(true)}>Email invoice</button><button type="button" className="btn btn-secondary" disabled={email.isPending} onClick={() => email.mutate(false)}>Email status</button>{download.error && <small role="alert" className="form-alert">{download.error.message}</small>}{email.error && <small role="alert" className="form-alert">{email.error.message}</small>}{email.data && <small role="status">{invoiceEmailLabel(email.data.data)}</small>}</span>;
+  return <span className={compact ? "invoice-actions-compact" : undefined}>
+    <button type="button" className="btn btn-secondary" title="Download Invoice" aria-label={download.isPending ? "Preparing invoice…" : "Download Invoice"} disabled={download.isPending} onClick={() => download.mutate()}><Download size={16} aria-hidden="true" />{!compact && (download.isPending ? "Preparing invoice…" : "Download Invoice")}</button>
+    <button type="button" className="btn btn-secondary" title="Email invoice" aria-label="Email invoice" disabled={email.isPending} onClick={() => email.mutate(true)}>{compact ? <Mail size={16} aria-hidden="true" /> : "Email invoice"}</button>
+    <button type="button" className="btn btn-secondary" title="Email status" aria-label="Email status" disabled={email.isPending} onClick={() => email.mutate(false)}>{compact ? <MailCheck size={16} aria-hidden="true" /> : "Email status"}</button>
+    {download.error && <small role="alert" className="form-alert">{download.error.message}</small>}{email.error && <small role="alert" className="form-alert">{email.error.message}</small>}{email.data && <small role="status">{invoiceEmailLabel(email.data.data)}</small>}
+  </span>;
 }

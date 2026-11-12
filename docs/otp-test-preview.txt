@@ -1,0 +1,44 @@
+Local OTP testing for signup and login
+
+When message delivery is unavailable, this explicit local test mode displays a
+random six-digit code on the signup and OTP login verification screens. It does
+not send WhatsApp messages or email. Normal delivery failures never expose an
+OTP: showing a real account's login OTP to its requester would bypass ownership
+verification. The current authentication transport is WhatsApp, not email OTP.
+
+Start a local MongoDB replica set named rs0 on 127.0.0.1:27017 first. This uses
+the separate gfu_otp_test_local database, not the normal application's database.
+Do not import real accounts into it. The normal backend/frontend .env files are
+not changed by these commands.
+
+In a fresh terminal in GitFit4U/backend:
+  npm.cmd run dev:otp-preview
+
+On first use, this creates the ignored .env.otp-preview from its example with
+random local session/OTP secrets. It never replaces an existing preview file.
+The default preview API port is 5001. Startup rejects production/shared servers,
+non-loopback databases/origins and inherited live integration credentials.
+
+Stop the normal frontend dev server if it occupies port 5173. In a separate
+terminal in GitFit4U/frontend:
+  npm.cmd run dev:otp-preview
+
+Open http://localhost:5173. Create a new test signup, read the displayed code and
+enter it. After logging out, choose Login with WhatsApp OTP and use that same
+test phone number: the login verification screen also displays its current code.
+An unknown number must sign up first. Disabled, Admin and unmarked real accounts
+cannot use test login previews. Password recovery and privileged OTP flows do
+not expose test codes.
+
+Codes expire after five minutes. Resends retain the one-minute cooldown and
+normal request/attempt limits. Codes are single use and stored only as HMACs on
+the server; the displayed value stays in transient React state, not browser
+storage. Successful verification, expiry or replacement clears the old code.
+Reloading loses the preview; request a new code after the resend cooldown.
+Test login does not mark the phone as verified by a messaging provider.
+
+To remove the temporary behavior, stop both preview processes and use the normal
+npm.cmd run dev commands. Production defaults remain OTP_MODE=whatsapp and
+OTP_DEV_PREVIEW_ENABLED=false; the production frontend does not display codes.
+Test accounts remain in the separate local database and cannot authenticate in
+normal mode. No code removal or production configuration change is necessary.

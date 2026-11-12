@@ -1,4 +1,5 @@
-﻿import { useEffect, useRef, useState } from "react";
+import { ListViewport } from "../../components/ListViewport";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import type { ReactNode } from "react";
 import { Avatar } from "../../components/Avatar";
@@ -437,60 +438,62 @@ export function GymDetailsView({
                 ? "Choose a plan to join this gym. Your membership starts after payment is verified."
                 : "Send a join request to the gym. Its team will confirm access and available membership options."}
             </p>
-            <div className="gd-plans">
-              {plans.map((p) => (
-                <article className="gd-plan" key={p._id || p.publicId}>
-                  <div className="gd-plan-heading">
-                    <span>
-                      <CalendarDays size={16} />
-                      {p.durationDays} days
-                    </span>
-                    <h3>{p.name}</h3>
-                  </div>
-                  <p className="gd-price">
-                    {price(p.priceMinor, p.currency)}
-                    <small>for the full plan</small>
-                  </p>
-                  {p.description && <p>{p.description}</p>}
-                  {!!p.trialDays && (
-                    <p className="chip">{p.trialDays}-day trial included</p>
-                  )}
-                  <ul>
-                    {p.benefits?.map((b: string) => (
-                      <li key={b}>
-                        <Check size={16} />
-                        <span>{b}</span>
-                      </li>
-                    ))}
-                    {!!p.freezeDaysAllowed && (
-                      <li>
-                        <Check size={16} />
-                        <span>Up to {p.freezeDaysAllowed} freeze days</span>
-                      </li>
+            <ListViewport label="Gym membership plans" resetKey={`${gym.publicId}:${plansState?.page}:${plansState?.limit}`}>
+              <div className="gd-plans">
+                {plans.map((p) => (
+                  <article className="gd-plan" key={p._id || p.publicId}>
+                    <div className="gd-plan-heading">
+                      <span>
+                        <CalendarDays size={16} />
+                        {p.durationDays} days
+                      </span>
+                      <h3>{p.name}</h3>
+                    </div>
+                    <p className="gd-price">
+                      {price(p.priceMinor, p.currency)}
+                      <small>for the full plan</small>
+                    </p>
+                    {p.description && <p>{p.description}</p>}
+                    {!!p.trialDays && (
+                      <p className="chip">{p.trialDays}-day trial included</p>
                     )}
-                    {!!p.personalTrainingSessions && (
-                      <li>
-                        <Check size={16} />
-                        <span>
-                          {p.personalTrainingSessions} personal training
-                          sessions
-                        </span>
-                      </li>
-                    )}
-                  </ul>
-                  <p className="gd-fine-print">
-                    Taxes and discounts calculated at checkout.
-                  </p>
-                  <button
-                    className="btn btn-primary"
-                    onClick={() => onChoosePlan(p)}
-                    aria-label={`Choose ${p.name}`}
-                  >
-                    Subscribe &amp; join <ArrowUpRight size={17} />
-                  </button>
-                </article>
-              ))}
-            </div>
+                    <ul>
+                      {p.benefits?.map((b: string) => (
+                        <li key={b}>
+                          <Check size={16} />
+                          <span>{b}</span>
+                        </li>
+                      ))}
+                      {!!p.freezeDaysAllowed && (
+                        <li>
+                          <Check size={16} />
+                          <span>Up to {p.freezeDaysAllowed} freeze days</span>
+                        </li>
+                      )}
+                      {!!p.personalTrainingSessions && (
+                        <li>
+                          <Check size={16} />
+                          <span>
+                            {p.personalTrainingSessions} personal training
+                            sessions
+                          </span>
+                        </li>
+                      )}
+                    </ul>
+                    <p className="gd-fine-print">
+                      Taxes and discounts calculated at checkout.
+                    </p>
+                    <button
+                      className="btn btn-primary"
+                      onClick={() => onChoosePlan(p)}
+                      aria-label={`Choose ${p.name}`}
+                    >
+                      Subscribe &amp; join <ArrowUpRight size={17} />
+                    </button>
+                  </article>
+                ))}
+              </div>
+            </ListViewport>
             {plansState && <Pagination page={plansState.page} limit={plansState.limit} total={plansState.total} loading={plansState.loading} onPageChange={plansState.onPage} onLimitChange={plansState.onLimit} />}
             {!plans.length && (
               <div className="gd-empty">
@@ -534,20 +537,22 @@ export function GymDetailsView({
                 View timetable <ArrowUpRight size={16} />
               </Link>
             </div>
-            <div className="class-grid">
-              {classes.slice(0, 3).map((c) => (
-  <ClassCard
-    key={c.publicId}
-    session={{
-      ...c,
-      gymId: {
-        name: gym.name,
-        timezone,
-      },
-    }}
-  />
-))}
-            </div>
+            <ListViewport label="Gym class sessions" resetKey={classesState?.page}>
+              <div className="class-grid">
+                {classes.slice(0, 3).map((c) => (
+    <ClassCard
+      key={c.publicId}
+      session={{
+        ...c,
+        gymId: {
+          name: gym.name,
+          timezone,
+        },
+      }}
+    />
+  ))}
+              </div>
+            </ListViewport>
             {classesState?.error && <p role="alert">{classesState.error}</p>}
             {/* {classesState && <Pagination page={classesState.page} limit={classesState.limit} total={classesState.total} loading={classesState.loading} onPageChange={classesState.onPage} onLimitChange={classesState.onLimit} />} */}
             {!classes.length && (
@@ -644,38 +649,40 @@ export function GymDetailsView({
             )}
             {reviewsState?.error && <p role="alert">{reviewsState.error}</p>}
             {reviewsState?.loading && <p role="status">Loading reviews...</p>}
-            {reviews.map((r) => (
-              <article className="gd-review" key={r.publicId}>
-                <div>
-                  <Avatar user={r.userId} />
-                  <strong>{r.userId?.name || "Gym member"}</strong>
-                  <span className="gd-review-rating">
-                    <Star size={15} fill="currentColor" />
-                    {r.rating} / 5
-                  </span>
-                  <time dateTime={r.createdAt}>
-                    {localDate(r.createdAt, timezone, {
-                      month: "short",
-                      year: "numeric",
-                      day: "numeric",
-                    })}
-                  </time>
-                  {r.editedAt && <small>Edited</small>}
-                </div>
-                {r.title && <h3>{r.title}</h3>}
-                <p>{r.body}</p>
-                {!!(r.images?.length || r.photoUrls?.length) && <div className="review-photo-grid">
-                  {(r.images || []).map((photo: Row, index: number) => <a key={photo.id} href={photo.url} target="_blank" rel="noopener noreferrer"><img src={photo.thumbnailUrl || photo.url} alt={`Review photo ${index + 1}`} width={96} height={96} loading="lazy" /></a>)}
-                  {(r.photoUrls || []).filter((url: string) => /^https:\/\//i.test(url)).map((url: string, index: number) => <img key={url} src={url} alt={`Legacy review photo ${index + 1}`} width={96} height={96} loading="lazy" referrerPolicy="no-referrer" />)}
-                </div>}
-                {r.ownerResponse?.body && (
-                  <blockquote>
-                    <strong>Response from the gym</strong>
-                    <p>{r.ownerResponse.body}</p>
-                  </blockquote>
-                )}
-              </article>
-            ))}
+            <ListViewport label="Gym reviews" resetKey={reviewsState?.page}>
+              {reviews.map((r) => (
+                <article className="gd-review" key={r.publicId}>
+                  <div>
+                    <Avatar user={r.userId} />
+                    <strong>{r.userId?.name || "Gym member"}</strong>
+                    <span className="gd-review-rating">
+                      <Star size={15} fill="currentColor" />
+                      {r.rating} / 5
+                    </span>
+                    <time dateTime={r.createdAt}>
+                      {localDate(r.createdAt, timezone, {
+                        month: "short",
+                        year: "numeric",
+                        day: "numeric",
+                      })}
+                    </time>
+                    {r.editedAt && <small>Edited</small>}
+                  </div>
+                  {r.title && <h3>{r.title}</h3>}
+                  <p>{r.body}</p>
+                  {!!(r.images?.length || r.photoUrls?.length) && <div className="review-photo-grid">
+                    {(r.images || []).map((photo: Row, index: number) => <a key={photo.id} href={photo.url} target="_blank" rel="noopener noreferrer"><img src={photo.thumbnailUrl || photo.url} alt={`Review photo ${index + 1}`} width={96} height={96} loading="lazy" /></a>)}
+                    {(r.photoUrls || []).filter((url: string) => /^https:\/\//i.test(url)).map((url: string, index: number) => <img key={url} src={url} alt={`Legacy review photo ${index + 1}`} width={96} height={96} loading="lazy" referrerPolicy="no-referrer" />)}
+                  </div>}
+                  {r.ownerResponse?.body && (
+                    <blockquote>
+                      <strong>Response from the gym</strong>
+                      <p>{r.ownerResponse.body}</p>
+                    </blockquote>
+                  )}
+                </article>
+              ))}
+            </ListViewport>
             {!reviews.length && (
               <div className="gd-empty">
                 <Star />

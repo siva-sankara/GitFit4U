@@ -1,3 +1,4 @@
+import { ListViewport } from "../../components/ListViewport";
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useCurrentUser } from "../../api/hooks";
@@ -79,36 +80,38 @@ export function UserClassesPage() {
         />
       </label>
       <QueryState query={sessions}>
-        <div className="class-card-grid">
-          {sessions.data?.data.map((row) => {
-            const booking = row.myBooking;
-            return (
-              <ClassCard
-                key={row.publicId}
-                session={row}
-                actions={
-                  booking ? (
-                    <Action
-                      method="DELETE"
-                      path={`/api/v1/users/classes/${row.publicId}/bookings/${booking._id}`}
-                      confirmMessage="Cancel your place in this class?"
-                    >
-                      Cancel booking
-                    </Action>
-                  ) : row.bookedCount < row.capacity ? (
-                    <Action
-                      path={`/api/v1/users/classes/${row.publicId}/bookings`}
-                    >
-                      Book class
-                    </Action>
-                  ) : (
-                    <span>Fully booked</span>
-                  )
-                }
-              />
-            );
-          })}
-        </div>
+        <ListViewport label="Available classes" resetKey={`${page}:${sessionLimit}:${day}:${query}`}>
+          <div className="class-card-grid">
+            {sessions.data?.data.map((row) => {
+              const booking = row.myBooking;
+              return (
+                <ClassCard
+                  key={row.publicId}
+                  session={row}
+                  actions={
+                    booking ? (
+                      <Action
+                        method="DELETE"
+                        path={`/api/v1/users/classes/${row.publicId}/bookings/${booking._id}`}
+                        confirmMessage="Cancel your place in this class?"
+                      >
+                        Cancel booking
+                      </Action>
+                    ) : row.bookedCount < row.capacity ? (
+                      <Action
+                        path={`/api/v1/users/classes/${row.publicId}/bookings`}
+                      >
+                        Book class
+                      </Action>
+                    ) : (
+                      <span>Fully booked</span>
+                    )
+                  }
+                />
+              );
+            })}
+          </div>
+        </ListViewport>
         {!sessions.data?.data.length && (
           <div className="state-card">
             {sessions.data?.meta?.eligibleGymCount === 0 ? <>

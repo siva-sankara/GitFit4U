@@ -14,7 +14,7 @@
   .profile-editor > form { gap: 14px; }
   .profile-edit-group { padding: 12px; }
   .profile-edit-group .profile-field-grid { grid-template-columns: minmax(0, 1fr); gap: 12px; }
-  .profile-edit-group input, .profile-edit-group select, .profile-edit-group textarea { font-size: 16px; }
+  .profile-edit-group input, .profile-edit-group select, .profile-edit-group textarea { font-size: 1rem; }
   .profile-edit-actions small { flex-basis: 100%; }
   .profile-edit-actions .btn { flex: 1; }
 }

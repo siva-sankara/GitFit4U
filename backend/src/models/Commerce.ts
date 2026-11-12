@@ -151,6 +151,14 @@ const subscriptionSchema = new Schema(
       },
     ],
     latestPaymentId: { type: Schema.Types.ObjectId, ref: "Payment" },
+    adminAuthorization: {
+      authorizedBy: { type: Schema.Types.ObjectId, ref: "User" },
+      authorizedAt: Date,
+      reason: String,
+      paymentStatus: { type: String, enum: ["PENDING", "PAID_OFFLINE", "PAID_ONLINE"] },
+      dueAt: Date,
+      settledAt: Date,
+    },
   },
   { timestamps: true, versionKey: "version", optimisticConcurrency: true },
 );
@@ -201,11 +209,27 @@ const paymentSchema = new Schema(
     currency: { type: String, default: "INR" },
     provider: {
       type: String,
-      enum: ["RAZORPAY", "OFFLINE"],
+      // PHONEPE is retained only for historical financial records. All new
+      // online orders are created through Razorpay.
+      enum: ["RAZORPAY", "PHONEPE", "OFFLINE"],
       default: "RAZORPAY",
     },
+    providerEnvironment: { type: String, enum: ["TEST", "LIVE"] },
     providerOrderId: { type: String, unique: true, sparse: true },
     providerPaymentId: { type: String, unique: true, sparse: true },
+    beneficiarySnapshot: { type: Schema.Types.Mixed, immutable: true },
+    allocationStatus: {
+      type: String,
+      enum: ["NOT_APPLICABLE", "PLANNED", "CREATED", "PENDING", "PROCESSED", "FAILED", "REVERSED", "PARTIALLY_REVERSED"],
+      default: "NOT_APPLICABLE",
+      index: true,
+    },
+    fulfillmentStatus: {
+      type: String,
+      enum: ["PENDING", "APPLIED", "FAILED", "REVIEW_REQUIRED"],
+      default: "PENDING",
+      index: true,
+    },
     status: {
       type: String,
       enum: [
@@ -239,6 +263,9 @@ paymentSchema.index({ offerId: 1, offerReservationStatus: 1, payerId: 1 });
 const providerEventSchema = new Schema(
   {
     provider: { type: String, required: true },
+    sourceEndpoint: { type: String, enum: ["PLATFORM", "OAUTH", "RECONCILIATION"], default: "PLATFORM" },
+    environment: { type: String, enum: ["TEST", "LIVE"] },
+    merchantAccountId: String,
     eventKey: { type: String, required: true },
     eventType: String,
     payloadHash: { type: String, required: true },

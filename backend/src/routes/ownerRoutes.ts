@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { getWhatsAppGroup, updateWhatsAppGroup } from "../controllers/manualWhatsAppController.js";
 import rateLimit from "express-rate-limit";
 import multer from "multer";
 import { resendMemberInvitation } from "../controllers/accountInvitationController.js";
@@ -9,6 +10,8 @@ import * as attendance from "../controllers/attendanceController.js";
 import * as communication from "../controllers/memberCommunicationController.js";
 import * as memberImports from "../controllers/memberImportController.js";
 import * as ownerPayments from "../controllers/ownerPaymentController.js";
+import * as paymentConnections from "../controllers/paymentConnectionController.js";
+import { refundPayment as refundCheckoutPayment } from "../controllers/checkoutController.js";
 import {
   ownerMemberCreateInput,
   ownerMemberUpdateInput,
@@ -113,6 +116,8 @@ ownerRoutes.post(
 );
 
 ownerRoutes.use(requireRole("GYM_OWNER", "GYM_STAFF"), requireGymContext);
+ownerRoutes.get("/communication/whatsapp-group", requireRole("GYM_OWNER"), requirePermission("gym:read"), getWhatsAppGroup);
+ownerRoutes.patch("/communication/whatsapp-group", requireRole("GYM_OWNER"), requirePermission("gym:update"), updateWhatsAppGroup);
 ownerRoutes.post("/members/:id/invitation/resend", requirePermission("member:write"), rateLimit({ windowMs: 15 * 60_000, limit: 20, standardHeaders: true, legacyHeaders: false }), resendMemberInvitation);
 ownerRoutes.get(
   "/dashboard",
@@ -120,6 +125,40 @@ ownerRoutes.get(
   controller.dashboard,
 );
 ownerRoutes.get("/gym", requirePermission("gym:read"), controller.getGym);
+ownerRoutes.get(
+  "/payment-connection",
+  requireRole("GYM_OWNER"),
+  requirePermission("gym:read"),
+  paymentConnections.ownerPaymentConnection,
+);
+ownerRoutes.get(
+  "/route-transfers",
+  requirePermission("finance:read"),
+  paymentConnections.ownerRouteTransfers,
+);
+ownerRoutes.post(
+  "/payment-connection/onboarding",
+  requireRole("GYM_OWNER"),
+  requirePermission("gym:update"),
+  requireIdempotencyKey,
+  validate(
+    z.object({
+      body: z
+        .object({
+          businessLegalName: z.string().trim().min(4).max(200),
+          businessType: z.string().trim().min(2).max(80),
+          businessContactEmail: z.string().email().max(254),
+          businessContactPhone: z.string().trim().regex(/^\+[1-9]\d{7,14}$/),
+          termsAccepted: z.literal(true),
+          termsVersion: z.string().trim().min(1).max(40),
+        })
+        .strict(),
+      params: z.object({}),
+      query: z.object({}),
+    }),
+  ),
+  paymentConnections.requestOwnerPaymentOnboarding,
+);
 ownerRoutes.patch(
   "/gym",
   requirePermission("gym:update"),
@@ -393,6 +432,26 @@ ownerRoutes.post(
   requirePermission("member:write"),
   requireIdempotencyKey,
   ownerPayments.remindPayment,
+);
+ownerRoutes.post(
+  "/payments/:id/refunds",
+  requirePermission("finance:read"),
+  requireIdempotencyKey,
+  validate(
+    z.object({
+      body: z
+        .object({
+          amountMinor: z.number().int().positive(),
+          reason: z.string().trim().min(5).max(1000),
+          offlineConfirmed: z.boolean().optional(),
+          offlineReference: z.string().trim().max(120).optional(),
+        })
+        .strict(),
+      params: z.object({ id: z.string().min(3).max(64) }),
+      query: z.object({}),
+    }),
+  ),
+  refundCheckoutPayment,
 );
 ownerRoutes.get(
   "/offers",

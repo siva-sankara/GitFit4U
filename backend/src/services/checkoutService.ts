@@ -12,6 +12,10 @@ import {
 import { paymentProvider } from "../integrations/payments/index.js";
 import { validatePlatformRenewalOrder } from "./platformRenewalService.js";
 import { calculateMembershipPricing, findEligibleOffer, reserveQuoteOffer } from "./promotionService.js";
+import {
+  gymOAuthClientForConnection,
+  requireMembershipMerchantConnection,
+} from "./paymentMerchantService.js";
 
 export async function createMembershipQuote(input: {
   userId: string;
@@ -79,12 +83,6 @@ export async function createCheckoutOrder(input: {
   userId: string;
   quoteId: string;
 }) {
-  if (!env.RAZORPAY_WEBHOOK_SECRET?.trim())
-    throw new AppError(
-      503,
-      "PAYMENT_CAPTURE_NOT_CONFIGURED",
-      "Online payment is unavailable until payment capture verification is configured.",
-    );
   const reservation = await mongoose.connection.transaction(async (session) => {
     const quote = await PlanQuote.findOneAndUpdate(
       {
@@ -102,6 +100,7 @@ export async function createCheckoutOrder(input: {
         "This quote has expired. Refresh the price.",
       );
     let registration: any;
+    let beneficiary: any;
     if (quote.planSnapshot?.type === "PLATFORM" && quote.planSnapshot?.renewal) {
       await validatePlatformRenewalOrder(quote, input.userId, session);
     } else if (quote.planSnapshot?.type === "PLATFORM") {
@@ -119,6 +118,8 @@ export async function createCheckoutOrder(input: {
           "Refresh the registration and select its current plan.",
         );
       await payableGym(registration, session);
+    } else {
+      beneficiary = await requireMembershipMerchantConnection(String(quote.gymId));
     }
     if (
       await Payment.exists({
@@ -147,6 +148,15 @@ export async function createCheckoutOrder(input: {
       ],
     }).session(session);
     if (existing) {
+      if (
+        existing.purpose === "MEMBERSHIP" &&
+        existing.allocationStatus === "FAILED"
+      )
+        throw new AppError(
+          409,
+          "ROUTE_ORDER_RECONCILIATION_REQUIRED",
+          "This Razorpay order has an unresolved beneficiary allocation. Contact support before retrying.",
+        );
       if (existing.offerId && !existing.providerOrderId && ["FAILED", "CANCELLED"].includes(existing.status))
         throw new AppError(409, "PROMOTION_ORDER_RECONCILIATION_REQUIRED", "This offer is reserved for a payment whose order could not be confirmed. Contact support with the payment reference before starting another payment.");
       if (registration) {
@@ -177,6 +187,28 @@ export async function createCheckoutOrder(input: {
           pricingSnapshot: quote.pricingSnapshot,
           ...(quote.offerId ? { offerId: quote.offerId, offerReservationStatus: "RESERVED" } : {}),
           currency: quote.currency,
+          provider: "RAZORPAY",
+          providerEnvironment: env.RAZORPAY_MODE.toUpperCase(),
+          allocationStatus:
+            quote.planSnapshot?.type === "PLATFORM"
+              ? "NOT_APPLICABLE"
+              : "NOT_APPLICABLE",
+          beneficiarySnapshot: beneficiary
+            ? {
+                paymentConnectionId: beneficiary._id,
+                paymentConnectionPublicId: beneficiary.publicId,
+                connectionRevision: beneficiary.connectionRevision,
+                merchantAccountId: beneficiary.merchantAccountId,
+                merchantPublicToken: beneficiary.publicToken,
+                businessLegalName: beneficiary.businessLegalName,
+                credentialType: "OAUTH_BEARER",
+                sellerType: "GYM",
+                customerPaidMinor: quote.totalMinor,
+                gatewayFeeMinor: null,
+                providerTaxMinor: null,
+                commissionMinor: 0,
+              }
+            : undefined,
           status: "CREATED",
           metadata: { quoteSnapshot: quote.toObject() },
         },
@@ -201,24 +233,69 @@ export async function createCheckoutOrder(input: {
     );
   }
   try {
-    const providerOrder = await paymentProvider.createPayment({
+    const beneficiary = payment.beneficiarySnapshot;
+    if (payment.purpose === "PLATFORM_PLAN" && !env.RAZORPAY_PLATFORM_PAYMENTS_ENABLED)
+      throw new AppError(503, "PLATFORM_PAYMENTS_DISABLED", "GETFIT4U platform payments are not enabled.");
+    if (payment.purpose === "PLATFORM_PLAN" &&
+        !(env.RAZORPAY_PLATFORM_WEBHOOK_SECRET || env.RAZORPAY_WEBHOOK_SECRET)?.trim())
+      throw new AppError(503, "PAYMENT_CAPTURE_NOT_CONFIGURED", "Platform payment capture verification is not configured.");
+    if (payment.purpose === "MEMBERSHIP" && !env.RAZORPAY_OAUTH_WEBHOOK_SECRET?.trim())
+      throw new AppError(503, "PAYMENT_CAPTURE_NOT_CONFIGURED", "Gym payment capture verification is not configured.");
+    const providerClient = payment.purpose === "MEMBERSHIP"
+      ? await gymOAuthClientForConnection(
+          String(beneficiary.paymentConnectionId),
+          String(beneficiary.merchantAccountId),
+        )
+      : null;
+    const providerOrder = await (providerClient
+      ? providerClient.createOrder({
+          amountMinor: payment.amountMinor,
+          currency: payment.currency,
+          receipt: payment.publicId,
+          notes: { purchase_reference: payment.publicId, purpose: "GYM_MEMBERSHIP" },
+        })
+      : paymentProvider.createPayment({
       amountMinor: payment.amountMinor,
       currency: payment.currency,
       receipt: payment.publicId,
-      notes: { gymId: String(payment.gymId) },
-    });
+      notes: {
+        purchase_reference: payment.publicId,
+        purpose:
+          payment.purpose === "PLATFORM_PLAN"
+            ? "PLATFORM_SUBSCRIPTION"
+            : "GYM_MEMBERSHIP",
+      },
+    }));
     payment.providerOrderId = providerOrder.id;
+    // Persist the provider identity before any follow-up inspection. A timeout
+    // or database error after order creation is an uncertain financial state,
+    // so a retry must reconcile this exact order instead of creating another.
+    await payment.save();
+    if (payment.purpose === "PLATFORM_PLAN" && providerOrder.transfers?.length)
+      throw new AppError(
+        409,
+        "PLATFORM_ORDER_TRANSFER_CONFLICT",
+        "The platform order unexpectedly contains a gym transfer and was blocked.",
+      );
+    // New gym membership orders are created directly in the gym merchant's
+    // OAuth account. No Route transfer or platform commission is attached.
     payment.status = "PENDING";
     await payment.save();
     return payment;
   } catch (error) {
+    const providerOrderWasCreated = Boolean(payment.providerOrderId);
     await Payment.updateOne(
       { _id: payment._id, status: "CREATED" },
       {
         $set: {
           status: "FAILED",
+          ...(payment.purpose === "MEMBERSHIP" && providerOrderWasCreated
+            ? { failureCode: "OAUTH_ORDER_RECONCILIATION_REQUIRED" }
+            : {}),
           failureDescription:
-            "Payment order could not be created. Please retry.",
+            payment.purpose === "MEMBERSHIP" && providerOrderWasCreated
+              ? "Razorpay may have created the gym merchant order. Reconcile this exact order before checkout resumes."
+              : "Payment order could not be created. Please retry.",
         },
       },
     );

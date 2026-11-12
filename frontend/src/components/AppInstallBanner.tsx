@@ -7,7 +7,7 @@ import "../styles/pwa.css";
 export function AppInstallBanner() {
   const pwa = usePwa();
   const [instructions, setInstructions] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const busy = pwa.installState === "prompting";
   const eligible = pwa.mobileInstallEligible && !pwa.installed && !pwa.dismissed && !pwa.bannerExpired;
   useEffect(() => {
     if (!eligible) return;
@@ -23,13 +23,13 @@ export function AppInstallBanner() {
       <span>Get the GETFIT4U app</span>
       <button className="install-banner-action" disabled={busy} onClick={async () => {
         if (!pwa.installAvailable) { setInstructions(true); return; }
-        setBusy(true);
-        try { await installApp(); } finally { setBusy(false); }
-      }}><Download size={16} aria-hidden="true" />{busy ? "Opening…" : "Install"}</button>
+        await installApp();
+      }}><Download size={16} aria-hidden="true" />{busy ? "Opening…" : pwa.installAvailable ? "Install" : "How to install"}</button>
       <button className="install-banner-dismiss" aria-label="Dismiss installation banner" onClick={dismissInstall}><X size={18} aria-hidden="true" /></button>
       {pwa.error && <small role="alert">{pwa.error}</small>}
     </aside>}
-    {instructions && <Modal open title="Install GETFIT4U" onClose={() => setInstructions(false)}>
+    {instructions && !pwa.installed && <Modal open title="How to install GETFIT4U" onClose={() => setInstructions(false)}>
+      {pwa.installAvailable && <button className="btn btn-primary" onClick={() => { void installApp(); setInstructions(false); }}>Install GETFIT4U</button>}
       <p>{installInstructions()}</p>
       <p>The app needs a connection for attendance, bookings, payments and messages.</p>
       <button className="btn btn-primary" onClick={() => setInstructions(false)}>Got it</button>

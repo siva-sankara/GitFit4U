@@ -1,3 +1,4 @@
+import { ListViewport } from "../../components/ListViewport";
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -142,14 +143,12 @@ function PeopleList({
       {query.error && <p role="alert">{query.error.message}</p>}
       <div className="profile-people">
         {query.data?.data.map((person) => (
-          <Link
+          <div
             key={person.publicId}
-            to={`/profile/${person.publicId}`}
-            onClick={onClose}
           >
             <Avatar user={person} />
-            <span>{person.name || "Member"}</span>
-          </Link>
+            <Link to={`/profile/${person.publicId}`} onClick={onClose}>{person.name || "Member"}</Link>
+          </div>
         ))}
       </div>
       {query.data && !query.data.data.length && <p>No members to show.</p>}
@@ -405,7 +404,7 @@ function ProfileContent({ id }: { id: string }) {
         </button>
       </div>
       <section className="profile-hero">
-        <Avatar user={person} size={96} />
+        <Avatar user={person} variant="profile" />
         <div className="profile-identity">
           <h2>{person.name || "Member"}</h2>
           {person.social?.bio && (
@@ -425,14 +424,14 @@ function ProfileContent({ id }: { id: string }) {
         </div>
         <div className="profile-actions">
           {person.own && <AccountAppSettings />}
-          {person.own && (
+          {/* {person.own && (
             <Link
               className="btn btn-secondary"
               to={`${workspacePrefix(me.data?.data.context.role || "USER")}/security`}
             >
               Account security
             </Link>
-          )}
+          )} */}
           {person.own ? (
             <button
               className="btn btn-secondary"
@@ -547,62 +546,64 @@ function ProfileContent({ id }: { id: string }) {
                 No posts yet. {person.own && "Share your first workout win."}
               </div>
             )}
-            {posts.data?.data.map((post) => (
-              <article className="profile-post" key={post.publicId}>
-                <header>
-                  <Avatar user={post.author} />
-                  <div>
-                    <strong>{post.author.name || "Member"}</strong>
-                    <small>
-                      {displayDate(post.createdAt)}
-                      {post.editedAt ? " · Edited" : ""}
-                    </small>
-                  </div>
-                  <div className="profile-post-actions">
-                    {person.own && (
-                      <button
-                        className="btn btn-ghost"
-                        onClick={() =>
-                          setComposer({ kind: "posts", initial: post })
-                        }
+            <ListViewport label="Profile posts" resetKey={`${endpoint}:${page}`}>
+              {posts.data?.data.map((post) => (
+                <article className="profile-post" key={post.publicId}>
+                  <header>
+                    <Avatar user={post.author} />
+                    <div>
+                      <strong>{post.author.name || "Member"}</strong>
+                      <small>
+                        {displayDate(post.createdAt)}
+                        {post.editedAt ? " · Edited" : ""}
+                      </small>
+                    </div>
+                    <div className="profile-post-actions">
+                      {person.own && (
+                        <button
+                          className="btn btn-ghost"
+                          onClick={() =>
+                            setComposer({ kind: "posts", initial: post })
+                          }
+                        >
+                          Edit
+                        </button>
+                      )}
+                      {(person.own || person.canModerate) && (
+                        <button
+                          className="btn btn-ghost"
+                          onClick={() =>
+                            setDeleting({
+                              kind: "posts",
+                              publicId: post.publicId,
+                            })
+                          }
+                        >
+                          Delete
+                        </button>
+                      )}
+                    </div>
+                  </header>
+                  <p className="profile-post-text">{post.text}</p>
+                  <div className="profile-post-images">
+                    {post.images.map((image) => (
+                      <a
+                        key={image.id}
+                        href={image.url}
+                        target="_blank"
+                        rel="noreferrer"
                       >
-                        Edit
-                      </button>
-                    )}
-                    {(person.own || person.canModerate) && (
-                      <button
-                        className="btn btn-ghost"
-                        onClick={() =>
-                          setDeleting({
-                            kind: "posts",
-                            publicId: post.publicId,
-                          })
-                        }
-                      >
-                        Delete
-                      </button>
-                    )}
+                        <img
+                          src={image.url}
+                          alt="Post attachment"
+                          loading="lazy"
+                        />
+                      </a>
+                    ))}
                   </div>
-                </header>
-                <p className="profile-post-text">{post.text}</p>
-                <div className="profile-post-images">
-                  {post.images.map((image) => (
-                    <a
-                      key={image.id}
-                      href={image.url}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      <img
-                        src={image.url}
-                        alt="Post attachment"
-                        loading="lazy"
-                      />
-                    </a>
-                  ))}
-                </div>
-              </article>
-            ))}
+                </article>
+              ))}
+            </ListViewport>
             <Pages
               page={page}
               pages={posts.data?.meta?.pages}

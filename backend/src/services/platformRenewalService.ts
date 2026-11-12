@@ -12,6 +12,7 @@ import {
 } from "../models/Commerce.js";
 import { AppError } from "../utils/AppError.js";
 import { emitDomainEvent } from "./domainEventService.js";
+import { platformQuotePricing, type OfferSelection } from "./promotionService.js";
 
 async function renewalGym(
   userId: string,
@@ -76,6 +77,7 @@ export async function platformRenewalQuote(
   userId: string,
   gymId: string,
   planId: string,
+  selection: OfferSelection = {},
 ) {
   return mongoose.connection.transaction(async (session) => {
     const { previous } = await renewalGym(userId, gymId, session);
@@ -126,8 +128,9 @@ export async function platformRenewalQuote(
         );
       previousQuote.expiresAt = new Date(Date.now() + 15 * 60000);
       await previousQuote.save({ session });
-      return previousQuote;
+      return { ...previousQuote.toObject(), paymentCommitted: true };
     }
+    const pricing = await platformQuotePricing({ ...selection, plan, userId, gymId, renewal: true }, session);
     const cached = await PlanQuote.findOne({
       gymId,
       purchaserId: userId,
@@ -135,6 +138,8 @@ export async function platformRenewalQuote(
       "planSnapshot.renewal": true,
       "planSnapshot.previousSubscriptionId": String(previous._id),
       "planSnapshot.version": plan.version,
+      offerId: pricing.offerId || null,
+      "pricingSnapshot.offer.version": pricing.pricingSnapshot.offer?.version || { $exists: false },
       expiresAt: { $gt: new Date() },
     }).session(session);
     if (
@@ -169,11 +174,8 @@ export async function platformRenewalQuote(
               memberLimit: plan.memberLimit,
               staffLimit: plan.staffLimit,
             },
-            subtotalMinor: plan.priceMinor,
-            totalMinor: plan.priceMinor,
+            ...pricing,
             currency: plan.currency,
-            discountMinor: 0,
-            taxMinor: 0,
             expiresAt: new Date(Date.now() + 15 * 60000),
           },
         ],

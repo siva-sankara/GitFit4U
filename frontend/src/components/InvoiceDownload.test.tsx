@@ -14,8 +14,8 @@ beforeEach(() => {
   vi.stubGlobal("URL", { ...URL, createObjectURL: vi.fn(() => "blob:invoice"), revokeObjectURL: vi.fn() });
 });
 afterEach(async () => { await act(async () => root.unmount()); client.clear(); host.remove(); vi.unstubAllGlobals(); });
-async function render(status = "CAPTURED") {
-  await act(async () => root.render(<QueryClientProvider client={client}><InvoiceDownload payment={{ publicId: "payment-public", status }} /></QueryClientProvider>));
+async function render(status = "CAPTURED", compact = false) {
+  await act(async () => root.render(<QueryClientProvider client={client}><InvoiceDownload payment={{ publicId: "payment-public", status }} compact={compact} /></QueryClientProvider>));
 }
 async function until(check: () => boolean) { for (let index = 0; index < 40 && !check(); index++) await act(async () => new Promise(resolve => { setTimeout(resolve, 10); })); expect(check()).toBe(true); }
 it("offers a backend PDF only for invoice-eligible payments", async () => {
@@ -50,4 +50,14 @@ it("queues an explicit invoice copy with an idempotency key and reports unavaila
 it("distinguishes provider acceptance from confirmed delivery", () => {
   expect(invoiceEmailLabel({ status: "SENT", configured: true, emailAvailable: true })).toContain("confirmation pending");
   expect(invoiceEmailLabel({ status: "DELIVERED", configured: true, emailAvailable: true })).toBe("Invoice email delivered.");
+});
+it("keeps named invoice controls and status lookup available in compact rows", async () => {
+  mocks.request.mockResolvedValue({ data: { status: "DELIVERED", configured: true, emailAvailable: true } });
+  await render("CAPTURED", true);
+  expect([...host.querySelectorAll("button")].map(button => button.getAttribute("aria-label"))).toEqual(["Download Invoice", "Email invoice", "Email status"]);
+  await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Email status"]')!.click());
+  await until(() => !!host.querySelector('[role="status"]'));
+  expect(mocks.request).toHaveBeenCalledWith("/api/v1/workspace/payments/payment-public/invoice/email", {});
+  expect(host.textContent).toContain("Invoice email delivered.");
+  expect(mocks.download).not.toHaveBeenCalled();
 });

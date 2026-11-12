@@ -1,3 +1,4 @@
+import { ListViewport, OverflowText } from "../../components/ListViewport";
 import { useEffect, useState, type FormEvent } from "react";
 import { useCurrentUser } from "../../api/hooks";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -7,8 +8,11 @@ import { PhoneInput } from "../../components/PhoneInput";
 import { StatusBadge } from "../../components/StatusBadge";
 import { Avatar } from "../../components/Avatar";
 import { MediaImageEditor } from "../../components/MediaImageEditor";
+import { PageHeader } from "../../components/PageHeader";
+import { Plus, Search } from "lucide-react";
 import type { MemberRow } from "./OwnerMembersPage";
 import "../../styles/member-management.css";
+import "../../styles/trainers.css";
 import { EmptyState, Pagination, SkeletonTableRows } from "../../components/DataListControls";
 
 export function OwnerTrainersPage() {
@@ -82,25 +86,31 @@ export function OwnerTrainersPage() {
     });
   }
   return (
-    <div className="page-stack">
-      <header className="page-heading">
+    <div className="page-stack owner-trainers-page">
+      <PageHeader>
         <div>
           <span className="eyebrow">Gym team</span>
           <h1>Trainers</h1>
           <p>Manage gym assignments, qualifications and availability.</p>
         </div>
-        {canManage && (
+        <div className="heading-actions trainer-toolbar">
+          <label className="search-field trainer-search">
+            <Search size={18} aria-hidden="true" />
+            <span className="sr-only">Search trainers</span>
+            <input type="search" value={q} onChange={(event) => setQ(event.target.value)} placeholder="Name, email or phone" />
+          </label>
+          {canManage && (
           <button
             className="btn btn-primary"
             onClick={() => {
               openTrainer({});
             }}
           >
-            Add trainer
+            <Plus size={18} aria-hidden="true" /> Add trainer
           </button>
-        )}
-      </header>
-      <label className="search-field"><span className="sr-only">Search trainers</span><input value={q} onChange={(event) => setQ(event.target.value)} placeholder="Search by name, email, or phone" /></label>
+          )}
+        </div>
+      </PageHeader>
       {query.isPending ? (
         <SkeletonTableRows columns={6} />
       ) : query.isError ? (
@@ -114,55 +124,60 @@ export function OwnerTrainersPage() {
           </button>
         </div>
       ) : (
-        <section className="panel member-management-scroll">
-          <table className="member-management-table">
-            <thead>
-              <tr>
-                <th>Trainer</th>
-                <th>Contact</th>
-                <th>Specialization</th>
-                <th>Experience</th>
-                <th>Status</th>
-                <th>Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {query.data?.data.map((trainer) => (
-                <tr key={trainer.publicId}>
-                  <td>
-                    <Avatar name={trainer.name} src={trainer.photoUrl} thumbnailSrc={trainer.photoThumbnailUrl} />
-                    <strong>{trainer.name}</strong>
-                  </td>
-                  <td>
-                    {trainer.phone || trainer.userId?.phone || "Not provided"}
-                    <small>{trainer.email || trainer.userId?.email}</small>
-                  </td>
-                  <td>
-                    {trainer.specializations?.join(", ") || "Not provided"}
-                  </td>
-                  <td>{trainer.experienceYears ?? 0} years</td>
-                  <td>
-                    <StatusBadge status={trainer.status} />
-                  </td>
-                  <td>
-                    {canManage ? (
-                      <button
-                        className="btn btn-secondary"
-                        onClick={() => {
-                          openTrainer(trainer);
-                        }}
-                      >
-                        View / Edit
-                      </button>
-                    ) : (
-                      "Read only"
-                    )}
-                  </td>
+        <section className="panel trainer-directory">
+          {query.data?.data.length ? <ListViewport label="Trainers" resetKey={path}>
+            <table className="member-management-table">
+              <colgroup><col className="trainer-name-column" /><col className="trainer-contact-column" /><col className="trainer-specialization-column" /><col className="trainer-experience-column" /><col className="trainer-status-column" /><col className="trainer-action-column" /></colgroup>
+              <thead>
+                <tr>
+                  <th scope="col">Trainer</th>
+                  <th scope="col">Contact</th>
+                  <th scope="col">Specialization</th>
+                  <th scope="col">Experience</th>
+                  <th scope="col">Status</th>
+                  <th scope="col">Action</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-          {!query.data?.data.length && <EmptyState title="No trainers found" detail="Try another search or add a trainer." />}
+              </thead>
+              <tbody>
+                {query.data?.data.map((trainer) => (
+                  <tr key={trainer.publicId}>
+                    <td className="trainer-name-cell">
+                    <div className="member-identity">
+                      <Avatar name={trainer.name} src={trainer.photoUrl} thumbnailSrc={trainer.photoThumbnailUrl} />
+                      <OverflowText className="trainer-name">{trainer.name || "Trainer"}</OverflowText>
+                    </div>
+                    </td>
+                    <td data-label="Contact" className="trainer-contact-cell">
+                    <OverflowText>{trainer.phone || trainer.userId?.phone || "Not provided"}</OverflowText>
+                    <small><OverflowText>{trainer.email || trainer.userId?.email || "Not provided"}</OverflowText></small>
+                    </td>
+                    <td data-label="Specialization" className="trainer-specialization-cell">
+                    <OverflowText>{trainer.specializations?.join(", ") || "Not provided"}</OverflowText>
+                    </td>
+                    <td data-label="Experience" className="trainer-experience-cell">{trainer.experienceYears ?? 0} years</td>
+                    <td data-label="Status" className="trainer-status-cell">
+                      <StatusBadge status={trainer.status} />
+                    </td>
+                    <td className="trainer-action-cell">
+                      {canManage ? (
+                        <button
+                          className="btn btn-secondary"
+                          aria-label={`View or edit ${trainer.name || "trainer"}`}
+                          onClick={() => {
+                            openTrainer(trainer);
+                          }}
+                        >
+                          View / Edit
+                        </button>
+                      ) : (
+                        "Read only"
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </ListViewport> : <EmptyState title="No trainers found" detail={canManage ? "Try another search or add a trainer." : "Try another name, email or phone number."} />}
           <Pagination page={page} limit={limit} total={query.data?.meta?.total || 0} loading={query.isFetching} onPageChange={setPage} onLimitChange={(value) => { setLimit(value); setPage(1); }} />
         </section>
       )}
@@ -248,13 +263,12 @@ export function OwnerTrainersPage() {
                 defaultValue={editing.bio}
               />
             </label>
-            <fieldset className="full-width">
+            <fieldset className="full-width trainer-availability">
               <legend>Availability in gym local time</legend>
               {availability.map((slot, index) => (
                 <div
-                  className="heading-actions"
+                  className="trainer-availability-row"
                   key={index}
-                  style={{ marginBottom: 12 }}
                 >
                   <label>
                     Day{" "}

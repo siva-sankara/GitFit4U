@@ -1,5 +1,6 @@
 import type { Request, Response } from "express";
 import { z } from "zod";
+import { messagingGym, messagingGymDetails, messagingMembers } from "../services/manualWhatsAppService.js";
 import { transitionMembership } from "../services/membershipLifecycleService.js";
 import { privatePendingMember } from "../services/memberInvitationPrivacy.js";
 import { redactPendingAccountRows } from "../services/tenantAccountPrivacy.js";
@@ -120,6 +121,7 @@ export async function dashboard(req: Request, res: Response) {
             publicId: platform.publicId,
             planId: platform.planId,
             status: platform.status,
+            adminAuthorization: platform.adminAuthorization,
             plan: platform.planSnapshot,
             startsAt: platform.startsAt,
             endsAt: platform.endsAt,
@@ -267,12 +269,14 @@ export async function listMembers(req: Request, res: Response) {
     gymId: req.auth!.gymId,
     isDeleted: { $ne: true },
   };
-  const gym = await Gym.findById(req.auth!.gymId).select("timezone publicId").lean();
+  const messaging = req.query.view === "messaging";
+  const gym = messaging ? await messagingGym(req.auth!) : await Gym.findById(req.auth!.gymId).select("timezone publicId").lean();
   const timezone = gym?.timezone || "Asia/Kolkata",
     now = new Date();
   const filters = z
     .object({
       q: z.string().max(120).optional(),
+      view: z.enum(["messaging"]).optional(),
       status: z
         .enum([
           "",
@@ -435,7 +439,11 @@ export async function listMembers(req: Request, res: Response) {
       .slice(0, 120)
       .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const regex = new RegExp(query, "i");
+    const searchableMemberAccounts = messaging ? await MemberProfile.distinct("userId", {
+      gymId: req.auth!.gymId, isDeleted: { $ne: true }, "invitation.status": { $ne: "PENDING" },
+    }) : undefined;
     const users = await User.distinct("_id", {
+      ...(searchableMemberAccounts ? { _id: { $in: searchableMemberAccounts } } : {}),
       $or: [{ name: regex }, { email: regex }, { phone: regex }],
     });
     filter.$or = [
@@ -445,6 +453,10 @@ export async function listMembers(req: Request, res: Response) {
       { "contact.email": regex },
       { "contact.phone": regex },
     ];
+    if (messaging) {
+      const plans = await Subscription.distinct("_id", { ...subscriptionScope, "planSnapshot.name": regex });
+      (filter.$or as Record<string, unknown>[]).push({ currentSubscriptionId: { $in: plans } });
+    }
   }
   const sort: Record<string, 1 | -1> =
     filters.sort === "JOINED_ASC"
@@ -454,6 +466,16 @@ export async function listMembers(req: Request, res: Response) {
         : filters.sort === "NAME_DESC"
           ? { "contact.name": -1, _id: 1 }
           : { joinedAt: -1, _id: -1 };
+  if (messaging) {
+    const [members, total] = await Promise.all([
+      messagingMembers(req.auth!.gymId!, filter, sort, skip, limit),
+      MemberProfile.countDocuments(filter),
+    ]);
+    res.json({ success: true, data: members, meta: {
+      ...pageMeta(page, limit, total), timezone, serverNow: now.toISOString(), ...messagingGymDetails(gym),
+    } });
+    return;
+  }
   const [members, total, summaryTotal, summaryPending, activeSubscriptions] = await Promise.all([
     MemberProfile.find(filter)
       .populate(

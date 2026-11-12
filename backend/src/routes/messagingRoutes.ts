@@ -4,6 +4,7 @@ import rateLimit from "express-rate-limit";
 import { requireAuth, requireRole } from "../middleware/auth.js";
 import { validate } from "../middleware/validate.js";
 import * as controller from "../controllers/messagingController.js";
+import { supportManagement, updateSupportWorkflow, addInternalNote } from "../controllers/supportManagementController.js";
 
 export const messagingRoutes = Router();
 const id = z.string().min(6).max(120);
@@ -57,6 +58,9 @@ messagingRoutes.post(
   controller.createConversation,
 );
 messagingRoutes.get("/:id/messages", controller.listMessages);
+messagingRoutes.get("/:id/support-management", supportManagement);
+messagingRoutes.patch("/:id/support-management", updateSupportWorkflow);
+messagingRoutes.post("/:id/internal-notes", addInternalNote);
 messagingRoutes.get("/:id", controller.conversationDetails);
 messagingRoutes.post(
   "/:id/messages",
@@ -103,5 +107,5 @@ messagingRoutes.patch(
       ]),
     }),
   ),
-  controller.updateSupportStatus,
+  updateSupportWorkflow,
 );

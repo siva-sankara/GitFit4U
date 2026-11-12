@@ -108,7 +108,8 @@ export async function enablePush() {
     throw new Error(
       "This browser does not support push notifications. Use HTTPS or localhost in a supported browser.",
     );
-  const permission = await Notification.requestPermission();
+  const permission = Notification.permission === "default"
+    ? await Notification.requestPermission() : Notification.permission;
   if (permission !== "granted")
     throw new Error(
       permission === "denied"
@@ -154,7 +155,8 @@ export async function listenForPush(
         payload.data?.title ||
         "New notification",
       message: payload.notification?.body || payload.data?.body,
-      actionUrl: payload.data?.navigationPath,
+      actionUrl: /^[a-f\d]{24}$/i.test(payload.data?.notificationId || "")
+        ? `/notification-open/${payload.data!.notificationId}` : "/notifications",
     });
   });
 }

@@ -63,6 +63,19 @@ beforeEach(() => {
 });
 
 describe("platform WhatsApp authentication sender", () => {
+  it("accepts Meta's retrieved URL-button and rendered English footer shape", async () => {
+    mocks.templates.mockResolvedValue([{ ...approvedTemplate, components: [
+      { type: "FOOTER", text: "This code expires in 5 minutes." },
+      { type: "BUTTONS", buttons: [{ type: "URL", text: "Copy code", url: "https://www.whatsapp.com/otp/code/?otp_type=COPY_CODE&code={{1}}" }] },
+    ] }]);
+    await expect(sendWhatsAppAuthenticationOtp("+919876543210", "246810")).resolves.toEqual({ providerMessageId: "wamid.auth" });
+  });
+  it("rejects an arbitrary URL masquerading as an authentication button", async () => {
+    mocks.templates.mockResolvedValue([{ ...approvedTemplate, components: [
+      { type: "FOOTER", code_expiration_minutes: 5 }, { type: "BUTTONS", buttons: [{ type: "URL", url: "https://example.com/otp/code/?code={{1}}" }] },
+    ] }]);
+    await expect(sendWhatsAppAuthenticationOtp("+919876543210", "246810")).rejects.toMatchObject({ code: "WHATSAPP_AUTH_TEMPLATE_BUTTON_INVALID" });
+  });
   it("validates the approved template and connected platform sender before submitting", async () => {
     await expect(
       sendWhatsAppAuthenticationOtp("+919876543210", "123456"),

@@ -14,7 +14,8 @@ import {
 } from "../controllers/attendanceController.js";
 import { requestGymJoin } from "../controllers/memberManagementController.js";
 import { requireIdempotencyKey } from "../middleware/idempotency.js";
-import { deleteNotifications, notificationDetails } from "../controllers/notificationController.js";
+import { deleteNotifications, notificationDetails, openNotification } from "../controllers/notificationController.js";
+import { supportContext } from "../services/supportContextService.js";
 
 export const userRoutes = Router();
 userRoutes.use(
@@ -27,6 +28,7 @@ userRoutes.use((req, _res, next) => {
   next();
 });
 userRoutes.get("/me", controller.getProfile);
+userRoutes.get("/me/support-context", async (req, res) => res.json({ success: true, data: await supportContext(req.auth!.userId) }));
 userRoutes.get("/me/reviews", feature.ownReview);
 userRoutes.patch("/me", validate(z.object({ body: profileUpdateInput, params: z.object({}), query: z.object({}) })), controller.updateProfile);
 const contactLimit = rateLimit({ windowMs: 15 * 60000, limit: 8, keyGenerator: req => req.auth!.userId, standardHeaders: "draft-8", legacyHeaders: false });
@@ -46,6 +48,7 @@ userRoutes.post(
 userRoutes.post("/me/gym-join-requests", requestGymJoin);
 userRoutes.get("/me/notifications", controller.notifications);
 userRoutes.get("/me/notifications/:id", notificationDetails);
+userRoutes.post("/me/notifications/:id/open", openNotification);
 userRoutes.delete("/me/notifications", deleteNotifications);
 userRoutes.delete("/me/notifications/:id", deleteNotifications);
 userRoutes.post("/me/notifications/:id/read", controller.markNotificationRead);
@@ -63,8 +66,9 @@ userRoutes.post(
         message: z.string().min(10).max(5000),
         category: z.string().max(60).optional(),
         priority: z.enum(["LOW", "NORMAL", "HIGH", "URGENT"]).optional(),
-        gymId: z.string().optional(),
-      }),
+        gymId: z.string().regex(/^[a-f\d]{24}$/i).optional(),
+        related: z.object({ type: z.enum(["PAYMENT", "MEMBERSHIP", "BOOKING"]), id: z.string().min(1).max(80) }).strict().optional(),
+      }).strict(),
       params: z.object({}),
       query: z.object({}),
     }),

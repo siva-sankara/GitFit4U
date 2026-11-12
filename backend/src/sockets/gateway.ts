@@ -21,6 +21,7 @@ async function authenticate(socket: Socket) {
     !session ||
     sessionExpiry(session) <= new Date() ||
     !user ||
+    (user.developmentTestAccount && env.OTP_MODE !== "development_preview") ||
     user.status !== "ACTIVE" ||
     !user.roles.includes(session.activeRole)
   )

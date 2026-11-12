@@ -1,7 +1,7 @@
 import type { Request, Response } from "express";
 import mongoose from "mongoose";
 import { nanoid } from "nanoid";
-import { redeemPaymentOffer } from "../services/promotionService.js";
+import { redeemPaymentOffer, platformQuotePricing } from "../services/promotionService.js";
 import { env } from "../config/env.js";
 import { platformRenewalQuote, activatePlatformRenewal } from "../services/platformRenewalService.js";
 import {
@@ -21,7 +21,12 @@ import {
 import { sha256 } from "../utils/crypto.js";
 import { AppError } from "../utils/AppError.js";
 import { paymentProvider } from "../integrations/payments/index.js";
-import { Refund } from "../models/Business.js";
+import { Refund, RouteTransfer, PaymentConnection } from "../models/Business.js";
+import {
+  verifyOAuthCheckoutSignature,
+  verifyRazorpayWebhook,
+} from "../integrations/payments/razorpayOAuthProvider.js";
+import { gymOAuthClientForConnection } from "../services/paymentMerchantService.js";
 import { ensurePaymentInvoice } from "../services/invoiceService.js";
 import {
   submitRefund,
@@ -30,6 +35,7 @@ import {
 import { Gym } from "../models/Gym.js";
 import { User } from "../models/User.js";
 import { GymRegistration } from "../models/GymRegistration.js";
+import { settleAuthorizedGatewayPayment } from "../services/gymActivationService.js";
 import { PlatformPlan } from "../models/Commerce.js";
 import {
   registrationPayment,
@@ -42,7 +48,7 @@ export async function createPlatformQuote(req: Request, res: Response) {
   if (req.body.renewal === true) {
     if (req.auth?.role !== "GYM_OWNER" || !req.auth.gymId) throw new AppError(403, "RENEWAL_FORBIDDEN", "Select a gym you own before renewing.");
     if (req.body.expectedGymId && req.body.expectedGymId !== req.auth.gymId) throw new AppError(409, "GYM_CONTEXT_CHANGED", "Your selected gym changed. Confirm the intended gym before renewing.");
-    return res.status(201).json({ success: true, data: await platformRenewalQuote(req.auth.userId, req.auth.gymId, req.body.planId) });
+    return res.status(201).json({ success: true, data: await platformRenewalQuote(req.auth.userId, req.auth.gymId, req.body.planId, req.body) });
   }
   const quote = await mongoose.connection.transaction(async (session) => {
     const registration = await GymRegistration.findOne({
@@ -93,7 +99,7 @@ export async function createPlatformQuote(req: Request, res: Response) {
         );
       previous.expiresAt = new Date(Date.now() + 15 * 60000);
       await previous.save({ session });
-      return previous;
+      return { ...previous.toObject(), paymentCommitted: true };
     }
     if (!plan.active)
       throw new AppError(
@@ -101,11 +107,14 @@ export async function createPlatformQuote(req: Request, res: Response) {
         "PLAN_UNAVAILABLE",
         "This registration plan is no longer available. Select another plan.",
       );
+    const pricing = await platformQuotePricing({ ...req.body, plan, userId: req.auth!.userId, gymId: registration.gymId, renewal: false }, session);
     const cached = await PlanQuote.findOne({
       gymId: registration.gymId,
       purchaserId: req.auth!.userId,
       planId: plan._id,
       "planSnapshot.version": plan.version,
+      offerId: pricing.offerId || null,
+      "pricingSnapshot.offer.version": pricing.pricingSnapshot.offer?.version || { $exists: false },
       expiresAt: { $gt: new Date() },
     }).session(session);
     registration.selectedPlatformPlanId = plan._id;
@@ -133,10 +142,7 @@ export async function createPlatformQuote(req: Request, res: Response) {
             memberLimit: plan.memberLimit,
             staffLimit: plan.staffLimit,
           },
-          subtotalMinor: plan.priceMinor,
-          discountMinor: 0,
-          taxMinor: 0,
-          totalMinor: plan.priceMinor,
+          ...pricing,
           currency: plan.currency,
           expiresAt: new Date(Date.now() + 15 * 60000),
         },
@@ -172,7 +178,10 @@ export async function createOrder(req: Request, res: Response) {
       amountMinor: payment.amountMinor,
       currency: payment.currency,
       status: payment.status,
-      razorpayKeyId: env.RAZORPAY_KEY_ID,
+      razorpayKeyId:
+        payment.purpose === "MEMBERSHIP"
+          ? payment.beneficiarySnapshot?.merchantPublicToken
+          : env.RAZORPAY_PLATFORM_KEY_ID,
       prefill: {
         name: purchaser?.name,
         email: purchaser?.email,
@@ -218,7 +227,13 @@ async function reconcileGatewayPayment(
   payment: any,
   providerPaymentId: string,
 ) {
-  const entity = await paymentProvider.getPaymentStatus(providerPaymentId);
+  const entity = payment.purpose === "MEMBERSHIP" &&
+    payment.beneficiarySnapshot?.credentialType === "OAUTH_BEARER"
+      ? await (await gymOAuthClientForConnection(
+        String(payment.beneficiarySnapshot.paymentConnectionId),
+        String(payment.beneficiarySnapshot.merchantAccountId),
+      )).getPayment(providerPaymentId)
+    : await paymentProvider.getPaymentStatus(providerPaymentId);
   if (
     entity.id !== providerPaymentId ||
     entity.order_id !== payment.providerOrderId ||
@@ -232,8 +247,18 @@ async function reconcileGatewayPayment(
     );
   if (entity.status === "captured" || entity.status === "failed") {
     await acceptProviderEvent(
-      { event: `payment.${entity.status}`, payload: { payment: { entity } } },
+      {
+        event: `payment.${entity.status}`,
+        ...(payment.beneficiarySnapshot?.merchantAccountId
+          ? { account_id: payment.beneficiarySnapshot.merchantAccountId }
+          : {}),
+        payload: { payment: { entity } },
+      },
       `query:${entity.id}:${entity.status}`,
+      payment.purpose === "MEMBERSHIP" &&
+        payment.beneficiarySnapshot?.credentialType === "OAUTH_BEARER"
+        ? "OAUTH"
+        : "PLATFORM",
     );
   }
 }
@@ -245,13 +270,19 @@ export async function verifyCheckout(req: Request, res: Response) {
   });
   if (!payment || payment.providerOrderId !== req.body.providerOrderId)
     throw new AppError(404, "PAYMENT_NOT_FOUND", "Payment not found.");
-  if (
-    !paymentProvider.verifyCheckout({
+  const signatureValid = payment.purpose === "MEMBERSHIP" &&
+    payment.beneficiarySnapshot?.credentialType === "OAUTH_BEARER"
+    ? verifyOAuthCheckoutSignature({
+        orderId: req.body.providerOrderId,
+        paymentId: req.body.providerPaymentId,
+        signature: req.body.signature,
+      })
+    : paymentProvider.verifyCheckout({
       orderId: req.body.providerOrderId,
       paymentId: req.body.providerPaymentId,
       signature: req.body.signature,
-    })
-  )
+    });
+  if (!signatureValid)
     throw new AppError(
       401,
       "PAYMENT_SIGNATURE_INVALID",
@@ -338,6 +369,131 @@ export async function refundPayment(req: Request, res: Response) {
   });
 }
 
+function transferStatus(value: unknown) {
+  const status = String(value || "created").toUpperCase();
+  return [
+    "CREATED",
+    "PENDING",
+    "PROCESSED",
+    "FAILED",
+    "REVERSED",
+    "PARTIALLY_REVERSED",
+  ].includes(status)
+    ? status
+    : "PENDING";
+}
+
+function settlementStatus(value: unknown) {
+  const status = String(value || "pending").toUpperCase();
+  if (status === "ON_HOLD") return "ON_HOLD";
+  if (status === "SETTLED") return "SETTLED";
+  if (status === "FAILED") return "FAILED";
+  if (status === "PROCESSING") return "PROCESSING";
+  return "PENDING";
+}
+
+export async function reconcileRouteTransfer(entity: Record<string, any>) {
+  if (
+    !entity?.id ||
+    !entity?.recipient ||
+    !Number.isSafeInteger(Number(entity.amount)) ||
+    !entity.currency
+  )
+    throw new AppError(
+      422,
+      "TRANSFER_EVENT_INVALID",
+      "The Route transfer event is missing required financial details.",
+    );
+  let transfer = await RouteTransfer.findOne({
+    provider: "RAZORPAY",
+    environment: env.RAZORPAY_MODE.toUpperCase(),
+    providerTransferId: entity.id,
+  });
+  if (!transfer && entity.source) {
+    const payment = await Payment.findOne({
+      provider: "RAZORPAY",
+      providerOrderId: entity.source,
+      purpose: "MEMBERSHIP",
+    });
+    const snapshot = payment?.beneficiarySnapshot;
+    if (
+      payment &&
+      snapshot &&
+      snapshot.linkedAccountId === entity.recipient &&
+      snapshot.transferAmountMinor === Number(entity.amount) &&
+      payment.currency === entity.currency
+    ) {
+      transfer = await RouteTransfer.create({
+        publicId: nanoid(24),
+        paymentId: payment._id,
+        gymId: payment.gymId,
+        paymentConnectionId: snapshot.paymentConnectionId,
+        environment: env.RAZORPAY_MODE.toUpperCase(),
+        providerOrderId: payment.providerOrderId,
+        providerTransferId: entity.id,
+        linkedAccountId: entity.recipient,
+        beneficiaryMappingVersion: snapshot.mappingVersion,
+        amountMinor: entity.amount,
+        currency: entity.currency,
+        beneficiarySnapshot: snapshot,
+      });
+    }
+  }
+  if (!transfer)
+    throw new AppError(
+      409,
+      "TRANSFER_MAPPING_UNKNOWN",
+      "The Route transfer does not match a committed membership purchase.",
+    );
+  if (
+    transfer.linkedAccountId !== entity.recipient ||
+    transfer.amountMinor !== Number(entity.amount) ||
+    transfer.currency !== entity.currency
+  )
+    throw new AppError(
+      409,
+      "TRANSFER_DETAILS_MISMATCH",
+      "The Route transfer differs from the committed beneficiary snapshot.",
+    );
+  transfer.status = transferStatus(entity.status);
+  transfer.settlementStatus = settlementStatus(entity.settlement_status);
+  transfer.amountReversedMinor = Number(entity.amount_reversed || 0);
+  transfer.providerFeeMinor = Number(entity.fees || 0);
+  transfer.providerTaxMinor = Number(entity.tax || 0);
+  transfer.providerSettlementId = entity.recipient_settlement_id || undefined;
+  transfer.providerPaymentId = String(entity.source || "").startsWith("pay_")
+    ? entity.source
+    : transfer.providerPaymentId;
+  transfer.processedAt = entity.processed_at
+    ? new Date(Number(entity.processed_at) * 1000)
+    : transfer.processedAt;
+  if (transfer.settlementStatus === "SETTLED") transfer.settledAt ||= new Date();
+  transfer.errorCode = entity.error?.code || undefined;
+  transfer.errorDescription = entity.error?.description || undefined;
+  await transfer.save();
+  if (["REVERSED", "PARTIALLY_REVERSED"].includes(transfer.status)) {
+    const refunds = await Refund.find({
+      paymentId: transfer.paymentId,
+      transferReversalStatus: { $in: ["PENDING", "PROCESSED"] },
+      status: { $in: ["PROCESSING", "PROCESSED"] },
+    }).sort({ createdAt: 1 });
+    let covered = transfer.amountReversedMinor;
+    for (const refund of refunds) {
+      if (covered < refund.amountMinor) break;
+      covered -= refund.amountMinor;
+      if (refund.transferReversalStatus !== "PROCESSED") {
+        refund.transferReversalStatus = "PROCESSED";
+        await refund.save();
+      }
+    }
+  }
+  await Payment.updateOne(
+    { _id: transfer.paymentId },
+    { $set: { allocationStatus: transfer.status } },
+  );
+  return transfer;
+}
+
 async function processProviderEvent(
   providerEventId: mongoose.Types.ObjectId,
   payload: Record<string, any>,
@@ -350,11 +506,110 @@ async function processProviderEvent(
   await providerEvent.save();
 
   if (
+    [
+      "account.app.authorization_revoked",
+      "account.activated",
+      "account.under_review",
+      "account.needs_clarification",
+      "account.suspended",
+      "account.rejected",
+    ].includes(payload.event)
+  ) {
+    const merchantAccountId = String(payload.account_id || "");
+    const connection: any = merchantAccountId
+      ? await PaymentConnection.findOne({
+          provider: "RAZORPAY",
+          environment: env.RAZORPAY_MODE.toUpperCase(),
+          merchantAccountId,
+          connectionType: "OAUTH_MERCHANT",
+        }).select("+accessTokenCiphertext +refreshTokenCiphertext +tokenFingerprint")
+      : null;
+    if (!connection || providerEvent.sourceEndpoint !== "OAUTH") {
+      providerEvent.status = "PROCESSED";
+      providerEvent.lastError = "Signed account event did not match an OAuth merchant connection.";
+      providerEvent.processedAt = new Date();
+      await providerEvent.save();
+      return;
+    }
+    if (payload.event === "account.app.authorization_revoked") {
+      connection.authorizationStatus = "REVOKED";
+      connection.collectionEnabled = false;
+      connection.onboardingStatus = "ACTION_REQUIRED";
+      connection.revokedAt = new Date();
+      connection.accessTokenCiphertext = undefined;
+      connection.refreshTokenCiphertext = undefined;
+      connection.tokenFingerprint = undefined;
+    } else if (payload.event === "account.activated") {
+      connection.paymentEligibilityStatus = "ELIGIBLE";
+      connection.onboardingStatus = "PENDING";
+      connection.lastProviderStatus = "ACTIVATED";
+    } else {
+      connection.paymentEligibilityStatus = ["account.suspended", "account.rejected"].includes(payload.event)
+        ? "INELIGIBLE"
+        : "UNKNOWN";
+      connection.onboardingStatus = payload.event === "account.rejected" ? "REJECTED" : "ACTION_REQUIRED";
+      connection.collectionEnabled = false;
+      connection.lastProviderStatus = String(payload.event).replace("account.", "").toUpperCase();
+    }
+    connection.lastProviderSyncAt = new Date();
+    await connection.save({ validateBeforeSave: false });
+    providerEvent.status = "PROCESSED";
+    providerEvent.processedAt = new Date();
+    await providerEvent.save();
+    return;
+  }
+
+  if (
     ["refund.created", "refund.processed", "refund.failed"].includes(
       payload.event,
     )
   ) {
-    await reconcileRefundEvent(payload.event, payload.payload?.refund?.entity);
+    const refundEntity = payload.payload?.refund?.entity;
+    const original = refundEntity?.payment_id
+      ? await Payment.findOne({ providerPaymentId: refundEntity.payment_id })
+      : null;
+    const expectedSource = original?.purpose === "MEMBERSHIP" &&
+      original?.beneficiarySnapshot?.credentialType === "OAUTH_BEARER"
+      ? "OAUTH"
+      : "PLATFORM";
+    if (!original || providerEvent.sourceEndpoint !== expectedSource ||
+      (expectedSource === "OAUTH" && String(payload.account_id || "") !==
+        String(original.beneficiarySnapshot?.merchantAccountId || ""))) {
+      providerEvent.status = "PROCESSED";
+      providerEvent.lastError = "Signed refund event did not match the committed merchant context.";
+      providerEvent.processedAt = new Date();
+      await providerEvent.save();
+      return;
+    }
+    await reconcileRefundEvent(payload.event, refundEntity);
+    providerEvent.status = "PROCESSED";
+    providerEvent.processedAt = new Date();
+    await providerEvent.save();
+    return;
+  }
+
+  if (
+    ["transfer.created", "transfer.processed", "transfer.failed", "transfer.reversed"].includes(
+      payload.event,
+    )
+  ) {
+    await reconcileRouteTransfer(payload.payload?.transfer?.entity);
+    providerEvent.status = "PROCESSED";
+    providerEvent.processedAt = new Date();
+    await providerEvent.save();
+    return;
+  }
+
+  if (payload.event === "settlement.processed") {
+    const settlement = payload.payload?.settlement?.entity;
+    if (!settlement?.id)
+      throw new AppError(
+        422,
+        "SETTLEMENT_EVENT_INVALID",
+        "The settlement event is missing its provider identifier.",
+      );
+    const transfers = await paymentProvider.getTransfersForSettlement(settlement.id);
+    for (const transfer of transfers) await reconcileRouteTransfer(transfer);
     providerEvent.status = "PROCESSED";
     providerEvent.processedAt = new Date();
     await providerEvent.save();
@@ -365,7 +620,12 @@ async function processProviderEvent(
   const providerPaymentId = paymentEntity?.id;
   const providerOrderId = paymentEntity?.order_id;
   if (
-    !["payment.captured", "order.paid", "payment.failed"].includes(
+    ![
+      "payment.authorized",
+      "payment.captured",
+      "order.paid",
+      "payment.failed",
+    ].includes(
       payload.event,
     )
   ) {
@@ -381,8 +641,49 @@ async function processProviderEvent(
     );
   let payment = await Payment.findOne({ providerOrderId });
   if (!payment) {
-    providerEvent.status = "FAILED";
-    providerEvent.lastError = "Payment record not found";
+    // Application webhooks can legitimately contain unrelated merchant
+    // activity. Preserve the evidence without retrying or crediting a member.
+    providerEvent.status = "PROCESSED";
+    providerEvent.lastError = "Signed payment event did not match a GETFIT4U order.";
+    providerEvent.processedAt = new Date();
+    await providerEvent.save();
+    return;
+  }
+  const expectedSource = payment.purpose === "MEMBERSHIP" &&
+    payment.beneficiarySnapshot?.credentialType === "OAUTH_BEARER"
+    ? "OAUTH"
+    : "PLATFORM";
+  const expectedMerchant = payment.beneficiarySnapshot?.merchantAccountId;
+  if (
+    providerEvent.sourceEndpoint !== expectedSource ||
+    (expectedSource === "OAUTH" &&
+      (!payload.account_id || String(payload.account_id) !== String(expectedMerchant)))
+  ) {
+    providerEvent.status = "PROCESSED";
+    providerEvent.lastError = "Webhook merchant context did not match the committed purchase.";
+    providerEvent.processedAt = new Date();
+    await providerEvent.save();
+    return;
+  }
+
+  if (payload.event === "payment.authorized") {
+    if (
+      paymentEntity?.status !== "authorized" ||
+      Number(paymentEntity?.amount) !== payment.amountMinor ||
+      paymentEntity?.currency !== payment.currency
+    )
+      throw new AppError(
+        409,
+        "PAYMENT_DETAILS_MISMATCH",
+        "The authorized payment does not match the committed order.",
+      );
+    if (!["CAPTURED", "REFUNDED", "PARTIALLY_REFUNDED", "REFUND_PENDING"].includes(payment.status))
+      await Payment.updateOne(
+        { _id: payment._id, status: { $in: ["CREATED", "PENDING", "AUTHORIZED"] } },
+        { $set: { status: "AUTHORIZED", providerPaymentId } },
+      );
+    providerEvent.status = "PROCESSED";
+    providerEvent.processedAt = new Date();
     await providerEvent.save();
     return;
   }
@@ -462,6 +763,10 @@ async function processProviderEvent(
                 "REGISTRATION_PAYMENT_CONFLICT",
                 "Payment does not match this registration.",
               );
+            // Serialize with manual activation/collection before deciding which
+            // subscription this verified gateway receipt settles.
+            await Gym.updateOne({ _id: registration.gymId }, { $inc: { version: 1 } }, { session: dbSession });
+            if (await settleAuthorizedGatewayPayment(registration, payment, quote, dbSession)) return;
             const alreadyActive = await Subscription.findOne({
               type: "PLATFORM",
               gymId: registration.gymId,
@@ -611,6 +916,15 @@ async function processProviderEvent(
       } finally {
         await dbSession.endSession();
       }
+      await Payment.updateOne(
+        { _id: payment._id, status: "CAPTURED", subscriptionId: { $exists: true } },
+        { $set: { fulfillmentStatus: "APPLIED" } },
+      );
+      if (payment.purpose === "MEMBERSHIP" && payment.beneficiarySnapshot?.linkedAccountId)
+        await RouteTransfer.updateOne(
+          { paymentId: payment._id },
+          { $set: { providerPaymentId } },
+        );
     }
   } else if (
     payload.event === "payment.failed" &&
@@ -669,8 +983,15 @@ async function processProviderEvent(
   await providerEvent.save();
 }
 
-export async function razorpayWebhook(req: Request, res: Response) {
-  if (!env.RAZORPAY_WEBHOOK_SECRET) {
+async function handleRazorpayWebhook(
+  req: Request,
+  res: Response,
+  sourceEndpoint: "PLATFORM" | "OAUTH",
+) {
+  const webhookSecret = sourceEndpoint === "OAUTH"
+    ? env.RAZORPAY_OAUTH_WEBHOOK_SECRET
+    : env.RAZORPAY_PLATFORM_WEBHOOK_SECRET || env.RAZORPAY_WEBHOOK_SECRET;
+  if (!webhookSecret) {
     throw new AppError(
       503,
       "WEBHOOK_NOT_CONFIGURED",
@@ -679,27 +1000,43 @@ export async function razorpayWebhook(req: Request, res: Response) {
   }
   const signature = req.header("x-razorpay-signature") || "";
   const raw = req.body as Buffer;
-  if (!Buffer.isBuffer(raw) || !paymentProvider.verifyWebhook(raw, signature)) {
+  if (!Buffer.isBuffer(raw) || !verifyRazorpayWebhook(raw, signature, webhookSecret)) {
     throw new AppError(
       401,
       "INVALID_WEBHOOK_SIGNATURE",
       "Webhook signature validation failed.",
     );
   }
-  const payload = JSON.parse(raw.toString("utf8")) as Record<string, any>;
-  const eventKey =
-    req.header("x-razorpay-event-id") || sha256(raw.toString("utf8"));
-  res.status(200).json(await acceptProviderEvent(payload, eventKey));
+  let payload: Record<string, any>;
+  try {
+    payload = JSON.parse(raw.toString("utf8")) as Record<string, any>;
+  } catch {
+    throw new AppError(400, "WEBHOOK_JSON_INVALID", "Webhook payload is not valid JSON.");
+  }
+  const providerEventId = req.header("x-razorpay-event-id") || sha256(raw.toString("utf8"));
+  const eventKey = `${sourceEndpoint.toLowerCase()}:${providerEventId}`;
+  res.status(200).json(await acceptProviderEvent(payload, eventKey, sourceEndpoint));
 }
+
+export const razorpayPlatformWebhook = (req: Request, res: Response) =>
+  handleRazorpayWebhook(req, res, "PLATFORM");
+export const razorpayOAuthWebhook = (req: Request, res: Response) =>
+  handleRazorpayWebhook(req, res, "OAUTH");
+// Backward-compatible platform endpoint for already registered deliveries.
+export const razorpayWebhook = razorpayPlatformWebhook;
 
 async function acceptProviderEvent(
   payload: Record<string, any>,
   eventKey: string,
+  sourceEndpoint: "PLATFORM" | "OAUTH" | "RECONCILIATION" = "RECONCILIATION",
 ) {
   let event;
   try {
     event = await ProviderEvent.create({
       provider: "RAZORPAY",
+      sourceEndpoint,
+      environment: env.RAZORPAY_MODE.toUpperCase(),
+      merchantAccountId: payload.account_id,
       eventKey,
       eventType: payload.event,
       payloadHash: sha256(JSON.stringify(payload)),
@@ -709,6 +1046,13 @@ async function acceptProviderEvent(
   } catch (error: any) {
     if (error?.code === 11000) {
       event = await ProviderEvent.findOne({ provider: "RAZORPAY", eventKey });
+      const incomingHash = sha256(JSON.stringify(payload));
+      if (event && event.payloadHash !== incomingHash)
+        throw new AppError(
+          409,
+          "WEBHOOK_EVENT_ID_REUSED",
+          "This provider event identifier was already used for a different payload.",
+        );
       if (event?.status === "PROCESSED")
         return { success: true, duplicate: true };
       if (!event) throw error;

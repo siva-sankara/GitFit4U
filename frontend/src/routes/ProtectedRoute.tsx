@@ -9,7 +9,10 @@ export function ProtectedRoute({ children }: { children: ReactNode }) {
   const me = useSession();
   if (me.isPending)
     return <main className="state-card">Loading your account…</main>;
-  if (me.isError) {
+  // A successful login response seeds authoritative identity before routing.
+  // Keep rendering that identity if a background /auth/me refresh is
+  // temporarily unavailable; only an initial failure may replace the screen.
+  if (me.isError && !me.data) {
     if (me.error instanceof ApiError && me.error.status === 401)
       return (
         <Navigate

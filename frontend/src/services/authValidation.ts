@@ -10,6 +10,17 @@ export const phoneSchema = z.string().trim().max(20).refine(value => {
     : Boolean(parseIndianMobile(cleaned));
 }, "Enter a valid phone number, including country code outside India");
 export const localMobileSchema = z.string().regex(/^[0-9]{10}$/, "Enter a 10-digit mobile number.");
+export const otpIdentifierSchema = z
+  .string()
+  .trim()
+  .min(3, "Enter your email address or mobile number")
+  .max(160)
+  .refine(
+    value => value.includes("@")
+      ? z.string().email().safeParse(value).success
+      : phoneSchema.safeParse(value).success,
+    "Enter a valid email address or mobile number",
+  );
 // Parse only recognized Indian formatting. Never truncate or discard arbitrary text.
 export function parseIndianMobile(value: string): string | undefined {
   const text = value.trim();

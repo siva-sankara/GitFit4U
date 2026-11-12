@@ -13,7 +13,6 @@ import type { Server } from "socket.io";
 import { notificationEvents } from "./domainEventService.js";
 import { reminderStillCurrent } from "./membershipReminderService.js";
 import { classReminderStillCurrent } from "./classReminderService.js";
-import { withNotificationLinks } from "./notificationLinkService.js";
 const firebase = new FirebaseProvider();
 export function allowsPush(user: any, category: string) {
   return Boolean(
@@ -64,10 +63,6 @@ export async function deliverPush(notificationId?: string) {
       });
       return true;
     }
-    const [destination] = await withNotificationLinks([{
-      event: notification.event, gymId: notification.gymId,
-      metadata: notification.metadata, actionUrl: notification.actionUrl,
-    }]);
     const user = await User.findById(notification.userId)
       .select("status notificationPreferences")
       .lean();
@@ -143,10 +138,10 @@ export async function deliverPush(notificationId?: string) {
                 ]?.[2] ||
                 (notification.dedupeKey?.startsWith("campaign:")
                   ? "Open GETFIT4U to read your announcement."
-                  : notification.message),
+                  : "Open GETFIT4U to read your update."),
               data: {
                 notificationId: String(notification._id),
-                navigationPath: destination.actionUrl || "/notifications",
+                navigationPath: `/notification-open/${notification._id}`,
                 soundEnabled: currentUser.notificationPreferences?.sound === true ? "true" : "false",
               },
             });
@@ -185,7 +180,7 @@ export async function deliverPush(notificationId?: string) {
         pushNextAttemptAt: again
           ? new Date(Date.now() + 60000 * 2 ** (notification.pushAttempts - 1))
           : null,
-        ...(delivered.size ? { deliveredAt: new Date() } : {}),
+        ...(delivered.size ? { providerAcceptedAt: new Date() } : {}),
       },
       $unset: { pushLeaseId: 1, pushLeaseUntil: 1 },
     });

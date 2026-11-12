@@ -1,4 +1,6 @@
 import type { ClientSession } from "mongoose";
+import { normalizeWhatsAppRecipient } from "../utils/whatsappDeepLink.js";
+export { normalizeWhatsAppRecipient } from "../utils/whatsappDeepLink.js";
 import { nanoid } from "nanoid";
 import { env } from "../config/env.js";
 import { WhatsAppProvider } from "../integrations/messaging/whatsappProvider.js";
@@ -29,19 +31,6 @@ export type WhatsAppActor = {
   gymId?: string;
   permissions: string[];
 };
-
-export function normalizeWhatsAppRecipient(value: string) {
-  let digits = value.replace(/\D/g, "");
-  if (/^[6-9]\d{9}$/.test(digits)) digits = `91${digits}`;
-  else if (/^0[6-9]\d{9}$/.test(digits)) digits = `91${digits.slice(1)}`;
-  if (!/^\d{8,15}$/.test(digits))
-    throw new AppError(
-      422,
-      "WHATSAPP_PHONE_INVALID",
-      "A verified international phone number is required.",
-    );
-  return digits;
-}
 
 export function maskedWhatsAppPhone(value?: string) {
   const digits = value?.replace(/\D/g, "") || "";

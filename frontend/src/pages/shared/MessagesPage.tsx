@@ -1,5 +1,6 @@
 import { PageHeader } from "../../components/PageHeader";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { ListViewport } from "../../components/ListViewport";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
 import {
@@ -37,8 +38,10 @@ const path = (id: string) => "/api/v1/conversations/" + id;
 type ConversationScope = { conversationId: string };
 function InternalMessagesPage({
   supportOnly = false,
+  channels,
 }: {
   supportOnly?: boolean;
+  channels?: ReactNode;
 }) {
   const client = useQueryClient(),
     me = useCurrentUser(),
@@ -53,18 +56,19 @@ function InternalMessagesPage({
   const [page, setPage] = useState(1),
     [search, setSearch] = useState(""), [searchDraft, setSearchDraft] = useState("");
   const [archived, setArchived] = useState(false);
-  const [contactSearch, setContactSearch] = useState(""), [contactQuery, setContactQuery] = useState(""), [contactPage, setContactPage] = useState(1), [contactOpen, setContactOpen] = useState(false);
+  const [contactPage, setContactPage] = useState(1);
   useEffect(() => {
-    const timer = setTimeout(() => { setContactQuery(contactSearch.trim()); setContactPage(1); setRecipient(""); }, 300);
-    return () => clearTimeout(timer);
-  }, [contactSearch]);
-  useEffect(() => {
-    const timer = setTimeout(() => { setSearch(searchDraft.trim()); setPage(1); }, 300);
+    const timer = setTimeout(() => { setSearch(searchDraft.trim()); setPage(1); setContactPage(1); }, 300);
     return () => clearTimeout(timer);
   }, [searchDraft]);
+  // Phone numbers pasted with spaces or punctuation still match stored numbers.
+  const searchQuery = !supportOnly && /^[+\d\s().-]+$/.test(search)
+    ? search.replace(/[\s().-]/g, "")
+    : search;
+  const searchSettled = searchDraft.trim() === search;
+  const showContacts = !supportOnly && searchQuery.length >= 2 && searchSettled;
   const [active, setActive] = useState(params.get("conversation") || "");
-  const [text, setText] = useState(""),
-    [recipient, setRecipient] = useState("");
+  const [text, setText] = useState("");
   const [subject, setSubject] = useState(""),
     [description, setDescription] = useState("");
   const [older, setOlder] = useState<Row[]>([]),
@@ -90,7 +94,7 @@ function InternalMessagesPage({
     draftId.current = crypto.randomUUID();
   }
   const conversations = useQuery({
-    queryKey: ["conversations", supportOnly, page, archived, search],
+    queryKey: ["conversations", supportOnly, page, archived, searchQuery],
     queryFn: () =>
       apiRequest<ApiEnvelope<Row[]>>(
         "/api/v1/conversations?page=" +
@@ -98,14 +102,14 @@ function InternalMessagesPage({
           "&limit=10" +
           (archived ? "&archived=true" : "") +
           (supportOnly ? "&type=SUPPORT" : "") +
-          (search ? "&q=" + encodeURIComponent(search) : ""),
+          (searchQuery ? "&q=" + encodeURIComponent(searchQuery) : ""),
       ),
     refetchInterval: 10000,
   });
   const contacts = useQuery({
-    queryKey: ["conversation-contacts", me.data?.data.context?.role, me.data?.data.context?.gymId, contactQuery, contactPage],
-    enabled: !supportOnly && contactOpen && (contactQuery.length === 0 || contactQuery.length >= 2),
-    queryFn: () => apiRequest<ApiEnvelope<Row[]>>("/api/v1/conversations/contacts?q=" + encodeURIComponent(contactQuery) + "&page=" + contactPage + "&limit=10"),
+    queryKey: ["conversation-contacts", userId, me.data?.data.context?.role, me.data?.data.context?.gymId, searchQuery, contactPage],
+    enabled: showContacts,
+    queryFn: ({ signal }) => apiRequest<ApiEnvelope<Row[]>>("/api/v1/conversations/contacts?q=" + encodeURIComponent(searchQuery) + "&page=" + contactPage + "&limit=10", { signal }),
   });
   const details = useQuery({
     queryKey: ["conversation", active],
@@ -135,15 +139,20 @@ function InternalMessagesPage({
       void client.invalidateQueries({ queryKey: key });
   }
   const create = useMutation({
-    mutationFn: () =>
+    mutationFn: ({ recipientId }: { recipientId: string; scope: ConversationScope }) =>
       apiRequest<ApiEnvelope<Row>>("/api/v1/conversations", {
         method: "POST",
-        body: JSON.stringify({ participantIds: [recipient], type: "DIRECT" }),
+        body: JSON.stringify({ participantIds: [recipientId], type: "DIRECT" }),
       }),
-    onSuccess: (result) => {
+    onSuccess: (result, input) => {
+      refresh(result.data.publicId);
+      if (input.scope !== scope.current) return;
       open(result.data.publicId);
-      setRecipient("");
-      refresh();
+      setSearchDraft("");
+      setSearch("");
+      setPage(1);
+      setContactPage(1);
+      setArchived(false);
     },
   });
   const createSupport = useMutation({
@@ -319,12 +328,9 @@ function InternalMessagesPage({
   function contactPhone(row?: Row) {
     return row?.type === "DIRECT" ? row.participants?.find((person: Row) => String(person._id) !== String(userId))?.phone : undefined;
   }
-  const visible =
-    conversations.data?.data.filter((row) =>
-      (name(row) + " " + (row.gymId?.name || ""))
-        .toLowerCase()
-        .includes(search.toLowerCase()),
-    ) || [];
+  // The server searches names, phones, email and gym names before pagination.
+  // Filtering the returned page by display name would discard phone matches.
+  const visible = conversations.data?.data || [];
   const errors = [
     send,
     upload,
@@ -340,13 +346,13 @@ function InternalMessagesPage({
     <div className="page-stack messaging-page">
       <PageHeader>
         <div>
-          {returnTo && (
+          {/* {returnTo && (
             <BackIconLink
               to={returnTo}
               label={sourceState?.returnLabel || "Back"}
             />
-          )}
-          <span className="eyebrow">Communication</span>
+          )} */}
+          {/* <span className="eyebrow">Communication</span> */}
           <h1>{supportOnly ? "Support conversations" : "Messages"}</h1>
           <p>
             {supportOnly
@@ -354,19 +360,15 @@ function InternalMessagesPage({
               : "Stay in touch with your gym and training team."}
           </p>
         </div>
+        {channels}
       </PageHeader>
       {notice && (
         <p role="status" className="chat-notice">
           {notice}
         </p>
       )}
-      <details className="chat-start panel" onToggle={event => setContactOpen(event.currentTarget.open)}>
-        <summary>
-          {supportOnly
-            ? "Start a support conversation"
-            : "Start a conversation"}
-        </summary>
-        {supportOnly ? (
+      {supportOnly && <details className="chat-start panel">
+        <summary>Start a support conversation</summary>
           <form
             onSubmit={(event) => {
               event.preventDefault();
@@ -413,54 +415,7 @@ function InternalMessagesPage({
               <p role="alert">{createSupport.error.message}</p>
             )}
           </form>
-        ) : (
-          <form
-            onSubmit={(event) => {
-              event.preventDefault();
-              create.mutate();
-            }}
-          >
-            <label className="field">
-              <span>Find a contact</span>
-              <input className="input" value={contactSearch} maxLength={80}
-                placeholder={admin ? "Name, phone, email or gym name" : "Search your gym contacts"}
-                onChange={event => setContactSearch(event.target.value)} />
-              {contactQuery.length === 1 && <small>Enter at least two characters to search.</small>}
-            </label>
-            <label className="field">
-              <span>Contact</span>
-              <select
-                className="select"
-                required
-                value={recipient}
-                onChange={(event) => setRecipient(event.target.value)}
-              >
-                <option value="">Choose a contact</option>
-                {contacts.data?.data.map((row) => (
-                  <option key={row._id} value={row._id}>
-                    {(row.name || row.publicId) + (row.phone ? " · " + row.phone : "")}
-                  </option>
-                ))}
-              </select>
-            </label>
-            {contacts.isFetching && <span role="status">Finding contacts…</span>}
-            {!contacts.isPending && !contacts.isError && !contacts.data?.data.length && contactQuery.length !== 1 && <p>No eligible contacts found.</p>}
-            <div className="chat-contact-pagination">
-              <button type="button" className="btn btn-secondary" aria-label="Previous contacts" disabled={contactPage <= 1 || contacts.isFetching} onClick={() => { setContactPage(value => value - 1); setRecipient(""); }}>Previous</button>
-              <span>Page {contactPage} of {Math.max(1, contacts.data?.meta?.pages || 1)}</span>
-              <button type="button" className="btn btn-secondary" aria-label="Next contacts" disabled={contactPage >= (contacts.data?.meta?.pages || 1) || contacts.isFetching} onClick={() => { setContactPage(value => value + 1); setRecipient(""); }}>Next</button>
-            </div>
-            <button
-              className="btn btn-primary"
-              disabled={!recipient || create.isPending}
-            >
-              Open conversation
-            </button>
-            {create.isError && <p role="alert">{create.error.message}</p>}
-            {contacts.isError && <p role="alert">{contacts.error.message}</p>}
-          </form>
-        )}
-      </details>
+      </details>}
       <section
         className={
           "message-shell panel modern-chat" + (active ? " has-selection" : "")
@@ -498,15 +453,47 @@ function InternalMessagesPage({
           </div>
           <input
             className="input"
-            aria-label="Search conversations"
-            placeholder="Search conversations"
+            type="search"
+            maxLength={80}
+            aria-label={supportOnly ? "Search conversations" : "Search contacts and conversations"}
+            aria-describedby={!supportOnly ? "chat-search-hint" : undefined}
+            placeholder={supportOnly ? "Search conversations" : "Search name or phone number"}
             value={searchDraft}
-            onChange={(event) => setSearchDraft(event.target.value)}
+            onChange={(event) => { setSearchDraft(event.target.value); if (!create.isPending) create.reset(); }}
           />
-          <div className="conversation-scroll">
+          {/* {!supportOnly && <p className="chat-search-hint" id="chat-search-hint">
+            Search with at least 2 characters to find a contact and message them.
+          </p>} */}
+          <ListViewport className="conversation-scroll" label="Conversation list" resetKey={`${page}:${contactPage}:${archived}:${search}`}>
+            {!supportOnly && !searchSettled && searchDraft.trim().length >= 2 && <p className="chat-search-status" role="status">Searching contacts…</p>}
+            {showContacts && <section className="chat-contact-results" aria-label="Matching contacts" aria-busy={contacts.isFetching}>
+              <h2 className="chat-results-heading">Contacts</h2>
+              {contacts.isPending ? <p className="chat-search-status" role="status">Searching contacts…</p>
+                : contacts.isError ? <div className="chat-search-status" role="alert">
+                    <p>{contacts.error.message}</p>
+                    <button type="button" className="btn btn-secondary" onClick={() => void contacts.refetch()}>Retry contact search</button>
+                  </div>
+                : contacts.data?.data.length ? contacts.data.data.map((contact) => (
+                  <div className="chat-contact-result" key={contact._id}>
+                    <Avatar user={contact} name={contact.name || contact.publicId} size={32} />
+                    <div className="conversation-copy">
+                      <strong title={contact.name || contact.publicId}>{contact.name || contact.publicId}</strong>
+                      {contact.phone && <small className="chat-contact-phone" title={contact.phone}>{contact.phone}</small>}
+                      {contact.email && <small title={contact.email}>{contact.email}</small>}
+                    </div>
+                    <button type="button" className="btn btn-secondary" aria-label={`Message ${contact.name || contact.publicId}${contact.phone ? " at " + contact.phone : ""}`}
+                      disabled={create.isPending} onClick={() => create.mutate({ recipientId: contact._id, scope: scope.current })}>
+                      {create.isPending && create.variables?.recipientId === contact._id ? "Opening…" : "Message"}
+                    </button>
+                  </div>
+                )) : <p className="chat-search-status">No matching contacts found.</p>}
+              {create.isError && create.variables?.scope === scope.current && <p className="chat-search-status" role="alert">{create.error.message}</p>}
+            </section>}
+            {search && <h2 className="chat-results-heading">{archived ? "Archived conversations" : "Conversations"}</h2>}
             <QueryState query={conversations}>
               {visible.map((row) => (
                 <button
+                  type="button"
                   key={row.publicId}
                   className={
                     "conversation" + (active === row.publicId ? " active" : "")
@@ -529,14 +516,14 @@ function InternalMessagesPage({
                             String(person._id) !== String(userId),
                         )}
                         name={name(row)}
-                        size={40}
+                        size={34}
                       />
                     )}
                   </span>
                   <span className="conversation-copy">
-                    <strong>{name(row)}</strong>
-                    {contactPhone(row) && <small className="chat-contact-phone">{contactPhone(row)}</small>}
-                    <small>
+                    <strong title={name(row)}>{name(row)}</strong>
+                    {contactPhone(row) && <small className="chat-contact-phone" title={contactPhone(row)}>{contactPhone(row)}</small>}
+                    <small title={row.lastMessageId?.deletedAt ? "Message deleted" : row.lastMessageId?.text || "Start the conversation"}>
                       {row.lastMessageId?.deletedAt
                         ? "Message deleted"
                         : row.lastMessageId?.text || "Start the conversation"}
@@ -548,7 +535,7 @@ function InternalMessagesPage({
                     )}
                   </span>
                   <span className="conversation-meta">
-                    <time dateTime={row.lastMessageAt}>
+                    <time dateTime={row.lastMessageAt} title={row.lastMessageAt ? date(row.lastMessageAt) : undefined}>
                       {row.lastMessageAt
                         ? new Date(row.lastMessageAt).toLocaleDateString(
                             undefined,
@@ -575,7 +562,14 @@ function InternalMessagesPage({
                 </div>
               )}
             </QueryState>
-          </div>
+          </ListViewport>
+          {showContacts && (contacts.data?.meta?.pages || 1) > 1 && !contacts.isError && (
+            <div className="chat-pagination" aria-label="Contact pages">
+              <button type="button" className="btn btn-secondary" aria-label="Previous contacts" disabled={contactPage <= 1 || contacts.isFetching} onClick={() => setContactPage(value => value - 1)}>Previous</button>
+              <span>Contacts {contactPage} / {contacts.data?.meta?.pages}</span>
+              <button type="button" className="btn btn-secondary" aria-label="Next contacts" disabled={contactPage >= (contacts.data?.meta?.pages || 1) || contacts.isFetching} onClick={() => setContactPage(value => value + 1)}>Next</button>
+            </div>
+          )}
           <div className="chat-pagination">
             <button
               className="btn btn-secondary"
@@ -585,7 +579,7 @@ function InternalMessagesPage({
               Previous
             </button>
             <span>
-              {page} / {Math.max(1, conversations.data?.meta?.pages || 1)}
+              {showContacts ? "Chats " : ""}{page} / {Math.max(1, conversations.data?.meta?.pages || 1)}
             </span>
             <button
               className="btn btn-secondary"
@@ -612,13 +606,15 @@ function InternalMessagesPage({
                   onClick={() => open("")}
                 />
                 <div className="chat-heading">
-                  <strong>{name(current)}</strong>
-                  {contactPhone(current) && <small className="chat-contact-phone">{contactPhone(current)}</small>}
-                  <small>
+                  <strong title={name(current)}>{name(current)}</strong>
+                  <div className="chat-heading-meta">
+                  {contactPhone(current) && <small className="chat-contact-phone" title={contactPhone(current)}>{contactPhone(current)}</small>}
+                  <small title={ticket ? "Support · " + ticket.status.replaceAll("_", " ") : current?.gymId?.name || "Private conversation"}>
                     {ticket
                       ? "Support · " + ticket.status.replaceAll("_", " ")
                       : current?.gymId?.name || "Private conversation"}
                   </small>
+                  </div>
                 </div>
                 <button
                   className="btn btn-secondary"
@@ -679,6 +675,7 @@ function InternalMessagesPage({
                 role="log"
                 aria-label="Message history"
                 aria-live="polite"
+                tabIndex={0}
               >
                 {details.isError && <p role="alert">{details.error.message}</p>}
                 <QueryState query={messages}>
@@ -944,11 +941,20 @@ export function MessagesPage({ supportOnly = false }: { supportOnly?: boolean })
     (permissions.includes("member:read") || permissions.includes("admin:platform"));
   if (!businessInbox) return <InternalMessagesPage supportOnly={supportOnly} />;
   const channel = params.get("channel") === "whatsapp" ? "whatsapp" : "internal";
-  return <div className="page-stack">
-    <nav className="message-channel-tabs" aria-label="Message channels">
+  const channels = (
+    <nav className="message-channel-tabs heading-actions" aria-label="Message channels">
       <Link to="?channel=internal" aria-current={channel === "internal" ? "page" : undefined}>In-app messages</Link>
+      {role === "GYM_OWNER" && <Link to="/owner/whatsapp">WhatsApp Messaging</Link>}
       <Link to="?channel=whatsapp" aria-current={channel === "whatsapp" ? "page" : undefined}>WhatsApp Business</Link>
     </nav>
-    {channel === "whatsapp" ? <><details className="panel"><summary>WhatsApp sender settings</summary><WhatsAppConnectionSettings /></details><WhatsAppInbox /></> : <InternalMessagesPage />}
+  );
+  if (channel === "internal") return <InternalMessagesPage channels={channels} />;
+  return <div className="page-stack messaging-page">
+    <PageHeader>
+      <div><h1>Messages</h1><p>Manage your WhatsApp Business conversations.</p></div>
+      {channels}
+    </PageHeader>
+    <details className="panel chat-start"><summary>WhatsApp sender settings</summary><WhatsAppConnectionSettings /></details>
+    <WhatsAppInbox />
   </div>;
 }

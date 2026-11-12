@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { MoreVertical, Trash2 } from "lucide-react";
@@ -17,6 +18,10 @@ export function MemberMoreActions({
   canReadFinance: boolean;
 }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const popoverId = useId();
   const client = useQueryClient();
   const app = useOptionalApp();
   const name = member.contact?.name || member.userId?.name || "member";
@@ -34,39 +39,99 @@ export function MemberMoreActions({
       void client.invalidateQueries({ queryKey: ["api"] });
     },
   });
+
+  // Render outside the scrolling table so every row's actions remain reachable.
+  useLayoutEffect(() => {
+    if (!open || !triggerRef.current || !popoverRef.current) return;
+    const trigger = triggerRef.current.getBoundingClientRect();
+    const popover = popoverRef.current;
+    const height = popover.getBoundingClientRect().height;
+    const below = window.innerHeight - trigger.bottom - 8;
+    const above = trigger.top - 8;
+    const showAbove = height > below && above > below;
+    const available = Math.max(0, showAbove ? above : below);
+    popover.style.maxHeight = `${available}px`;
+    popover.style.top = `${showAbove ? Math.max(8, trigger.top - Math.min(height, available) - 4) : trigger.bottom + 4}px`;
+    popover.style.left = `${Math.max(8, Math.min(trigger.right - popover.offsetWidth, window.innerWidth - popover.offsetWidth - 8))}px`;
+    popover.querySelector<HTMLElement>("a, button:not(:disabled)")?.focus();
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const outside = (event: Event) => {
+      if (event.target instanceof Node && !triggerRef.current?.contains(event.target) && !popoverRef.current?.contains(event.target))
+        setOpen(false);
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setOpen(false);
+      triggerRef.current?.focus();
+    };
+    const scroll = (event: Event) => {
+      if (event.target instanceof Node && popoverRef.current?.contains(event.target)) return;
+      setOpen(false);
+    };
+    const resize = () => setOpen(false);
+    document.addEventListener("pointerdown", outside);
+    document.addEventListener("focusin", outside);
+    document.addEventListener("keydown", escape);
+    window.addEventListener("scroll", scroll, true);
+    window.addEventListener("resize", resize);
+    return () => {
+      document.removeEventListener("pointerdown", outside);
+      document.removeEventListener("focusin", outside);
+      document.removeEventListener("keydown", escape);
+      window.removeEventListener("scroll", scroll, true);
+      window.removeEventListener("resize", resize);
+    };
+  }, [open]);
   return <>
-    <details className="member-more-menu">
-      <summary
+      <button
+        ref={triggerRef}
+        type="button"
         className="member-row-more"
         aria-label={`More actions for ${name}`}
+        aria-expanded={open}
+        aria-controls={open ? popoverId : undefined}
         title="More actions"
+        onClick={() => setOpen((current) => !current)}
       >
         <MoreVertical size={19} aria-hidden="true" />
-      </summary>
-      <div className="member-more-popover" role="menu" aria-label={`Actions for ${name}`}>
-        <Link role="menuitem" to={details}>
+      </button>
+      {open && createPortal(<div
+        ref={popoverRef}
+        id={popoverId}
+        className="member-more-popover"
+        role="group"
+        aria-label={`Actions for ${name}`}
+        onClick={(event) => {
+          if (event.target instanceof Element && event.target.closest("a")) setOpen(false);
+        }}
+      >
+        <Link to={details}>
           {canManage ? "View / edit member" : "View member"}
         </Link>
         {canManage && (
-          <Link role="menuitem" to={`${details}#member-membership`}>
+          <Link to={`${details}#member-membership`}>
             {member.assignedTrainerId ? "Change trainer" : "Assign trainer"}
           </Link>
         )}
-        <Link role="menuitem" to={`${details}#member-membership`}>
+        <Link to={`${details}#member-membership`}>
           Membership details
         </Link>
         {canReadFinance && (
-          <Link role="menuitem" to={`${details}#member-payments`}>
+          <Link to={`${details}#member-payments`}>
             Payment history
           </Link>
         )}
         {canManage && member.status !== "ARCHIVED" && (
-          <Link role="menuitem" to={`${details}#member-membership`}>
+          <Link to={`${details}#member-membership`}>
             Deactivate or manage access
           </Link>
         )}
         {member.invitation?.status === "PENDING" && canManage && (
-          <div className="member-more-invitation" role="menuitem">
+          <div className="member-more-invitation">
             <MemberInvitationStatus member={member} canManage actionOnly />
           </div>
         )}
@@ -74,15 +139,17 @@ export function MemberMoreActions({
           <button
             type="button"
             className="member-remove-action"
-            role="menuitem"
-            onClick={() => setConfirmDelete(true)}
+            onClick={() => {
+              triggerRef.current?.focus();
+              setOpen(false);
+              setConfirmDelete(true);
+            }}
           >
             <Trash2 size={16} aria-hidden="true" />
             Remove member record
           </button>
         )}
-      </div>
-    </details>
+      </div>, document.body)}
     <Modal
       open={confirmDelete}
       title={`Remove ${name}?`}

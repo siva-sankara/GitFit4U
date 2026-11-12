@@ -23,6 +23,8 @@ const req = (query: object = {}, permissions = ["member:read"]) =>
     auth: { gymId, role: "GYM_OWNER", permissions },
   }) as any;
 beforeEach(() => {
+  vi.spyOn(Gym, "findOne").mockReturnValue(chain({ name: "Gym A", timezone: "Asia/Kolkata", ownerId: { name: "Owner A" } }));
+  vi.spyOn(MemberProfile, "distinct").mockResolvedValue(["account-a"]);
   vi.spyOn(Gym, "findById").mockReturnValue(
     chain({ timezone: "Asia/Kolkata" }),
   );
@@ -36,6 +38,21 @@ beforeEach(() => {
   vi.spyOn(User, "distinct").mockResolvedValue([]);
 });
 afterEach(() => vi.restoreAllMocks());
+it("reuses filters and pagination for the owner-only messaging view and searches gym plan names", async () => {
+  const res = response();
+  await listMembers({ ...req({ view: "messaging", q: "Gold", page: "2", limit: "25", gymId: "gym-b" }), auth: { ...req().auth, userId: "owner-a" } }, res);
+  expect(Gym.findOne).toHaveBeenCalledWith({ _id: gymId, ownerId: "owner-a", deletedAt: null });
+  expect(User.distinct).toHaveBeenCalledWith("_id", expect.objectContaining({ _id: { $in: ["account-a"] } }));
+  expect(Subscription.distinct).toHaveBeenCalledWith("_id", { gymId, type: "GYM_MEMBERSHIP", "planSnapshot.name": /Gold/i });
+  expect(MemberProfile.find).toHaveBeenCalledWith(expect.objectContaining({ gymId, $or: expect.arrayContaining([{ currentSubscriptionId: { $in: ["subscription-id"] } }]) }));
+  expect(res.json.mock.calls[0][0].meta).toMatchObject({ page: 2, limit: 25, gymName: "Gym A", ownerName: "Owner A", timezone: "Asia/Kolkata" });
+  expect(Payment.distinct).not.toHaveBeenCalled();
+});
+it("rejects messaging access to another owner's gym before retrieving members", async () => {
+  vi.mocked(Gym.findOne).mockReturnValue(chain(null));
+  await expect(listMembers(req({ view: "messaging" }), response())).rejects.toMatchObject({ statusCode: 403 });
+  expect(MemberProfile.find).not.toHaveBeenCalled();
+});
 it("applies plan and trainer filters on the backend within the authorized gym", async () => {
   await listMembers(
     req({ planId: "gold-public", trainerId: "507f1f77bcf86cd799439012" }),

@@ -1,6 +1,6 @@
 import { PageHeader } from "../../components/PageHeader";
 import { BackIconLink } from "../../components/BackIconControl";
-import { lazy, Suspense, useState } from "react";
+import { Suspense, useState } from "react";
 import { Link, Navigate, useLocation } from "react-router-dom";
 import { QrCode } from "lucide-react";
 import {
@@ -18,6 +18,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useCurrentUser } from "../../api/hooks";
 import { Modal } from "../../components/Modal";
 import { Avatar } from "../../components/Avatar";
+import { PaymentPricing } from "../../components/PaymentPricing";
 import { apiRequest, setAccessToken } from "../../services/apiClient";
 import {
   useData,
@@ -44,6 +45,7 @@ import { ProfileHub } from "../user/ProfileHub";
 import { AttendancePage, StreakKpi } from "../user/AttendancePage";
 import { InvoiceDownload } from "../../components/InvoiceDownload";
 import { OwnerPaymentActions } from "../../components/OwnerPaymentActions";
+import { PaymentRecordsTable } from "../../components/PaymentRecordsTable";
 import { PromotionPlacement } from "../../components/PromotionPlacement";
 import { PromotionManagement } from "../promotions/PromotionManagement";
 import { RegisterGymPage } from "../public/RegisterGymPage";
@@ -63,34 +65,45 @@ import {
   GymStatusAction,
 } from "../admin/AdminManagement";
 import { StatusBadge } from "../../components/StatusBadge";
+import { lazyWithRetry } from "../../services/lazyWithRetry";
 import "../../styles/member-workspace.css";
 
-const OwnerDashboardPage = lazy(() =>
+const OwnerDashboardPage = lazyWithRetry("owner-dashboard", () =>
   import("../owner/OwnerDashboardPage").then((module) => ({
     default: module.OwnerDashboardPage,
   })),
 );
-const RevenuePage = lazy(() =>
+const RevenuePage = lazyWithRetry("owner-revenue", () =>
   import("../owner/RevenuePage").then((module) => ({
     default: module.RevenuePage,
   })),
 );
-const AdminBroadcastPage = lazy(() =>
+const AdminBroadcastPage = lazyWithRetry("admin-broadcast", () =>
   import("../shared/AdminBroadcastPage").then((module) => ({
     default: module.AdminBroadcastPage,
   })),
 );
-const OwnerScannerPage = lazy(() =>
+const OwnerWhatsAppMessagingPage = lazyWithRetry("owner-whatsapp-messaging", () =>
+  import("../owner/OwnerWhatsAppMessagingPage").then(module => ({ default: module.OwnerWhatsAppMessagingPage })),
+);
+const AdminPaymentConnectionsPage = lazyWithRetry(
+  "admin-payment-connections",
+  () =>
+    import("../admin/AdminPaymentConnectionsPage").then((module) => ({
+      default: module.AdminPaymentConnectionsPage,
+    })),
+);
+const OwnerScannerPage = lazyWithRetry("owner-gym-qr", () =>
   import("../owner/OwnerScannerPage").then((module) => ({
     default: module.OwnerScannerPage,
   })),
 );
-const SocialProfilePage = lazy(() =>
+const SocialProfilePage = lazyWithRetry("social-profile", () =>
   import("../user/SocialProfilePage").then((module) => ({
     default: module.SocialProfilePage,
   })),
 );
-const AttendanceQrPage = lazy(() =>
+const AttendanceQrPage = lazyWithRetry("attendance-scanner", () =>
   import("../user/AttendanceQrPage").then((module) => ({
     default: module.AttendanceQrPage,
   })),
@@ -133,7 +146,7 @@ const paymentCols = [
   col("publicId", "Reference"),
   col("payerId.name", "Payer"),
   col("purpose", "Purpose", "status"),
-  col("amountMinor", "Amount", "money"),
+  { ...col("amountMinor", "Amount", "money"), render: (row: Row) => <PaymentPricing payment={row} /> },
   status,
   created,
 ];
@@ -760,13 +773,15 @@ export function LiveWorkspace() {
   }
   if (
     ["owner", "admin"].includes(role) &&
-    (page === "offers" || page === "ads")
+    (page === "offers" || page === "ads" || (role === "admin" && page === "platform-offers"))
   )
     return <PromotionManagement kind={page} admin={role === "admin"} />;
   if (page === "security") return <Security />;
   if (role === "admin") {
     if (page === "settings") return <AdminSettings />;
     if (page === "broadcasts") return <AdminBroadcastPage />;
+    if (page === "payment-connections")
+      return <AdminPaymentConnectionsPage />;
     if (page === "notification-delivery")
       return (
         <ResourcePage
@@ -776,7 +791,7 @@ export function LiveWorkspace() {
             col("userId.name", "Recipient"),
             col("title", "Title"),
             col("category", "Category"),
-            col("pushStatus", "Push delivery", "status"),
+            { key: "pushStatus", title: "Push delivery", render: (row: Row) => row.openedAt ? "Opened" : row.pushStatus === "SENT" ? "Accepted by provider" : label(row.pushStatus) },
             col("createdAt", "Created", "date"),
           ]}
           actions={(row) =>
@@ -800,6 +815,7 @@ export function LiveWorkspace() {
       return <AdminMemberships />;
   }
   if (role === "owner") {
+    if (page === "whatsapp") return <OwnerWhatsAppMessagingPage />;
     if (page === "members" && path[2])
       return <OwnerMemberDetailsPage id={path[2]} />;
     if (page === "members") return <OwnerMembersPage />;
@@ -942,22 +958,14 @@ export function LiveWorkspace() {
       <ResourcePage
         title={label(page)}
         resource={page}
-        actions={
-          page === "payments"
-            ? (row) => (
-                <>
-                  {role === "owner" ? (
-                    <OwnerPaymentActions payment={row} />
-                  ) : (
-                    <InvoiceDownload
-                      payment={row as { publicId: string; status: string }}
-                    />
-                  )}
-                  {role === "admin" && <RefundAction payment={row} />}
-                </>
-              )
-            : undefined
-        }
+        className={page === "payments" ? "payments-page" : undefined}
+        description={page === "payments" ? "Review payments, manage collections and access receipts." : undefined}
+        searchPlaceholder={page === "payments" ? "Search payer or payment reference" : undefined}
+        statuses={page === "payments" ? ["CREATED", "PENDING", "AUTHORIZED", "CAPTURED", "FAILED", "CANCELLED", "PARTIALLY_REFUNDED", "REFUNDED", "REFUND_PENDING", "DISPUTED"] : undefined}
+        renderTable={page === "payments" ? (rows, resetKey) => <PaymentRecordsTable rows={rows} resetKey={resetKey} actions={row => <>
+          {role === "owner" ? <OwnerPaymentActions payment={row} compact /> : <InvoiceDownload payment={row as { publicId: string; status: string }} compact />}
+          {role === "admin" && <RefundAction payment={row} />}
+        </>} /> : undefined}
         columns={
           page === "payments"
             ? role === "owner"
@@ -1031,7 +1039,7 @@ export function LiveWorkspace() {
         />
       );
     if (page === "classes") return <OwnerClassManagement />;
-    if (page === "campaigns" || page === "whatsapp")
+    if (page === "campaigns")
       return (
         <ResourcePage
           title="Campaigns"

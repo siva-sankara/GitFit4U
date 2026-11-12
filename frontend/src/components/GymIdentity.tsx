@@ -34,7 +34,7 @@ export function GymIdentity({
       </span>
       <span className="gym-identity-copy">
         <strong title={name}>{name}</strong>
-        {subtitle && <small>{subtitle}</small>}
+        {subtitle && <small title={subtitle}>{subtitle}</small>}
       </span>
     </span>
   );

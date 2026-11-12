@@ -84,7 +84,7 @@ export async function confirmPhoneChange(req: Request, res: Response) {
       );
     await User.updateOne(
       { _id: req.auth!.userId },
-      { $set: { phone: change.phone }, $inc: { version: 1 } },
+      { $set: { phone: change.phone, phoneVerifiedAt: new Date() }, $inc: { version: 1 } },
       { session, runValidators: true },
     );
     await AuthIdentity.updateOne(
@@ -169,7 +169,7 @@ export async function changeEmail(req: Request, res: Response) {
       );
     await User.updateOne(
       { _id: req.auth!.userId },
-      { $set: { email }, $inc: { version: 1 } },
+      { $set: { email, emailVerifiedAt: new Date() }, $inc: { version: 1 } },
       { session, runValidators: true },
     );
     await AuthIdentity.updateOne(

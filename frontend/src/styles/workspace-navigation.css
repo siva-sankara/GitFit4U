@@ -147,6 +147,9 @@
   .sidebar-logout {
     padding-inline: 0;
   }
+  .sidebar-access > strong {
+    display: none;
+  }
 }
 @media (max-width: 767px) {
   .topbar-profile > strong {

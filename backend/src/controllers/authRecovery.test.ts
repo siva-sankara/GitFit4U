@@ -1,6 +1,6 @@
 import mongoose from "mongoose";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { sha256 } from "../utils/crypto.js";
+import { hashOtpContext, sha256 } from "../utils/crypto.js";
 
 const mocks = vi.hoisted(() => ({
   userLock: vi.fn(),
@@ -35,6 +35,8 @@ vi.mock("../services/otpService.js", () => ({
   verifyOtp: mocks.otp,
   requestOtp: vi.fn(),
   normalizePhone: vi.fn(),
+  maskEmail: (value: string) => value,
+  maskPhone: (value: string) => value,
 }));
 vi.mock("../services/tokenService.js", () => ({
   createSession: vi.fn(),
@@ -229,6 +231,54 @@ describe("recovery grant issuance and administrative identity edits", () => {
     expect(mocks.userLock.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.createGrant.mock.invocationCallOrder[0],
     );
+  });
+
+  it("issues an email-originated recovery grant and records first-use email proof atomically", async () => {
+    const email = "current@example.com";
+    const save = vi.fn();
+    mocks.otp.mockResolvedValue({
+      purpose: "ACCOUNT_RECOVERY",
+      userId: "user",
+      emailDelivery: true,
+      mobileDelivery: false,
+      emailHash: hashOtpContext("otp-email", email),
+    });
+    const user = {
+      _id: "user",
+      email,
+      status: "ACTIVE",
+      save,
+    };
+    mocks.userLock.mockResolvedValue(user);
+    const res = response();
+    await verifyRecoveryOtp(otpRequest(), res);
+    expect(mocks.userLock).toHaveBeenCalledWith(
+      { _id: "user", status: "ACTIVE" },
+      { $inc: { version: 1 } },
+      { session, returnDocument: "after" },
+    );
+    expect(user).toHaveProperty("emailVerifiedAt", expect.any(Date));
+    expect(save).toHaveBeenCalledWith({ session });
+    expect(mocks.createGrant).toHaveBeenCalledOnce();
+  });
+
+  it("rejects recovery when the verified email changed after the code was issued", async () => {
+    mocks.otp.mockResolvedValue({
+      purpose: "ACCOUNT_RECOVERY",
+      userId: "user",
+      emailDelivery: true,
+      emailHash: hashOtpContext("otp-email", "old@example.com"),
+    });
+    mocks.userLock.mockResolvedValue({
+      _id: "user",
+      email: "current@example.com",
+      emailVerifiedAt: new Date(),
+      status: "ACTIVE",
+    });
+    await expect(
+      verifyRecoveryOtp(otpRequest(), response()),
+    ).rejects.toMatchObject({ code: "RECOVERY_FAILED" });
+    expect(mocks.createGrant).not.toHaveBeenCalled();
   });
 
   it("does not mint a grant for a replaced phone or an inactive account", async () => {

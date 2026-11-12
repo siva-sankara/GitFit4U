@@ -26,8 +26,8 @@ export function ClassCard({
         <span className="eyebrow">{session.category || "Fitness"}</span>
         <StatusBadge status={session.status} />
       </header>
-      <h3>{session.name}</h3>
-      {session.gymId?.name && <small>{session.gymId.name}</small>}
+      <h3 title={session.name}>{session.name}</h3>
+      {session.gymId?.name && <small title={session.gymId.name}>{session.gymId.name}</small>}
       <div className="class-trainer">
         <Avatar
           name={session.trainerId?.name || "Gym team"}
@@ -35,7 +35,7 @@ export function ClassCard({
           thumbnailSrc={session.trainerId?.photoThumbnailUrl}
           size={28}
         />
-        <span>{session.trainerId?.name || "Trainer to be assigned"}</span>
+        <span title={session.trainerId?.name || "Trainer to be assigned"}>{session.trainerId?.name || "Trainer to be assigned"}</span>
       </div>
       <dl>
         <div>

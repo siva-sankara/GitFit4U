@@ -1,7 +1,7 @@
 import { z } from "zod";
 const objectId = z.string().regex(/^[a-f\d]{24}$/i);
 const money = z.number().int().min(0).max(1_000_000_000);
-export const promotionStatus = z.enum(["DRAFT", "SCHEDULED", "ACTIVE", "PAUSED", "EXPIRED", "ARCHIVED"]);
+export const promotionStatus = z.enum(["DRAFT", "SCHEDULED", "ACTIVE", "PAUSED", "EXPIRED", "ENDED", "ARCHIVED"]);
 const fields = {
   name: z.string().trim().min(2).max(160), description: z.string().trim().max(3000).default(""),
   gymId: objectId.optional(), startsAt: z.coerce.date(), endsAt: z.coerce.date(),
@@ -16,13 +16,21 @@ const discount = z.object({
   if (v.kind === "PERCENT" && (!v.percentageBasisPoints || v.amountMinor !== undefined))
     ctx.addIssue({ code: "custom", message: "Set a percentage discount, without a fixed amount." });
 });
-export const offerInput = z.object({
+const offerFields = z.object({
   ...fields, type: z.enum(["DISCOUNT", "NEW_MEMBER", "FESTIVAL", "REFERRAL", "FIRST_MONTH"]),
   code: z.string().trim().min(2).max(30).regex(/^[a-z0-9_-]+$/i).transform(v => v.toUpperCase()).optional(),
   discount, terms: z.string().trim().max(3000).default(""), minimumPurchaseMinor: money.default(0),
   applicablePlanIds: z.array(objectId).max(100).default([]),
   redemptionLimit: z.number().int().min(1).max(1_000_000).nullable().optional(),
   perUserLimit: z.number().int().min(1).max(100).default(1),
+}).strict();
+export const offerInput = offerFields.refine(v => v.endsAt > v.startsAt, "End must follow start");
+export const platformOfferInput = offerFields.omit({ gymId: true, type: true, applicablePlanIds: true }).extend({
+  platformPlanIds: z.array(objectId).max(100).default([]),
+  ownerAudienceIds: z.array(objectId).max(100).default([]),
+  gymAudienceIds: z.array(objectId).max(100).default([]),
+  purchaseKinds: z.array(z.enum(["NEW", "RENEWAL"])).min(1).max(2),
+  billingPeriods: z.array(z.enum(["MONTHLY", "YEARLY"])).min(1).max(2),
 }).strict().refine(v => v.endsAt > v.startsAt, "End must follow start");
 export const adInput = z.object({
   ...fields, budgetMinor: money.default(0),

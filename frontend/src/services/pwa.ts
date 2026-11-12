@@ -5,6 +5,7 @@ interface InstallPrompt extends Event {
   userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
 }
 interface PwaState {
+  installState: "checking" | "ready" | "prompting" | "dismissed" | "installed" | "manual" | "error";
   installed: boolean;
   installAvailable: boolean;
   dismissed: boolean;
@@ -16,6 +17,9 @@ interface PwaState {
   bannerExpired: boolean;
 }
 export const installSessionKey = "gfu_install_session_v1";
+declare global {
+  interface Window { __gfuInstallCapture?: { prompt: InstallPrompt | null; installed: boolean } }
+}
 export const installBannerDuration = 120_000;
 const listeners = new Set<() => void>();
 let deferredPrompt: InstallPrompt | null = null;
@@ -23,7 +27,7 @@ let registration: ServiceWorkerRegistration | null = null;
 let started = false;
 let reloadRequested = false;
 let bannerTimer: ReturnType<typeof setTimeout> | undefined;
-let state: PwaState = { installed: false, installAvailable: false, dismissed: false, online: true, updateAvailable: false, error: null,
+let state: PwaState = { installState: "checking", installed: false, installAvailable: false, dismissed: false, online: true, updateAvailable: false, error: null,
   mobileInstallEligible: false, bannerStartedAt: null, bannerExpired: false };
 function update(patch: Partial<PwaState>) {
   state = { ...state, ...patch };
@@ -40,7 +44,7 @@ export function installInstructions(userAgent = navigator.userAgent, touchPoints
   return "Use your browser's Install app icon or menu. If unavailable, use a browser that supports installation, such as Chrome or Edge, over HTTPS.";
 }
 export function dismissInstall() {
-  update({ dismissed: true });
+  update({ dismissed: true, installState: state.installed ? "installed" : "dismissed" });
   persistInstallSession();
 }
 function persistInstallSession() {
@@ -70,16 +74,18 @@ export function beginInstallBanner() {
 }
 export async function installApp() {
   const prompt = deferredPrompt;
-  if (!prompt || state.installed) return;
+  if (!prompt || state.installed || state.installState === "prompting") return;
   deferredPrompt = null;
-  update({ installAvailable: false, error: null });
+  if (window.__gfuInstallCapture) window.__gfuInstallCapture.prompt = null;
+  update({ installState: "prompting", installAvailable: false, error: null });
   try {
     await prompt.prompt();
     const choice = await prompt.userChoice;
     if (choice.outcome === "dismissed") dismissInstall();
+    else if (!state.installed) update({ installState: "manual" });
     // Only appinstalled/display-mode confirms an installed application.
   } catch {
-    update({ error: "Installation could not open. Use your browser's installation menu." });
+    update({ installState: "error", error: "Installation could not open. Use your browser's installation menu." });
   }
 }
 export function applyAppUpdate() {
@@ -98,20 +104,38 @@ export function startPwaLifecycle(registerWorker = import.meta.env.PROD) {
     if (typeof saved?.startedAt === "number" && Number.isFinite(saved.startedAt) && saved.startedAt <= Date.now())
       bannerStartedAt = saved.startedAt;
   } catch { /* Storage is optional. */ }
-  update({ installed: isInstalled(), dismissed, online: navigator.onLine, bannerStartedAt,
+  update({ installState: isInstalled() ? "installed" : dismissed ? "dismissed" : "manual", installed: isInstalled(), dismissed, online: navigator.onLine, bannerStartedAt,
     mobileInstallEligible: mobileInstallEligible(), bannerExpired: bannerStartedAt !== null && Date.now() - bannerStartedAt >= installBannerDuration });
   scheduleBannerExpiry();
-  window.addEventListener("beforeinstallprompt", event => {
-    event.preventDefault();
-    deferredPrompt = event as InstallPrompt;
-    update({ installAvailable: true });
-  });
-  window.addEventListener("appinstalled", () => {
+  const installed = () => {
     deferredPrompt = null;
-    update({ installed: true, dismissed: true, installAvailable: false, mobileInstallEligible: false, error: null });
+    if (window.__gfuInstallCapture) window.__gfuInstallCapture.prompt = null;
+    update({ installState: "installed", installed: true, dismissed: true, installAvailable: false, mobileInstallEligible: false, error: null });
     persistInstallSession();
+  };
+  const capturePrompt = (event: InstallPrompt) => {
+    event.preventDefault();
+    if (state.installed || isInstalled()) return;
+    deferredPrompt = event;
+    update({ installState: "ready", installAvailable: true, error: null });
+  };
+  if (window.__gfuInstallCapture) {
+    const syncCapture = () => {
+      const capture = window.__gfuInstallCapture!;
+      if (capture.installed || isInstalled()) installed();
+      else if (capture.prompt) capturePrompt(capture.prompt);
+    };
+    window.addEventListener("gfu-install-capture", syncCapture);
+    syncCapture();
+  } else {
+    // Test harnesses and older cached entry documents may not have the bootstrap.
+    window.addEventListener("beforeinstallprompt", event => capturePrompt(event as InstallPrompt));
+    window.addEventListener("appinstalled", installed);
+  }
+  window.matchMedia?.("(display-mode: standalone)").addEventListener?.("change", () => {
+    if (isInstalled()) installed();
+    else update({ installed: false, mobileInstallEligible: mobileInstallEligible(), installState: deferredPrompt ? "ready" : "manual" });
   });
-  window.matchMedia?.("(display-mode: standalone)").addEventListener?.("change", () => update({ installed: isInstalled(), mobileInstallEligible: mobileInstallEligible() }));
   window.addEventListener("online", () => update({ online: true }));
   window.addEventListener("offline", () => update({ online: false }));
   window.addEventListener("resize", () => update({ mobileInstallEligible: mobileInstallEligible() }));

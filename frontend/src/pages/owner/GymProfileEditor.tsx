@@ -4,6 +4,8 @@ import { Modal } from "../../components/Modal";
 import { GymLogoEditor } from "./GymLogoEditor";
 import { GymTermsEditor } from "./GymTermsEditor";
 import { WhatsAppConnectionSettings } from "../../components/WhatsAppConnectionSettings";
+import { WhatsAppGroupSettings } from "../../components/WhatsAppGroupSettings";
+import { RazorpayOAuthSettings } from "../../components/RazorpayOAuthSettings";
 import { Link } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useCurrentUser } from "../../api/hooks";
@@ -15,6 +17,7 @@ import { Pagination, SectionAccordion } from "../../components/DataListControls"
 import { StatusBadge } from "../../components/StatusBadge";
 import { ClassCard } from "../../components/ClassCard";
 import { ChevronLeft, ChevronRight } from "lucide-react";
+import "../../styles/gym-profile.css";
 import {
   EditForm,
   QueryState,
@@ -84,7 +87,7 @@ export function GymProfileEditor({
             gym.data.data.platformSubscriptionStatus === "ACTIVE" && (
             <Link
               className="btn btn-secondary"
-              to={`/gyms/${gym.data.data.slug}?from=settings`}
+              to={`/owner/gyms/${gym.data.data.slug}?from=settings`}
               state={{ from: "gym-profile-settings" }}
             >
               View public gym page
@@ -109,7 +112,7 @@ export function GymProfileEditor({
             <SectionAccordion id="gym-logo" title="Gym logo" description="The identity members see across GETFIT4U." defaultOpen>
               <GymLogoEditor key={`logo-${gym.data.data._id}`} gym={gym.data.data} disabled={!canEdit} embedded />
             </SectionAccordion>
-            <SectionAccordion id="gym-details" title="Basic and contact details" description="Gym name, description, contact channels and facilities." defaultOpen>
+            <SectionAccordion id="gym-details" title="Basic and contact details" description="Gym name, description, contact channels and facilities." >
               <fieldset disabled={!canEdit} className="profile-fieldset">
                 <EditForm
                   method="PATCH"
@@ -130,12 +133,12 @@ export function GymProfileEditor({
                     { ...field("contact.whatsapp", "WhatsApp number"), clearable: true },
                     { ...field("contact.website", "Website", "text"), clearable: true },
                     field("facilities", "Facilities (one per line)", "lines"),
-                    field("amenities", "Amenities (one per line)", "lines"),
-                    field(
-                      "benefits",
-                      "Member benefits (one per line)",
-                      "lines",
-                    ),
+                    // field("amenities", "Amenities (one per line)", "lines"),
+                    // field(
+                    //   "benefits",
+                    //   "Member benefits (one per line)",
+                    //   "lines",
+                    // ),
                   ]}
                 />
               </fieldset>
@@ -145,7 +148,7 @@ export function GymProfileEditor({
                 <GymProfilePlans fields={planFields} canWrite={permissions.includes("plan:write")} slug={gym.data.data.slug} published={gym.data.data.status === "ACTIVE" && gym.data.data.platformSubscriptionStatus === "ACTIVE"} embedded />
               </SectionAccordion>
             )}
-            <SectionAccordion id="gym-media" title="Media gallery" description={`${gym.data.data.mediaCount || gym.data.data.mediaAttachmentIds?.length || 0} photos and videos. Preview uses optimized thumbnails.`} defaultOpen>
+            <SectionAccordion id="gym-media" title="Media gallery" description={`${gym.data.data.mediaCount || gym.data.data.mediaAttachmentIds?.length || 0} photos and videos. Preview uses optimized thumbnails.`} >
               <GymMediaEditor key={`media-${gym.data.data._id}`} gym={gym.data.data} disabled={!canEdit} />
             </SectionAccordion>
             <SectionAccordion id="gym-location" title="Address and location" description="Public address, entrance pin and attendance radius.">
@@ -154,18 +157,22 @@ export function GymProfileEditor({
             <SectionAccordion id="gym-hours" title="Opening hours" description="Weekly opening and closing schedule.">
               <GymHoursEditor gym={gym.data.data} disabled={!canEdit} />
             </SectionAccordion>
-            <SectionAccordion id="gym-classes" title="Classes preview" description="The next three gym classes, without an internal scrolling panel." defaultOpen>
+            <SectionAccordion id="gym-classes" title="Classes preview" description="The next three gym classes, without an internal scrolling panel." >
               <GymProfileClasses fields={classFields} canWrite={permissions.includes("class:write")} canRead={permissions.includes("gym:read")} />
             </SectionAccordion>
             <SectionAccordion id="gym-communication" title="Notification and communication settings" description="WhatsApp connection and automated member reminders.">
               <div className="gym-profile-nested-grid">
+                {me.data?.data.context?.role === "GYM_OWNER" && <WhatsAppGroupSettings disabled={!canEdit} />}
                 {canEdit && <WhatsAppConnectionSettings />}
                 <ClassReminderSettings gym={gym.data.data} disabled={!canEdit} />
                 <MembershipReminderSettings gym={gym.data.data} disabled={!canEdit} />
               </div>
             </SectionAccordion>
+            <SectionAccordion id="gym-payments" title="Membership payments" description="Connect your gym's Razorpay account and check payment readiness.">
+              <RazorpayOAuthSettings gym={gym.data.data} disabled={!canEdit} embedded />
+            </SectionAccordion>
             <SectionAccordion id="gym-terms" title="Social and public page settings" description="Gym-specific terms and public information.">
-              <GymTermsEditor terms={gym.data.data.terms} disabled={!canEdit} />
+              <GymTermsEditor terms={gym.data.data.terms} disabled={!canEdit} embedded />
             </SectionAccordion>
           </div>
         )}
@@ -175,7 +182,7 @@ export function GymProfileEditor({
 }
 export function MembershipReminderSettings({ gym, disabled }: { gym: Row; disabled: boolean }) {
   const save = useSaveGym();
-  return <section className="panel form-section page-stack"><h2>Membership renewal reminders</h2>
+  return <section className="panel form-section page-stack gym-reminder-settings"><h2>Membership renewal reminders</h2>
     <p>Daily reminders begin seven days before a member's gym membership expires. Choose how long to follow up after expiry; member notification preferences still apply.</p>
     <form onSubmit={(event) => {
       event.preventDefault(); const values = new FormData(event.currentTarget);
@@ -189,7 +196,7 @@ export function MembershipReminderSettings({ gym, disabled }: { gym: Row; disabl
 }
 function ClassReminderSettings({ gym, disabled }: { gym: Row; disabled: boolean }) {
   const save = useSaveGym();
-  return <section className="panel form-section page-stack"><h2>Class reminders</h2>
+  return <section className="panel form-section page-stack gym-reminder-settings"><h2>Class reminders</h2>
     <p>Remind confirmed attendees before their class. Their notification preferences still apply.</p>
     <form onSubmit={(event) => {
       event.preventDefault(); const values = new FormData(event.currentTarget);
@@ -307,7 +314,7 @@ export function GymMediaEditor({
       ) : (
         <img loading="lazy" src={m.thumbnailUrl || m.url} alt={m.caption || m.name} />
       )}
-      <p>{m.caption || m.name}</p>
+      <p className="gym-media-caption" title={m.caption || m.name}>{m.caption || m.name}</p>
       <div className="heading-actions gym-media-actions">
         <a className="btn btn-ghost" href={m.url} target="_blank" rel="noreferrer">View</a>
         {!disabled && <button type="button" className="btn btn-ghost" onClick={() => { setCaption(m.caption || ""); setEditingCaption(m); }}>Edit caption</button>}
@@ -444,7 +451,7 @@ export function GymHoursEditor({
             onChange={(e) => setTimezone(e.target.value)}
           />
         </label>
-        {hours.map((h, i) => (
+        <div className="gym-hours-schedule">{hours.map((h, i) => (
           <div key={h.day} className="gym-hours-row">
             <strong>{days[h.day]}</strong>
             <label>
@@ -500,7 +507,7 @@ export function GymHoursEditor({
               <span>Closed</span>
             )}
           </div>
-        ))}
+        ))}</div>
         <button className="btn btn-primary">
           {save.isPending ? "Saving..." : "Save opening hours"}
         </button>

@@ -40,8 +40,8 @@ export function ActivateAccountPage() {
     if (!isLink && (!/[A-Z]/.test(password) || !/[a-z]/.test(password) || !/\d/.test(password))) { setError("Use at least 10 characters including uppercase, lowercase and a number."); return; }
     accept.mutate(isLink ? undefined : password);
   }
-  return <main className="public-page" style={{ maxWidth: 560, margin: "64px auto", padding: 20 }}>
-    <section className="panel" style={{ padding: 28 }}>
+  return <main className="public-page activation-page">
+    <section className="panel">
       <Link to="/">GETFIT4U</Link>
       <h1>{isLink ? "Accept your gym invitation" : "Activate your account"}</h1>
       {accept.isSuccess ? <><p role="status">{isLink ? "Your gym membership is linked." : "Your account is active. Sign in with your new password."} Gym access remains subject to your membership eligibility.</p><Link className="btn btn-primary" to={isLink ? loginDestination(me.data?.data || "USER", "/app/profile/membership") : authPath("/login", "/app/profile/membership")}>{isLink ? "Continue to your account" : "Sign in"}</Link></>

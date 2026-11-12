@@ -105,6 +105,9 @@ it("fetches the next database page and renders returned records", async () => {
   );
   await flush();
   expect(host.textContent).toContain("First gym");
+  const viewport = host.querySelector<HTMLElement>('[aria-label="Records table"]')!;
+  expect(viewport.querySelector('[aria-label="Pagination"]')).toBeNull();
+  viewport.scrollTop = 250;
   await act(async () => {
     Array.from(host.querySelectorAll("button"))
       .find((button) => button.textContent === "Next")!
@@ -114,6 +117,24 @@ it("fetches the next database page and renders returned records", async () => {
   expect(mocks.request.mock.lastCall?.[0]).toContain("page=2");
   expect(host.textContent).toContain("Second gym");
   expect(host.textContent).not.toContain("First gym");
+  expect(host.querySelector<HTMLElement>('[aria-label="Records table"]')?.scrollTop).toBe(0);
+});
+
+it("keeps full text available on compact cells and preserves links and row actions", async () => {
+  const name = "A gym name that is longer than the available column";
+  const action = vi.fn();
+  await render(<Table rows={[{ _id: "gym-one", name, amount: 12345 }]} columns={[
+    { key: "name", title: "Gym", link: () => "/gyms/one" },
+    { key: "amount", title: "Amount", format: "money" },
+    { key: "contact", title: "Contact", render: () => "long.contact.address@example.com" },
+  ]} actions={() => <button onClick={action}>Manage gym</button>} />);
+  const link = host.querySelector<HTMLAnchorElement>('a[href="/gyms/one"]');
+  expect(link?.title).toBe(name);
+  expect(link?.textContent).toBe(name);
+  expect(host.querySelector('td.data-number [title]')?.getAttribute("title")).toBe("₹123.45");
+  expect(host.querySelector('[title="long.contact.address@example.com"]')?.textContent).toBe("long.contact.address@example.com");
+  await act(async () => host.querySelector<HTMLButtonElement>("td.data-actions button")!.click());
+  expect(action).toHaveBeenCalledOnce();
 });
 it("keeps provider errors visible instead of showing a successful save", async () => {
   mocks.request.mockRejectedValue(

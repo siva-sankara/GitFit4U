@@ -143,11 +143,11 @@ it("keeps announcement contents out of push payloads", async () => {
     "Private contents",
   );
 });
-it("normalizes an old queued platform reminder before handing its destination to FCM", async () => {
+it("hands FCM an authenticated notification link, including for historical reminders", async () => {
   const { notification } = setup();
   const gymId = "507f1f77bcf86cd799439011";
   Object.assign(notification, { event: "platform.expiring", gymId, actionUrl: "/owner/platform-subscription" });
   vi.spyOn(Gym, "find").mockReturnValue({ select: () => ({ lean: async () => [{ _id: gymId, publicId: "target-gym" }] }) } as never);
   await deliverPush();
-  expect(firebase.send).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ navigationPath: "/platform-renewal?gym=target-gym" }) }));
+  expect(firebase.send).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ navigationPath: "/notification-open/notice-one" }) }));
 });

@@ -22,6 +22,7 @@ export function needsOwnerOnboarding(identity: AuthIdentity): boolean {
 
 // Only local, known application destinations may be restored after authentication.
 export function safeReturnTo(value: unknown): string | undefined {
+  if (typeof value === "string" && /^\/notification-open\/[a-f\d]{24}$/i.test(value)) return value;
   if (
     typeof value !== "string" ||
     value.includes("\\") ||
@@ -43,6 +44,7 @@ export function safeReturnTo(value: unknown): string | undefined {
 // Keep these exact routes aligned with App and LiveWorkspace; no namespace wildcard.
 export function isOwnerAccountDestination(value: unknown): boolean {
   const safe = safeReturnTo(value);
+  if (safe && /^\/notification-open\/[a-f\d]{24}$/i.test(safe)) return true;
   return Boolean(
     safe &&
       (publicPolicyDestination.test(safe) ||
@@ -60,6 +62,7 @@ export function authPath(path: string, returnTo?: string): string {
 export function loginDestination(identity: AuthIdentity, returnTo?: string): string {
   const user = account(identity), role = user.activeRole || "USER";
   const safe = safeReturnTo(returnTo);
+  if (safe && /^\/notification-open\/[a-f\d]{24}$/i.test(safe)) return safe;
   if (needsOwnerOnboarding(identity)) return safe && isOwnerAccountDestination(safe) ? safe : "/register-gym";
   const home =
     role === "ADMIN"
@@ -93,6 +96,10 @@ export function workspacePath(identity: AuthIdentity, path: string) {
   const role = account(identity).activeRole || "USER";
   const prefix = workspacePrefix(role);
   if (publicPolicyDestination.test(path)) return path;
+  // Public discovery is a member capability. Owners preview only their own
+  // public gym page from Gym Profile Settings and return to that screen.
+  if (/^\/explore(?:[?#]|$)/.test(path) && role === "GYM_OWNER")
+    return loginDestination(identity);
   if (
     /^\/(explore(?:[?#]|$)|gyms\/|help(?:[?#]|$)|contact(?:[?#]|$)|legal\/)/.test(
       path,

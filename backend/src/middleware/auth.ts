@@ -6,6 +6,7 @@ import { verifyAccessToken } from "../services/tokenService.js";
 import { sessionExpiry } from "../services/sessionPolicy.js";
 import { AppError } from "../utils/AppError.js";
 import type { Permission, Role } from "../constants/domain.js";
+import { env } from "../config/env.js";
 
 export const requireAuth: RequestHandler = async (req, _res, next) => {
   try {
@@ -26,6 +27,7 @@ export const requireAuth: RequestHandler = async (req, _res, next) => {
       !session ||
       sessionExpiry(session) <= new Date() ||
       !user ||
+      (user.developmentTestAccount && env.OTP_MODE !== "development_preview") ||
       user.status !== "ACTIVE" ||
       !user.roles.includes(session.activeRole)
     ) {

@@ -1,3 +1,5 @@
+import { ListViewport } from "../../components/ListViewport";
+import { PlatformCheckoutOffers } from "../../components/PlatformCheckoutOffers";
 import { PageHeader } from "../../components/PageHeader";
 import { CompactFilters } from "../../components/CompactFilters";
 import { RoutineIllustration } from "../../components/RoutineIllustration";
@@ -106,12 +108,14 @@ export function DatabaseGymCard({ gym }: { gym: Row }) {
     </article>
   );
 }
+export const LANDING_GYM_LIMIT = 8;
 export function LiveLanding() {
   const me = useSession({ publicPage: true });
   const showOwnerLink = !getAccessToken() || Boolean(me.data && canRegisterGym(me.data.data));
-  const query = useData<Row[]>("/api/v1/public/gyms?limit=6"),
+  const query = useData<Row[]>(`/api/v1/public/gyms?limit=${LANDING_GYM_LIMIT}`),
     navigate = useNavigate();
   const [search, setSearch] = useState("");
+  const visibleGyms = (query.data?.data ?? []).slice(0, LANDING_GYM_LIMIT);
   return (
     <>
       <section className="hero-section">
@@ -157,14 +161,14 @@ export function LiveLanding() {
         </div>
       </section>
       <section className="container section-space landing-section">
-        <h2>Explore registered gyms</h2>
+        <div className="landing-section-heading"><h2>Explore registered gyms</h2><Link className="btn btn-secondary" to="/explore">See all gyms <ArrowRight size={18} aria-hidden="true" /></Link></div>
         <QueryState query={query}>
           <div className="live-card-grid">
-            {query.data?.data.map((gym) => (
+            {visibleGyms.map((gym) => (
               <DatabaseGymCard key={gym._id} gym={gym} />
             ))}
           </div>
-          {!query.data?.data.length && (
+          {query.isSuccess && !visibleGyms.length && (
             <p>No gyms are currently published. Check back soon.</p>
           )}
         </QueryState>
@@ -403,11 +407,13 @@ export function LiveExplore() {
         <p>
           {query.data?.meta?.total ?? query.data?.data.length ?? 0} gyms found
         </p>
-        <div className="live-card-grid">
-          {query.data?.data.map((gym) => (
-            <DatabaseGymCard key={gym._id} gym={gym} />
-          ))}
-        </div>
+        <ListViewport label="Gyms" resetKey={params.toString()}>
+          <div className="live-card-grid">
+            {query.data?.data.map((gym) => (
+              <DatabaseGymCard key={gym._id} gym={gym} />
+            ))}
+          </div>
+        </ListViewport>
         {!query.data?.data.length && (
           <section className="state-card panel">
             <h2>No gyms match your search</h2>
@@ -487,7 +493,7 @@ export function PaymentCheckout({
     queryFn: () =>
       apiRequest<ApiEnvelope<Row>>(quotePath, {
         method: "POST",
-        body: JSON.stringify({ ...quoteBody, ...(membershipCheckout && couponCode ? { couponCode } : {}) }),
+        body: JSON.stringify({ ...quoteBody, ...(couponCode ? { couponCode } : {}) }),
       }),
     retry: false,
     staleTime: 15 * 60 * 1000,
@@ -537,6 +543,7 @@ export function PaymentCheckout({
         throw new Error("Online payment is not configured.");
       if (!mounted.current) return;
       setPaymentId(order.data.paymentId);
+      sessionStorage.setItem("getfit4u.pendingPaymentId", order.data.paymentId);
       if (quotePath.includes("platform"))
         void client.invalidateQueries({
           queryKey: ["api", "/api/v1/workspace/registrations"],
@@ -581,6 +588,8 @@ export function PaymentCheckout({
                   ? "Payment verified. Your membership is ready."
                   : "Payment submitted. Waiting for verified capture.",
               );
+              if (verified.data.status === "CAPTURED")
+                sessionStorage.removeItem("getfit4u.pendingPaymentId");
               await client.invalidateQueries({
                 queryKey: ["payment", order.data.paymentId],
               });
@@ -595,25 +604,13 @@ export function PaymentCheckout({
             ondismiss: async () => {
               releaseGateway();
               if (received) return;
-              try {
-                await apiRequest(
-                  `/api/v1/checkout/payments/${order.data.paymentId}/cancel`,
-                  { method: "POST", body: "{}" },
-                );
-                setMessage(
-                  "Checkout closed. You can retry the same order if payment was not completed.",
-                );
-                await client.invalidateQueries({
-                  queryKey: ["payment", order.data.paymentId],
-                });
-                if (quotePath.includes("platform"))
-                  void client.invalidateQueries({
-                    queryKey: ["api", "/api/v1/workspace/registrations"],
-                  });
-                resolve();
-              } catch (error) {
-                reject(error);
-              }
+              setMessage(
+                "Checkout closed. We are still checking this order; closing the window is not a payment failure.",
+              );
+              await client.invalidateQueries({
+                queryKey: ["payment", order.data.paymentId],
+              });
+              resolve();
             },
           },
         });
@@ -661,14 +658,15 @@ export function PaymentCheckout({
       style: "currency",
       currency: quote.data?.data.currency || "INR",
     }).format((amount || 0) / 100);
+  const pricingCommitted = Boolean(paymentId || quote.data?.data.paymentCommitted);
   return (
     <>
-    {membershipCheckout && <form className="checkout-coupon" onSubmit={event => { event.preventDefault(); if (!paymentId && !pay.isPending) { setMessage(""); setCouponCode(couponInput.trim().toUpperCase()); } }}>
-      <label className="field"><span>Offer / coupon code</span><input className="input" value={couponInput} maxLength={64} autoComplete="off" disabled={!!paymentId || pay.isPending} onChange={event => setCouponInput(event.target.value)} /></label>
-      <div className="heading-actions"><button type="submit" className="btn btn-secondary" disabled={!!paymentId || pay.isPending || !couponInput.trim() || quote.isFetching}>Apply code</button>
-        {couponCode && <button type="button" className="btn btn-ghost" disabled={!!paymentId || pay.isPending} onClick={() => { setCouponCode(""); setCouponInput(""); }}>Remove code</button>}</div>
-      {!!paymentId && <p className="subtle">Pricing is locked to this payment attempt. Check its status before starting another purchase.</p>}
-    </form>}
+    {!membershipCheckout && !pricingCommitted && <PlatformCheckoutOffers key={`${quoteBody.planId}-${quoteBody.registrationId || quoteBody.expectedGymId || "renewal"}`} purchase={quoteBody} disabled={pay.isPending || quote.isFetching} onApply={code => { setCouponInput(code); setCouponCode(code); setMessage(""); }} />}
+    {!pricingCommitted ? <form className="checkout-coupon" onSubmit={event => { event.preventDefault(); if (!pay.isPending) { setMessage(""); setCouponCode(couponInput.trim().toUpperCase()); } }}>
+      <label className="field"><span>Offer / coupon code</span><input className="input" value={couponInput} maxLength={30} autoComplete="off" disabled={pay.isPending} onChange={event => setCouponInput(event.target.value)} /></label>
+      <div className="heading-actions"><button type="submit" className="btn btn-secondary" disabled={pay.isPending || !couponInput.trim() || quote.isFetching}>Apply code</button>
+        {couponCode && <button type="button" className="btn btn-ghost" disabled={pay.isPending} onClick={() => { setCouponCode(""); setCouponInput(""); }}>Remove code</button>}</div>
+    </form> : <p className="subtle">Pricing is locked to the existing payment order. Resume it at the recorded price; another offer cannot change this order.</p>}
     <QueryState query={quote}>
       {quote.data && (
         <>

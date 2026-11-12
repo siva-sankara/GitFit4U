@@ -62,6 +62,10 @@ const gymSchema = new Schema(
       whatsapp: String,
       website: String,
     },
+    whatsappGroup: {
+      type: new Schema({ name: { type: String, maxlength: 100 }, inviteLink: { type: String, maxlength: 300 } }, { _id: false }),
+      select: false,
+    },
     address: {
       line1: String,
       line2: String,

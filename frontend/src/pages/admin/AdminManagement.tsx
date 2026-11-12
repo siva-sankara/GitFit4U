@@ -422,14 +422,7 @@ export function GymStatusAction({ gym }: { gym: Row }) {
         onClose={() => setOpen(false)}
       >
         {open && (
-          <EditForm
-            endpoint={`/api/v1/admin/gyms/${gym.publicId}/status`}
-            fields={[
-              s("action", "Action", ["activate", "suspend", "archive"]),
-              f("reason", "Reason", "textarea"),
-            ]}
-            onSaved={() => setOpen(false)}
-          />
+          <GymActivationForm gym={gym} onSaved={() => setOpen(false)} />
         )}
       </Modal>
     </>
@@ -554,3 +547,4 @@ export function RefundAction({ payment }: { payment: Row }) {
     </>
   );
 }
+import { GymActivationForm } from "./GymActivationForm";

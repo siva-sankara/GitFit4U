@@ -82,27 +82,29 @@ const navigation: Record<string, Array<[string, string, string?]>> = {
     ["Registrations", "registrations"],
     ["Gyms", "gyms"],
     ["Owners", "owners"],
-    ["Trainers", "trainers"],
-    ["Members", "members"],
-    ["Membership plans", "membership-plans"],
-    ["Memberships", "memberships"],
-    ["Users", "users"],
+    // ["Trainers", "trainers"],
+    // ["Members", "members"],
+    // ["Membership plans", "membership-plans"],
+    // ["Memberships", "memberships"],
+    // ["Users", "users"],
     ["Platform plans", "platform-plans"],
-    ["Subscriptions", "subscriptions"],
+    // ["Subscriptions", "subscriptions"],
     ["Payments", "payments"],
+    ["Gym payment onboarding", "payment-connections"],
     ["Invoices", "invoices"],
-    ["Refunds", "refunds"],
+    // ["Refunds", "refunds"],
     ["Campaigns", "whatsapp"],
-    ["Advertisements", "ads"],
-    ["Offers", "offers"],
-    ["Reviews", "reviews"],
-    ["Monitoring", "monitoring"],
-    ["Audit logs", "audit"],
+    ["Gym Advertisements", "ads"],
+    ["Gym Offers", "offers"],
+    ["Platform Offers", "platform-offers"],
+    // ["Reviews", "reviews"],
+    // ["Monitoring", "monitoring"],
+    // ["Audit logs", "audit"],
     ["Support", "support"],
     ["Notifications", "notifications"],
     ["Broadcasts", "broadcasts"],
-    ["Notification delivery", "notification-delivery"],
-    ["Settings", "settings"],
+    // ["Notification delivery", "notification-delivery"],
+    // ["Settings", "settings"],
   ],
 };
 export function WorkspaceLayout() {
@@ -218,6 +220,7 @@ export function WorkspaceLayout() {
               title={text}
               aria-label={text}
               to={`${prefix}/${page}`}
+              className={({ isActive }) => isActive || (page === "messages" && location.pathname === "/owner/whatsapp") ? "active" : undefined}
               onClick={() => setDrawer(false)}
             >
               {i === 0 ? (
@@ -246,7 +249,7 @@ export function WorkspaceLayout() {
             aria-label={`Open profile for ${user?.name || "Member"}`}
             title={user?.name || "My profile"}
           >
-            <Avatar user={user} size={36} />
+            <Avatar user={user} size={36} interactive={false} />
             <span className="profile-name">
               <strong>{user?.name || "Member"}</strong>
             </span>
@@ -300,7 +303,7 @@ export function WorkspaceLayout() {
               aria-label={`Open profile for ${user?.name || "Member"}`}
               title="My profile"
             >
-              <Avatar user={user} size={32} />
+              <Avatar user={user} size={32} interactive={false} />
               <strong>{user?.name || "Member"}</strong>
             </NavLink>
           </div>
@@ -313,7 +316,7 @@ export function WorkspaceLayout() {
       </div>
       <nav className="mobile-bottom-nav" aria-label="Mobile navigation">
         {mobileRows.map(([text, page, Icon]) => (
-          <NavLink key={page} to={`${prefix}/${page}`} className={({ isActive }) => isActive || (page === "profile" && location.pathname === "/profile") ? "active" : undefined} aria-label={text}>
+          <NavLink key={page} to={`${prefix}/${page}`} className={({ isActive }) => isActive || (page === "profile" && location.pathname === "/profile") || (page === "messages" && location.pathname === "/owner/whatsapp") ? "active" : undefined} aria-label={text}>
             <Icon size={21} aria-hidden="true" />
             <span>{text}</span>
           </NavLink>

@@ -1,0 +1,29 @@
+.list-viewport {
+  min-width: 0;
+  min-height: 0;
+  max-height: var(--list-max-height, clamp(16rem, calc(100dvh - 20rem), 38rem));
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+.list-viewport:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.list-viewport > table { border-collapse: separate; border-spacing: 0; }
+.list-viewport > .member-management-table { table-layout: fixed; min-width: 640px; }
+.trainer-directory .member-management-table { min-width: 880px; }
+.trainer-directory .member-identity { min-width: 0; }
+.list-viewport > table > thead > tr > th { position: sticky; top: 0; z-index: 2; background: var(--surface-solid); }
+.overflow-text { display: block; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.data-records-table { table-layout: fixed; }
+.data-records-table th { white-space: normal; overflow-wrap: anywhere; }
+.data-records-table td { white-space: normal; overflow-wrap: anywhere; }
+.data-records-table .status-badge { white-space: normal; }
+.data-records-table .data-number { text-align: right; font-variant-numeric: tabular-nums; }
+.data-records-table .data-actions { width: 14rem; white-space: normal; }
+.data-records-table .heading-actions { gap: 6px; }
+.data-records-table :is(td, th) { padding: 8px 10px; vertical-align: middle; }
+.data-records-table td > :is(div, span, a) { max-width: 100%; }
+.data-records-table td > a { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 680px) {
+  .list-viewport { --list-max-height: clamp(16rem, 60dvh, 34rem); }
+}
+/* A dialog already owns its scroll region; avoid trapping two vertical scrollbars. */
+.modal-content .list-viewport { max-height: none; }

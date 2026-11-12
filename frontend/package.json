@@ -6,6 +6,7 @@
   "scripts": {
     "lint": "eslint . --max-warnings 0",
     "dev": "vite --host 0.0.0.0",
+    "dev:otp-preview": "node scripts/start-otp-preview.mjs",
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 0.0.0.0",
     "test": "vitest run"

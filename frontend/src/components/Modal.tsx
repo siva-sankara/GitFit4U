@@ -14,6 +14,7 @@ export function Modal({
   children,
   onClose,
   wide = false,
+  className = "",
   footer,
   externalOverlayActive = false,
 }: {
@@ -22,6 +23,7 @@ export function Modal({
   children: ReactNode;
   onClose: () => void;
   wide?: boolean;
+  className?: string;
   footer?: ReactNode;
   /** A child-owned gateway dialog temporarily owns focus and dismissal. */
   externalOverlayActive?: boolean;
@@ -104,9 +106,13 @@ export function Modal({
   if (!open) return null;
   return createPortal(
     <div
-      className="modal-backdrop modal-layer"
+      className={`modal-backdrop modal-layer ${className}`}
       role="presentation"
-      onMouseDown={(event) => {
+      onMouseDown={event => event.stopPropagation()}
+      onPointerDown={event => event.stopPropagation()}
+      onKeyDown={event => { if (event.key === "Enter" || event.key === " ") event.stopPropagation(); }}
+      onClick={(event) => {
+        event.stopPropagation();
         if (
           event.target === event.currentTarget &&
           !externalOverlayActive &&

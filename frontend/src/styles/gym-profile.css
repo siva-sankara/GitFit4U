@@ -1,0 +1,127 @@
+/* Scope the editor spacing so public gym pages keep their own layout. */
+.gym-profile-editor .gym-profile-sections { gap: 12px; }
+.gym-profile-editor .section-accordion { border-radius: 14px; }
+.gym-profile-editor .section-accordion-header { min-height: 56px; padding-inline: 14px; }
+.gym-profile-editor .section-accordion-toggle { padding-block: 10px; min-width: 0; }
+.gym-profile-editor .section-accordion-toggle > span { min-width: 0; gap: 4px; }
+.gym-profile-editor .section-accordion-toggle :is(strong, small) { overflow-wrap: anywhere; }
+.gym-profile-editor .section-accordion-content { padding: 14px; }
+.gym-profile-editor .section-accordion-content:not([hidden]) { display: grid; gap: 12px; }
+.gym-profile-editor .section-accordion-content :is(p, h2, h3, h4) { margin-block: 0; }
+.gym-profile-editor .section-accordion-content .page-stack { gap: 10px; }
+.gym-profile-editor .section-accordion-content .form-section {
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-solid);
+  box-shadow: none;
+}
+.gym-profile-editor .section-accordion-content :is(input, select, textarea) { max-width: 100%; }
+.gym-profile-editor .section-accordion-content .field { gap: 5px; min-width: 0; }
+.gym-profile-editor .section-accordion-content :is(.input, .select) { min-height: 40px; }
+.gym-profile-editor .section-accordion-content :is(form, .profile-fieldset) > .btn { justify-self: start; width: auto; }
+.gym-profile-editor .section-accordion-content .form-alert { margin: 0; padding: 10px 12px; }
+.gym-profile-editor .section-accordion-content :is(.page-heading, .section-heading) { margin: 0; gap: 10px; align-items: center; }
+.gym-profile-editor .section-accordion-content .page-heading h2 { font-size: var(--text-size-card); }
+.gym-profile-editor .section-accordion-content :is(.form-grid, .live-card-grid) { gap: 12px; }
+.gym-profile-editor .section-accordion-content .form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.gym-profile-editor #gym-details .field:has(textarea),
+.gym-profile-editor #gym-details .field:first-child { grid-column: 1 / -1; }
+.gym-profile-editor #gym-details textarea { min-height: 100px; }
+.gym-profile-editor .gym-logo-layout { grid-template-columns: minmax(0, .85fr) minmax(0, 1.4fr); gap: 18px; align-items: center; }
+.gym-profile-editor .gym-logo-current { display: flex; min-height: 0; padding: 0; border: 0; border-radius: 0; background: transparent; }
+.gym-logo-editor .gym-logo-preview { gap: 14px; width: 100%; }
+/* The editor preview must not inherit the sidebar's 34px identity size. */
+.gym-logo-editor .gym-logo-preview .gym-identity-logo { width: 88px; height: 88px; min-width: 88px; max-width: 88px; flex: 0 0 88px; padding: 6px; border-radius: 16px; overflow: hidden; }
+.gym-logo-editor .gym-logo-preview .gym-identity-logo img { width: 100%; height: 100%; max-width: 100%; max-height: 100%; object-fit: contain; }
+.gym-logo-editor .gym-logo-preview .gym-identity-copy { gap: 6px; }
+.gym-logo-editor .gym-logo-preview .gym-identity-copy strong { font-size: 1.05rem; white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.gym-logo-editor .gym-logo-controls { display: grid; gap: 10px; }
+.gym-logo-editor .gym-logo-picker { display: grid; grid-template-columns: 30px minmax(0,1fr) auto; align-items: center; gap: 10px; padding: 12px; border: 1px dashed var(--border-strong); border-radius: 12px; background: var(--surface-elevated); }
+.gym-logo-editor .gym-logo-upload-icon { color: var(--text-secondary); }
+.gym-logo-editor .gym-logo-picker-copy { min-width: 0; display: grid; gap: 4px; }
+.gym-logo-editor .gym-logo-picker-copy strong { font-size: var(--text-size-small); }
+.gym-logo-editor .gym-logo-picker-copy small { font-size: .75rem; line-height: 1.5; color: var(--text-secondary); }
+.gym-logo-editor .gym-logo-picker .btn { white-space: nowrap; }
+.gym-logo-editor .gym-logo-actions { justify-content: flex-start; gap: 8px; }
+.gym-logo-editor .gym-logo-selection { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: var(--text-size-caption); }
+.gym-logo-editor .gym-logo-selection > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.gym-logo-editor progress { width: 100%; height: 6px; accent-color: var(--brand-strong); }
+.gym-profile-editor .gym-profile-nested-grid { gap: 12px; align-items: stretch; }
+.gym-profile-editor .gym-profile-nested-grid > :is(.gym-whatsapp-group-settings, .whatsapp-settings) { grid-column: 1 / -1; }
+.gym-profile-editor .gym-profile-nested-grid > .whatsapp-settings { order: 1; }
+.gym-profile-editor .gym-profile-nested-grid h2 { font-size: var(--text-size-card); }
+.gym-profile-editor .gym-whatsapp-group-settings fieldset { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px 12px; }
+.gym-profile-editor .gym-whatsapp-group-settings fieldset > :is(p, button) { grid-column: 1 / -1; }
+.gym-profile-editor .gym-reminder-settings { display: flex; flex-direction: column; }
+.gym-profile-editor .gym-reminder-settings form { margin-top: auto; }
+.gym-profile-editor .gym-reminder-settings .profile-fieldset { display: grid; gap: 12px; }
+.gym-profile-editor .gym-reminder-settings .profile-fieldset > .btn { justify-self: start; }
+.gym-profile-editor .gym-reminder-settings small { color: var(--text-secondary); line-height: 1.5; }
+.gym-profile-editor .upload-area { grid-template-columns: minmax(0,1fr) auto; align-items: center; padding: 12px; gap: 8px 14px; border-width: 1px; border-radius: 12px; }
+.gym-profile-editor .upload-area > .btn { grid-column: 2; grid-row: 1 / 4; }
+.gym-profile-editor .upload-area > :is(p, small) { grid-column: 1; font-size: .75rem; color: var(--text-secondary); overflow-wrap: anywhere; }
+.gym-profile-editor input[type="file"]:not(.sr-only) { width: 100%; font-size: .8rem; }
+.gym-profile-editor input[type="file"]::file-selector-button { padding: 8px 10px; margin-right: 8px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--surface-solid); color: var(--text); cursor: pointer; }
+.gym-profile-editor .gym-media-preview-grid { gap: 10px; }
+.gym-profile-editor .gym-media-preview-grid .gym-media-item:nth-child(n) { display: flex; }
+.gym-profile-editor .gym-media-item { display: flex; flex-direction: column; gap: 8px; border-radius: 12px; }
+.gym-profile-editor .gym-media-item :is(img, video) { height: 148px; }
+.gym-profile-editor .gym-media-caption { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-size-caption); }
+.gym-profile-editor .gym-media-item .gym-media-actions .btn { min-height: 34px; padding: 5px 8px; font-size: .75rem; }
+.gym-profile-editor .gym-media-actions { margin-top: auto; gap: 6px; }
+.gym-profile-editor .gym-hours-schedule { border: 1px solid var(--border); border-radius: 12px; padding: 0 12px; }
+.gym-profile-editor .gym-hours-row {
+  grid-template-columns: minmax(100px, 1fr) 80px minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+  padding-block: 8px;
+}
+.gym-profile-editor .gym-hours-row:last-child { border-bottom: 0; }
+.gym-profile-editor .gym-hours-row label { min-width: 0; }
+.gym-profile-editor .gym-hours-row label:has(input[type="time"]) { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 8px; font-size: .8rem; }
+.gym-profile-editor .gym-hours-row input[type="time"] { width: 100%; min-height: 40px; }
+.gym-profile-editor .location-methods { gap: 12px; }
+.gym-profile-editor .location-picker { margin-block: 0; }
+.gym-profile-editor :is(.location-method-card, .location-map-stage, .location-selection) { padding: 14px; border-radius: 12px; }
+.gym-profile-editor .location-method-card { gap: 10px; }
+.gym-profile-editor #gym-location .registration-section { margin: 0; padding: 12px; }
+.gym-profile-editor #gym-location .registration-section[open] > fieldset { margin-top: 12px; }
+.gym-profile-editor #gym-memberships article.form-section { display: flex; flex-direction: column; align-items: start; gap: 10px; }
+.gym-profile-editor #gym-memberships article :is(h3, p, ul) { overflow-wrap: anywhere; }
+.gym-profile-editor #gym-memberships article ul { margin: 0; padding-left: 20px; }
+.gym-profile-editor #gym-memberships article .btn { margin-top: auto; max-width: 100%; white-space: normal; }
+.gym-profile-editor .payment-connection-settings .metric-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 10px; }
+.gym-profile-editor .payment-connection-settings .metric-tile { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 6px 8px; padding: 12px; min-height: 0; }
+.gym-profile-editor .payment-connection-settings .metric-tile > svg { width: 18px; height: 18px; }
+.gym-profile-editor .payment-connection-settings .metric-tile > :is(strong, small) { grid-column: 1 / -1; overflow-wrap: anywhere; }
+.gym-profile-editor .payment-connection-settings .metric-tile > strong { font-size: var(--text-size-card); line-height: 1.35; }
+.gym-profile-editor .payment-connection-settings .page-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 0; }
+.gym-profile-editor .whatsapp-onboarding-options { gap: 10px; }
+.gym-profile-editor .whatsapp-onboarding-options > .subtle { order: 1; }
+.gym-profile-editor :is(.whatsapp-onboarding-option, .whatsapp-connection-card, .whatsapp-controls, .whatsapp-personal-help) { padding: 12px; gap: 10px; border-radius: 10px; }
+.gym-profile-editor .whatsapp-onboarding-option .btn { white-space: normal; }
+.gym-profile-editor .whatsapp-connection-card dl > div { padding: 8px; }
+.gym-profile-editor .whatsapp-event-grid { margin: 0; grid-template-columns: repeat(auto-fit,minmax(min(100%,220px),1fr)); }
+.gym-profile-editor .gym-terms-editor > .heading-actions { justify-content: space-between; }
+.gym-profile-editor .gym-terms-editor > p { line-height: 1.6; }
+@media (max-width: 1000px) {
+  .gym-profile-editor .gym-profile-nested-grid { grid-template-columns: repeat(2,minmax(0, 1fr)); }
+  .gym-logo-editor .gym-logo-picker { grid-template-columns: 30px minmax(0,1fr); }
+  .gym-logo-editor .gym-logo-picker > .btn { grid-column: 2; justify-self: start; }
+}
+@media (max-width: 700px) {
+  .gym-profile-editor .section-accordion-header { padding-inline: 12px; }
+  .gym-profile-editor .section-accordion-content { padding: 12px; }
+  .gym-profile-editor .gym-logo-layout,
+  .gym-profile-editor .gym-profile-nested-grid,
+  .gym-profile-editor .gym-whatsapp-group-settings fieldset,
+  .gym-profile-editor .whatsapp-onboarding-options,
+  .gym-profile-editor .payment-connection-settings .metric-grid,
+  .gym-profile-editor .section-accordion-content .form-grid { grid-template-columns: minmax(0, 1fr); }
+  .gym-profile-editor .gym-logo-layout { gap: 14px; }
+  .gym-profile-editor .upload-area { grid-template-columns: minmax(0,1fr); }
+  .gym-profile-editor .upload-area > .btn { grid-column: 1; grid-row: auto; }
+  .gym-profile-editor .gym-hours-row { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; }
+  .gym-profile-editor .gym-hours-row label:has(input[type="time"]) { grid-template-columns: minmax(0,1fr); gap: 4px; }
+  .gym-profile-editor .gym-hours-row > label:has(input[type="checkbox"]) { justify-self: end; }
+}

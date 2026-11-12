@@ -66,6 +66,8 @@ it("requests permission only on explicit opt-in and registers the browser token"
   await syncPushToken();
   expect(mocks.requestPermission).not.toHaveBeenCalled();
   expect(mocks.api).not.toHaveBeenCalled();
+  Object.assign(Notification, { permission: "default" });
+  mocks.requestPermission.mockImplementation(async () => { Object.assign(Notification, { permission: "granted" }); return "granted"; });
   await enablePush();
   expect(mocks.requestPermission).toHaveBeenCalledOnce();
   expect(mocks.api).toHaveBeenCalledWith("/api/v1/devices", {
@@ -78,8 +80,9 @@ it("requests permission only on explicit opt-in and registers the browser token"
   });
 });
 it("handles denied permission without registering a device", async () => {
-  mocks.requestPermission.mockResolvedValue("denied");
+  Object.assign(Notification, { permission: "denied" });
   await expect(enablePush()).rejects.toThrow("blocked");
+  expect(mocks.requestPermission).not.toHaveBeenCalled();
   expect(mocks.api).not.toHaveBeenCalled();
 });
 it("handles unsupported browsers without breaking the inbox", async () => {
@@ -128,7 +131,7 @@ it("passes foreground notifications to the inbox listener and supports cleanup",
     id: "notification-1",
     title: "Membership active",
     message: undefined,
-    actionUrl: undefined,
+    actionUrl: "/notifications",
   });
 });
 it("rolls back opt-in after device registration fails so settings can retry", async () => {

@@ -1,3 +1,4 @@
+import { ListViewport } from "../../components/ListViewport";
 import { PageHeader } from "../../components/PageHeader";
 import {
   Bell,
@@ -9,6 +10,7 @@ import {
   Flame,
   Megaphone,
   RefreshCw,
+  Settings,
   Trash2,
   type LucideIcon,
 } from "lucide-react";
@@ -75,6 +77,7 @@ export function NotificationsApiPage() {
     all?: boolean;
   }>();
   const [copied, setCopied] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const query = useNotifications(page, filter, limit);
   const read = useReadNotification();
   const unread = useUnreadNotification();
@@ -94,24 +97,36 @@ export function NotificationsApiPage() {
     <div className="page-stack notifications-page">
       <PageHeader>
         <div>
-          <span className="eyebrow">Stay up to date</span>
           <h1>Notifications</h1>
           <p>Your membership, payments and gym updates in one place.</p>
         </div>
         <div className="heading-actions">
           <button
             type="button"
+            className="btn btn-secondary notification-settings-toggle"
+            onClick={() => setSettingsOpen(true)}
+            aria-label="Notification settings"
+            title="Notification settings"
+            aria-haspopup="dialog"
+            aria-expanded={settingsOpen}
+          >
+            <Settings size={16} aria-hidden="true" />
+          </button>
+          <button
+            type="button"
             className="btn btn-secondary"
             onClick={() => void query.refetch()}
             disabled={query.isFetching}
             aria-label="Refresh notifications"
+            title="Refresh notifications"
           >
             <RefreshCw
               size={18}
               className={query.isFetching ? "notification-spin" : undefined}
             />
-            <span className="notification-action-label">Refresh</span>
+            {/* <span className="notification-action-label">Refresh</span> */}
           </button>
+          
           <button
             type="button"
             className="btn btn-primary"
@@ -142,7 +157,6 @@ export function NotificationsApiPage() {
           </button>
         </div>
       </PageHeader>
-      {/* <PushNotificationSettings /> */}
       {(read.isError || unread.isError || readAll.isError || remove.isError) && (
         <p className="form-alert" role="alert">
           {read.error?.message ||
@@ -172,17 +186,19 @@ export function NotificationsApiPage() {
                 />
                 Select page
               </label>
-              {checked.length > 0 && (
-                <button
-                  className="btn btn-secondary"
-                  onClick={() => setDeleteSelection({ ids: checked })}
-                >
-                  <Trash2 size={15} />
-                  Delete selected ({checked.length})
-                </button>
-              )}
             </div>
           )}
+          {checked.length > 0 ? (
+            <button
+              type="button"
+              className="btn btn-secondary notification-bulk-delete"
+              disabled={remove.isPending}
+              onClick={() => setDeleteSelection({ ids: checked })}
+            >
+              <Trash2 size={15} />
+              Delete selected ({checked.length})
+            </button>
+          ) : (
           <div
             className="notification-filters"
             role="group"
@@ -203,6 +219,7 @@ export function NotificationsApiPage() {
               </button>
             ))}
           </div>
+          )}
         </div>
         {query.isLoading ? (
           <div
@@ -254,74 +271,79 @@ export function NotificationsApiPage() {
             </p>
           </div>
         ) : (
-          <div className="notification-list">
-            {data.map((notification) => {
-              const Icon = icons[notification.category] || Bell;
-              return (
-                <div className="notification-row" key={notification._id}>
-                  <label className="notification-checkbox">
-                    <input
-                      type="checkbox"
-                      aria-label={`Select ${notification.title}`}
-                      checked={checked.includes(notification._id)}
-                      onChange={(event) =>
-                        setChecked((old) =>
-                          event.target.checked
-                            ? [...old, notification._id]
-                            : old.filter((id) => id !== notification._id),
-                        )
-                      }
-                    />
-                  </label>
-                  <button
-                    type="button"
-                    key={notification._id}
-                    className={`notification-item${notification.readAt ? "" : " unread"}`}
-                    onClick={() => {
-                      setSelected({
-                        ...notification,
-                        readAt: notification.readAt || new Date().toISOString(),
-                      });
-                      if (!notification.readAt && !read.isPending)
-                        read.mutate(notification._id);
-                    }}
-                  >
-                    <span className="notification-icon" aria-hidden="true">
-                      <Icon size={21} />
-                    </span>
-                    <span className="notification-copy">
-                      <span className="notification-category">
-                        {categoryLabel(notification.category)}
+          <ListViewport className="notification-viewport" label="Notifications" resetKey={`${page}:${limit}:${filter}`}>
+            <div className="notification-list">
+              {data.map((notification) => {
+                const Icon = icons[notification.category] || Bell;
+                return (
+                  <div className="notification-row" key={notification._id}>
+                    <label className="notification-checkbox">
+                      <input
+                        type="checkbox"
+                        aria-label={`Select ${notification.title}`}
+                        checked={checked.includes(notification._id)}
+                        onChange={(event) =>
+                          setChecked((old) =>
+                            event.target.checked
+                              ? [...old, notification._id]
+                              : old.filter((id) => id !== notification._id),
+                          )
+                        }
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      key={notification._id}
+                      className={`notification-item${notification.readAt ? "" : " unread"}`}
+                      onClick={() => {
+                        setSelected({
+                          ...notification,
+                          readAt: notification.readAt || new Date().toISOString(),
+                        });
+                        if (!notification.readAt && !read.isPending)
+                          read.mutate(notification._id);
+                      }}
+                    >
+                      <span className="notification-icon" aria-hidden="true">
+                        <Icon size={21} />
                       </span>
-                      <strong>{notification.title}</strong>
-                      <span className="notification-preview">
-                        {notification.message}
-                      </span>
-                    </span>
-                    <span className="notification-meta">
-                      <time dateTime={notification.createdAt}>
-                        {timestamp(notification.createdAt)}
-                      </time>
-                      {!notification.readAt && (
-                        <span className="notification-unread-label">
-                          Unread
+                      <span className="notification-copy">
+                        <strong title={notification.title}>{notification.title}</strong>
+                        <span className="notification-preview" title={notification.message}>
+                          {notification.message}
                         </span>
-                      )}
-                    </span>
-                  </button>
-                  <button
-                    className="notification-delete"
-                    aria-label={`Delete ${notification.title}`}
-                    onClick={() =>
-                      setDeleteSelection({ ids: [notification._id] })
-                    }
-                  >
-                    <Trash2 size={17} />
-                  </button>
-                </div>
-              );
-            })}
-          </div>
+                      </span>
+                      <span className="notification-meta">
+                        <span className="notification-meta-labels">
+                        <span className="notification-category">
+                          {categoryLabel(notification.category)}
+                        </span>
+                        {!notification.readAt && (
+                          <span className="notification-unread-label">
+                            Unread
+                          </span>
+                        )}
+                        </span>
+                        <time dateTime={notification.createdAt} title={new Date(notification.createdAt).toLocaleString()}>
+                          {timestamp(notification.createdAt)}
+                        </time>
+                      </span>
+                    </button>
+                    <button
+                      className="notification-delete"
+                      aria-label={`Delete ${notification.title}`}
+                      title={`Delete ${notification.title}`}
+                      onClick={() =>
+                        setDeleteSelection({ ids: [notification._id] })
+                      }
+                    >
+                      <Trash2 size={17} />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </ListViewport>
         )}
         {!query.isLoading &&
           !query.isError &&
@@ -329,6 +351,14 @@ export function NotificationsApiPage() {
             <Pagination page={page} limit={limit} total={query.data?.meta?.total || 0} loading={query.isFetching} onPageChange={setPage} onLimitChange={(value) => { setLimit(value); setPage(1); }} />
           )}
       </section>
+      <Modal
+        open={settingsOpen}
+        title="Notification settings"
+        onClose={() => setSettingsOpen(false)}
+        className="notification-settings-dialog"
+      >
+        <PushNotificationSettings embedded />
+      </Modal>
       <Modal
         open={Boolean(selected)}
         title={selected?.title || "Notification"}

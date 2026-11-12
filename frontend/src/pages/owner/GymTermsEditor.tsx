@@ -5,9 +5,11 @@ import { apiRequest } from "../../services/apiClient";
 export function GymTermsEditor({
   terms,
   disabled = false,
+  embedded = false,
 }: {
   terms?: { text?: string; updatedAt?: string };
   disabled?: boolean;
+  embedded?: boolean;
 }) {
   const [text, setText] = useState(terms?.text || "");
   const [editing, setEditing] = useState(false);
@@ -24,7 +26,7 @@ export function GymTermsEditor({
     },
   });
   return (
-    <section id="gym-terms" className="panel form-section page-stack">
+    <section id={embedded ? undefined : "gym-terms"} className={`${embedded ? "" : "panel form-section "}page-stack gym-terms-editor`}>
       <div className="heading-actions">
         <h2>Terms &amp; Conditions</h2>
         {!editing && !disabled && (

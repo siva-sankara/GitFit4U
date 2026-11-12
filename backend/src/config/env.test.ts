@@ -46,6 +46,59 @@ describe("production environment validation", () => {
     });
   });
 
+  it("allows a blank Route fee policy while Route is disabled", () => {
+    expect(parseEnvironment({
+      NODE_ENV: "test",
+      RAZORPAY_ROUTE_ENABLED: "false",
+      RAZORPAY_GYM_FEE_BEARER: "",
+    })).toMatchObject({
+      RAZORPAY_ROUTE_ENABLED: false,
+      RAZORPAY_GYM_FEE_BEARER: undefined,
+    });
+  });
+
+  it("does not require a new-order fee policy for historical Route reconciliation", () => {
+    expect(parseEnvironment({
+      NODE_ENV: "test",
+      RAZORPAY_ROUTE_ENABLED: "true",
+      RAZORPAY_GYM_FEE_BEARER: "",
+    })).toMatchObject({ RAZORPAY_ROUTE_ENABLED: true, RAZORPAY_GYM_FEE_BEARER: undefined });
+  });
+
+  it("maps legacy Razorpay merchant variables to the scoped platform names", () => {
+    expect(parseEnvironment({
+      NODE_ENV: "test",
+      RAZORPAY_KEY_ID: "rzp_test_legacy",
+      RAZORPAY_KEY_SECRET: "legacy-secret",
+      RAZORPAY_WEBHOOK_SECRET: "legacy-webhook",
+    })).toMatchObject({
+      RAZORPAY_PLATFORM_PAYMENTS_ENABLED: true,
+      RAZORPAY_PLATFORM_KEY_ID: "rzp_test_legacy",
+      RAZORPAY_PLATFORM_KEY_SECRET: "legacy-secret",
+      RAZORPAY_PLATFORM_WEBHOOK_SECRET: "legacy-webhook",
+    });
+  });
+
+  it("fails closed when gym OAuth is enabled without its server secrets", () => {
+    expect(() => parseEnvironment({
+      NODE_ENV: "test",
+      RAZORPAY_GYM_OAUTH_ENABLED: "true",
+    })).toThrow(/RAZORPAY_OAUTH_CLIENT_ID is required/);
+  });
+
+  it("accepts a fully configured test OAuth environment", () => {
+    expect(parseEnvironment({
+      NODE_ENV: "test",
+      RAZORPAY_GYM_OAUTH_ENABLED: "true",
+      RAZORPAY_OAUTH_CLIENT_ID: "client",
+      RAZORPAY_OAUTH_CLIENT_SECRET: "client-secret",
+      RAZORPAY_OAUTH_REDIRECT_URI: "https://api.example.com/api/v1/payments/razorpay/oauth/callback",
+      RAZORPAY_OAUTH_WEBHOOK_SECRET: "webhook-secret",
+      PAYMENT_TOKEN_ENCRYPTION_KEY: "a".repeat(64),
+      FRONTEND_URL: "https://www.getfit4u.in",
+    })).toMatchObject({ RAZORPAY_GYM_OAUTH_ENABLED: true, RAZORPAY_MODE: "test" });
+  });
+
   it.each(["JWT_ACCESS_TTL", "JWT_REFRESH_TTL"])("rejects zero-duration %s", (key) => {
     expect(() => parseEnvironment({ NODE_ENV: "test", [key]: "0m" })).toThrow();
   });

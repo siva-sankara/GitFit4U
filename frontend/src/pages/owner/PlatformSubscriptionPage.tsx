@@ -89,6 +89,8 @@ export function PlatformSubscriptionPage() {
               <div><dt>Starts</dt><dd>{sub?.startsAt ? new Date(sub.startsAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: dashboard.data?.data.timezone || "Asia/Kolkata" }) : "—"}</dd></div>
               <div><dt>Expires</dt><dd>{sub?.endsAt ? new Date(sub.endsAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: dashboard.data?.data.timezone || "Asia/Kolkata" }) : "—"}</dd></div>
               {sub?.plan?.priceMinor != null && <div><dt>Plan price</dt><dd>{money(sub.plan.priceMinor)}</dd></div>}
+              {sub?.adminAuthorization && <div><dt>Payment</dt><dd>{sub.adminAuthorization.paymentStatus === "PENDING" ? "Payment pending — access authorized by admin" : sub.adminAuthorization.paymentStatus === "PAID_OFFLINE" ? "Paid offline" : "Paid online"}</dd></div>}
+              {sub?.adminAuthorization?.dueAt && <div><dt>Payment due</dt><dd>{new Date(sub.adminAuthorization.dueAt).toLocaleDateString("en-IN")}</dd></div>}
             </dl>
             {!!sub?.plan?.features?.length && <ul>{sub.plan.features.map((feature: string) => <li key={feature}>{feature}</li>)}</ul>}
             <p>Unused active days are preserved. Renewals do not enable automatic charging.</p>

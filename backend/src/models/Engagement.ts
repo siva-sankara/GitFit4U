@@ -178,6 +178,8 @@ const notificationSchema = new Schema(
     readAt: Date,
     archivedAt: Date,
     deliveredAt: Date,
+    providerAcceptedAt: Date,
+    openedAt: Date,
   },
   { timestamps: true },
 );
@@ -296,6 +298,12 @@ const supportTicketSchema = new Schema(
     gymId: { type: Schema.Types.ObjectId, ref: "Gym" },
     subject: { type: String, required: true },
     category: String,
+    assignedTo: { type: Schema.Types.ObjectId, ref: "User" },
+    related: { type: { type: String, enum: ["PAYMENT", "MEMBERSHIP", "BOOKING"] }, id: String, label: String },
+    activity: [{ type: { type: String }, actorId: { type: Schema.Types.ObjectId, ref: "User" },
+      from: String, to: String, at: { type: Date, default: Date.now } }],
+    internalNotes: { type: [{ key: String, authorId: { type: Schema.Types.ObjectId, ref: "User" }, body: String, at: { type: Date, default: Date.now } }], select: false },
+    revision: { type: Number, default: 0 },
     priority: {
       type: String,
       enum: ["LOW", "NORMAL", "HIGH", "URGENT"],

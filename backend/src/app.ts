@@ -8,7 +8,11 @@ import { env } from "./config/env.js";
 import { logger } from "./config/logger.js";
 import { connectDatabase } from "./config/db.js";
 import { httpLogging } from "./middleware/httpLogging.js";
-import { razorpayWebhook } from "./controllers/checkoutController.js";
+import {
+  razorpayOAuthWebhook,
+  razorpayPlatformWebhook,
+  razorpayWebhook,
+} from "./controllers/checkoutController.js";
 import { webhook as whatsappWebhook, webhookChallenge as whatsappWebhookChallenge } from "./controllers/whatsappController.js";
 import { apiRoutes } from "./routes/index.js";
 import { requestContext } from "./middleware/requestContext.js";
@@ -30,6 +34,15 @@ app.disable("x-powered-by");
 app.set("trust proxy", 1);
 app.use(requestContext);
 app.use(httpLogging);
+app.use((req, res, next) => {
+  if (env.OTP_MODE !== "development_preview") return next();
+  const peer = req.socket.remoteAddress || "";
+  const local = ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(peer);
+  if (!local || !["localhost", "127.0.0.1", "[::1]"].includes(req.hostname) || req.headers["x-forwarded-host"] || req.headers["forwarded"])
+    return next(new AppError(403, "LOCAL_PREVIEW_ONLY", "This test server accepts direct local requests only."));
+  res.setHeader("Cache-Control", "no-store");
+  next();
+});
 app.use(
   helmet({
     contentSecurityPolicy: false,
@@ -70,6 +83,18 @@ app.post(
   express.raw({ type: "application/json", limit: "512kb" }),
   ensureDatabase,
   razorpayWebhook,
+);
+app.post(
+  "/api/v1/webhooks/razorpay/platform",
+  express.raw({ type: "application/json", limit: "512kb" }),
+  ensureDatabase,
+  razorpayPlatformWebhook,
+);
+app.post(
+  "/api/v1/webhooks/razorpay/oauth",
+  express.raw({ type: "application/json", limit: "512kb" }),
+  ensureDatabase,
+  razorpayOAuthWebhook,
 );
 
 app.get("/api/v1/webhooks/whatsapp", whatsappWebhookChallenge);

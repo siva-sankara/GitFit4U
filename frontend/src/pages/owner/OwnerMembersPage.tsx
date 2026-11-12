@@ -77,7 +77,7 @@ function MemberMetric({
       <div>
         <span>{label}</span>
         <strong>{value}</strong>
-        <small>{detail}</small>
+        <small title={detail}>{detail}</small>
       </div>
     </article>
   );
@@ -378,6 +378,7 @@ export function OwnerMembersPage() {
   const [downloadBusy, setDownloadBusy] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const selectAllRef = useRef<HTMLInputElement>(null);
+  const memberListRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const timer = window.setTimeout(() => setDebounced({ scope: listScope, search }), 300);
     return () => window.clearTimeout(timer);
@@ -423,6 +424,7 @@ export function OwnerMembersPage() {
   const allOnPageSelected = rows.length > 0 && selectedOnPage === rows.length;
   useEffect(() => {
     setSelectedIds(new Set());
+    if (memberListRef.current) memberListRef.current.scrollTop = 0;
   }, [path]);
   useEffect(() => {
     if (selectAllRef.current)
@@ -675,145 +677,163 @@ export function OwnerMembersPage() {
           </button>
         </div>
       ) : (
-        <section className="panel member-management-scroll">
-          <table className="member-management-table">
-            <thead>
-              <tr>
-                <th className="member-select-column">
-                  <input
-                    ref={selectAllRef}
-                    type="checkbox"
-                    checked={allOnPageSelected}
-                    onChange={togglePage}
-                    aria-label="Select all members on this page"
-                  />
-                </th>
-                <th>Member</th>
-                <th>Trainer</th>
-                <th>Contact</th>
-                <th>Plan / Access</th>
-                <th>Attendance</th>
-                <th>Actions</th>
-                <th>Join / Renewal</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row) => {
-                const presentation = membershipPresentation(row, timezone, now);
-                const pendingInvitation = row.invitation?.status === "PENDING";
-                const phone = row.contact?.phone || row.userId?.phone;
-                const email = row.contact?.email || row.userId?.email;
-                const renewal = row.currentSubscriptionId?.renewalAt;
-                const selected = selectedIds.has(row.publicId);
-                return (
-                  <tr
-                    key={row.publicId}
-                    className={presentation.state === "EXPIRING" ? "member-expiring-row" : undefined}
-                    aria-selected={selected}
-                    onDoubleClick={() => navigate("/owner/members/" + row.publicId)}
-                  >
-                    <td className="member-select-column" data-label="Select">
-                      <input
-                        type="checkbox"
-                        checked={selected}
-                        onChange={() => toggleMember(row.publicId)}
-                        onClick={(event) => event.stopPropagation()}
-                        onDoubleClick={(event) => event.stopPropagation()}
-                        aria-label={`Select ${memberName(row)}`}
-                      />
-                    </td>
-                    <td data-label="Member">
-                      <div className="member-identity">
-                        <Avatar
-                          name={memberName(row)}
-                          src={row.contact?.avatarUrl || row.userId?.avatarUrl}
-                          thumbnailSrc={row.contact?.avatarThumbnailUrl || (!row.contact?.avatarUrl ? row.userId?.avatarThumbnailUrl : undefined)}
-                          size={46}
+        <section className="panel member-directory">
+          <div
+            ref={memberListRef}
+            className="member-management-scroll"
+            role="region"
+            aria-label="Member list"
+            tabIndex={0}
+          >
+            <table className="member-management-table" aria-label="Gym members">
+              <colgroup>
+                <col className="member-col-select" />
+                <col className="member-col-identity" />
+                <col className="member-col-trainer" />
+                <col />
+                <col className="member-col-plan" />
+                <col className="member-col-attendance" />
+                <col className="member-col-actions" />
+                <col className="member-col-dates" />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th className="member-select-column">
+                    <input
+                      ref={selectAllRef}
+                      type="checkbox"
+                      checked={allOnPageSelected}
+                      onChange={togglePage}
+                      aria-label="Select all members on this page"
+                    />
+                  </th>
+                  <th>Member</th>
+                  <th>Trainer</th>
+                  <th>Contact</th>
+                  <th>Plan / Access</th>
+                  <th>Attendance</th>
+                  <th>Actions</th>
+                  <th>Join / Renewal</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row) => {
+                  const presentation = membershipPresentation(row, timezone, now);
+                  const pendingInvitation = row.invitation?.status === "PENDING";
+                  const phone = row.contact?.phone || row.userId?.phone;
+                  const email = row.contact?.email || row.userId?.email;
+                  const trainerName = row.assignedTrainerId?.name || (canManage ? "Assign trainer" : "Not assigned");
+                  const trainerPhone = row.assignedTrainerId?.phone || row.assignedTrainerId?.userId?.phone || "Phone not provided";
+                  const renewal = row.currentSubscriptionId?.renewalAt;
+                  const renewalLabel = renewal
+                    ? `Renews ${gymDate(renewal, timezone)}`
+                    : row.currentSubscriptionId?.endsAt
+                      ? `Ends ${gymDate(row.currentSubscriptionId.endsAt, timezone)}`
+                      : "No renewal recorded";
+                  const selected = selectedIds.has(row.publicId);
+                  return (
+                    <tr
+                      key={row.publicId}
+                      className={presentation.state === "EXPIRING" ? "member-expiring-row" : undefined}
+                      aria-selected={selected}
+                      onDoubleClick={() => navigate("/owner/members/" + row.publicId)}
+                    >
+                      <td className="member-select-column" data-label="Select">
+                        <input
+                          type="checkbox"
+                          checked={selected}
+                          onChange={() => toggleMember(row.publicId)}
+                          onClick={(event) => event.stopPropagation()}
+                          onDoubleClick={(event) => event.stopPropagation()}
+                          aria-label={`Select ${memberName(row)}`}
                         />
-                        <div className="member-primary">
-                          <strong title={memberName(row)}>{memberName(row)}</strong>
-                          <StatusBadge
-                            status={pendingInvitation ? "PENDING_ACTIVATION" : row.status === "JOIN_REQUESTED" ? "JOIN_REQUESTED" : presentation.state}
+                      </td>
+                      <td data-label="Member">
+                        <div className="member-identity">
+                          <Avatar
+                            name={memberName(row)}
+                            src={row.contact?.avatarUrl || row.userId?.avatarUrl}
+                            thumbnailSrc={row.contact?.avatarThumbnailUrl || (!row.contact?.avatarUrl ? row.userId?.avatarThumbnailUrl : undefined)}
+                            size={36}
+                          />
+                          <div className="member-primary">
+                            <strong title={memberName(row)}>{memberName(row)}</strong>
+                            <StatusBadge
+                              status={pendingInvitation ? "PENDING_ACTIVATION" : row.status === "JOIN_REQUESTED" ? "JOIN_REQUESTED" : presentation.state}
+                            />
+                          </div>
+                        </div>
+                      </td>
+                      <td data-label="Trainer">
+                        <Link
+                          className="member-cell-text member-trainer-name"
+                          to={"/owner/members/" + row.publicId + "#member-membership"}
+                          title={trainerName}
+                        >
+                          {trainerName}
+                        </Link>
+                        {row.assignedTrainerId && (
+                          <small className="member-trainer-phone">
+                            <Phone size={14} aria-hidden="true" />
+                            <span className="member-cell-text" title={trainerPhone}>{trainerPhone}</span>
+                          </small>
+                        )}
+                      </td>
+                      <td data-label="Contact">
+                        <span className="member-contact-line">
+                          <Phone size={15} aria-hidden="true" />
+                          <span className="member-cell-text" title={phone || "Not provided"}>{phone || "Not provided"}</span>
+                        </span>
+                        <small className="member-contact-line">
+                          <Mail size={15} aria-hidden="true" />
+                          <span className="member-cell-text" title={email || "Not provided"}>{email || "Not provided"}</span>
+                        </small>
+                      </td>
+                      <td data-label="Plan / Access">
+                        <div className="member-plan-status">
+                          <span className="member-cell-text" title={presentation.plan}>{presentation.plan}</span>
+                          <MembershipStatusDot member={row} timezone={timezone} now={now} />
+                        </div>
+                      </td>
+                      <td data-label="Attendance">
+                        <strong>{row.attendanceVisits30Days || 0}</strong>
+                      </td>
+                      <td data-label="Actions">
+                        <div
+                          className="member-row-actions"
+                          onClick={(event) => event.stopPropagation()}
+                          onDoubleClick={(event) => event.stopPropagation()}
+                        >
+                          <MemberQuickActions
+                            member={row}
+                            actions={["call", "message"]}
+                            ownerMember
+                            canMessage={Boolean(canManage)}
+                          />
+                          <MemberWhatsAppReminderAction
+                            member={row}
+                            canManage={Boolean(canManage)}
+                          />
+                          <MemberMoreActions
+                            member={row}
+                            canManage={Boolean(canManage)}
+                            canReadFinance={Boolean(canReadFinance)}
                           />
                         </div>
-                      </div>
-                    </td>
-                    <td data-label="Trainer">
-                      <strong>{row.assignedTrainerId?.name || "Not assigned"}</strong>
-                      {row.assignedTrainerId && (
-                        <small className="member-trainer-phone">
-                          <Phone size={14} aria-hidden="true" />
-                          {row.assignedTrainerId.phone ||
-                            row.assignedTrainerId.userId?.phone ||
-                            "Phone not provided"}
-                        </small>
-                      )}
-                      <small>
-                        <Link to={"/owner/members/" + row.publicId}>
-                          {canManage ? row.assignedTrainerId ? "View / Edit" : "Assign trainer" : "View member"}
-                        </Link>
-                      </small>
-                    </td>
-                    <td data-label="Contact">
-                      <span className="member-contact-line">
-                        <Phone size={15} aria-hidden="true" />
-                        {phone || "Not provided"}
-                      </span>
-                      <small className="member-contact-line">
-                        <Mail size={15} aria-hidden="true" />
-                        {email || "Not provided"}
-                      </small>
-                    </td>
-                    <td data-label="Plan / Access">
-                      <div className="member-plan-status">
-                        <span>{presentation.plan}</span>
-                        <MembershipStatusDot member={row} timezone={timezone} now={now} />
-                      </div>
-                    </td>
-                    <td data-label="Attendance">
-                      <strong>{row.attendanceVisits30Days || 0}</strong>
-                    </td>
-                    <td data-label="Actions">
-                      <div
-                        className="member-row-actions"
-                        onClick={(event) => event.stopPropagation()}
-                        onDoubleClick={(event) => event.stopPropagation()}
-                      >
-                        <MemberQuickActions
-                          member={row}
-                          actions={["call", "message"]}
-                          ownerMember
-                          canMessage={Boolean(canManage)}
-                        />
-                        <MemberWhatsAppReminderAction
-                          member={row}
-                          canManage={Boolean(canManage)}
-                        />
-                        <MemberMoreActions
-                          member={row}
-                          canManage={Boolean(canManage)}
-                          canReadFinance={Boolean(canReadFinance)}
-                        />
-                      </div>
-                    </td>
-                    <td data-label="Join / Renewal">
-                      <strong>{gymDate(row.joinedAt, timezone)}</strong>
-                      <small>
-                        {renewal
-                          ? `Renews ${gymDate(renewal, timezone)}`
-                          : row.currentSubscriptionId?.endsAt
-                            ? `Ends ${gymDate(row.currentSubscriptionId.endsAt, timezone)}`
-                            : "No renewal recorded"}
-                      </small>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-          {!query.data?.data.length && (
-            <p className="state-card">No members match your filters.</p>
-          )}
+                      </td>
+                      <td data-label="Join / Renewal">
+                        <strong>{gymDate(row.joinedAt, timezone)}</strong>
+                        <small className="member-cell-text" title={renewalLabel}>{renewalLabel}</small>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            {!query.data?.data.length && (
+              <p className="state-card">No members match your filters.</p>
+            )}
+          </div>
           <Pagination
             page={page}
             limit={limit}
@@ -822,27 +842,6 @@ export function OwnerMembersPage() {
             onPageChange={(next) => setList({ page: next })}
             onLimitChange={(next) => setList({ limit: next, page: 1 })}
           />
-          {/* <footer hidden className="table-footer member-table-footer">
-            <span>
-              {selectedOnPage > 0 && `${selectedOnPage} selected · `}
-              {rows.length} of {query.data?.meta?.total || 0} members shown
-            </span>
-            <div className="member-pagination">
-              <button type="button" disabled={page <= 1} onClick={() => setList({ page: page - 1 })}>
-                Previous
-              </button>
-              <span className="member-page-number" aria-current="page">
-                <span className="sr-only">Page </span>{page}
-              </span>
-              <button
-                type="button"
-                disabled={page >= (query.data?.meta?.pages || 1)}
-                onClick={() => setList({ page: page + 1 })}
-              >
-                Next
-              </button>
-            </div>
-          </footer> */}
         </section>
       )}
       {create && (

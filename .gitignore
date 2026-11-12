@@ -5,6 +5,7 @@
 **/.env
 **/.env.*
 !**/.env.example
+!backend/.env.otp-preview.example
 # This one file contains only the public production API origin.
 !frontend/.env.production
 node_modules/

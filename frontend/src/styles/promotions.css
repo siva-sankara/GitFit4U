@@ -36,3 +36,14 @@
 .promotion-identity-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; }
 .promotion-identity-row .eyebrow { min-width: 0; flex: 1 1 120px; margin: 0; overflow-wrap: anywhere; }
 .promotion-identity-row .btn { min-height: 44px; flex-shrink: 0; padding: 8px 12px; font-size: .85rem; }
+
+.promotion-tabs, .promotion-filters { display: flex; flex-wrap: wrap; gap: 1rem; align-items: end; }
+.promotion-tabs a { padding: .65rem; border-bottom: 2px solid transparent; }
+.promotion-tabs a[aria-current="page"] { border-color: var(--brand); font-weight: 700; }
+.promotion-filters label { display: grid; gap: .35rem; flex: 1 1 12rem; min-width: 0; }
+.promotion-filters input, .promotion-filters select { width: 100%; min-height: 2.75rem; background: var(--surface); border: 1px solid var(--control-border); border-radius: .5rem; padding: .5rem; }
+.promotion-audience-options { max-height: 14rem; overflow: auto; }
+.promotion-card, .promotion-form label { min-width: 0; overflow-wrap: anywhere; }
+.platform-checkout-offers { margin-bottom: 1rem; }
+.platform-checkout-offers article { display: grid; gap: .5rem; padding: .75rem; margin-block: .75rem; border: 1px solid var(--border); border-radius: .75rem; }
+.platform-checkout-offers article p { margin: 0; }

@@ -4,9 +4,10 @@ import { nanoid } from "nanoid";
 import { Offer, Advertisement, Attachment } from "../models/Business.js";
 import { Gym } from "../models/Gym.js";
 import { MembershipPlan } from "../models/Commerce.js";
+import { User } from "../models/User.js";
 import { MemberProfile } from "../models/Member.js";
-import { offerInput, adInput } from "../routes/promotionSchemas.js";
-import { activePromotionFilter, effectivePromotionStatus, promotionGymFilter } from "../services/promotionService.js";
+import { offerInput, promotionStatus, adInput } from "../routes/promotionSchemas.js";
+import { activePromotionFilter, effectivePromotionStatus, promotionGymFilter, gymOfferScopeFilter } from "../services/promotionService.js";
 import { lockAttachments } from "../services/mediaBindingService.js";
 import { attachmentUrl } from "../integrations/storage/mediaStore.js";
 import { paginationFromQuery, pageMeta } from "../utils/pagination.js";
@@ -22,35 +23,61 @@ async function scope(req: Request, bodyGymId?: string) {
   if (!gym) throw new AppError(403, "GYM_READ_ONLY", "This gym is unavailable for promotional changes.");
   return gym;
 }
-async function list(req: Request, res: Response, kind: "offer" | "ad") {
+async function list(req: Request, res: Response, kind: "offer" | "ad" | "platform") {
   const { page, limit, skip } = paginationFromQuery(req.query);
-  const filter: any = { status: { $ne: "ARCHIVED" } };
+  const filter: any = {};
+  if (kind === "platform") { if (!isAdmin(req)) throw new AppError(403, "FORBIDDEN", "Administrator access required."); filter.scope = "PLATFORM_SUBSCRIPTION"; }
+  if (kind === "offer") filter.$and = [gymOfferScopeFilter];
+  if (req.query.status) {
+    const status = promotionStatus.parse(req.query.status), now = new Date();
+    if (status === "ACTIVE") Object.assign(filter, activePromotionFilter(now));
+    else if (status === "SCHEDULED") Object.assign(filter, { status: { $in: ["ACTIVE", "SCHEDULED"] }, startsAt: { $gt: now }, endsAt: { $gt: now } });
+    else if (status === "EXPIRED") (filter.$and ||= []).push({ $or: [{ status: "EXPIRED" }, { status: { $in: ["ACTIVE", "SCHEDULED"] }, endsAt: { $lte: now } }] });
+    else filter.status = status;
+  }
   if (isAdmin(req)) {
     if (req.query.gymId) {
       if (!mongoose.isValidObjectId(String(req.query.gymId))) throw new AppError(422, "INVALID_GYM", "Choose a valid gym.");
       filter.gymId = req.query.gymId;
     }
-  } else filter.gymId = req.auth!.gymId;
-  const Model = kind === "offer" ? Offer : Advertisement;
+  } else {
+    if (!req.auth?.gymId) throw new AppError(403, "GYM_REQUIRED", "Select a gym you manage.");
+    filter.gymId = req.auth.gymId;
+  }
+  const search = String(req.query.q || "").trim().slice(0, 100);
+  if (search) {
+    const regex = new RegExp(search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+    const owners = isAdmin(req) ? await User.find({ $or: [{ name: regex }, { email: regex }] }).select("_id").limit(100).lean() : [];
+    const gyms = isAdmin(req) ? await Gym.find({ $or: [{ name: regex }, { ownerId: { $in: owners.map(o => o._id) } }] }).select("_id").limit(100).lean() : [];
+    (filter.$and ||= []).push({ $or: [{ name: regex }, { description: regex }, { code: regex }, ...(kind !== "platform" ? [{ gymId: { $in: gyms.map(g => g._id) } }] : [])] });
+  }
+  const Model = kind === "ad" ? Advertisement : Offer;
+  const rowsQuery = Model.find(filter).sort({ createdAt: -1, _id: -1 }).skip(skip).limit(limit).populate({ path: "gymId", select: "name publicId slug ownerId", populate: { path: "ownerId", select: "name email publicId" } });
+  if (kind !== "ad") rowsQuery.populate(kind === "platform" ? [
+    { path: "platformPlanIds", select: "name billingPeriod" }, { path: "ownerAudienceIds", select: "name email" }, { path: "gymAudienceIds", select: "name" },
+  ] : [{ path: "applicablePlanIds", select: "name" }]);
   const [rows, total] = await Promise.all([
-    Model.find(filter).sort({ createdAt: -1, _id: -1 }).skip(skip).limit(limit).populate("gymId", "name publicId slug").lean(),
+    rowsQuery.lean(),
     Model.countDocuments(filter),
   ]);
   const data = kind === "ad" ? await adsWithImages(rows) : rows;
-  res.json({ success: true, data: data.map((row: any) => ({ ...row, effectiveStatus: effectivePromotionStatus(row) })), meta: pageMeta(page, limit, total) });
+  res.json({ success: true, data: data.map((row: any) => ({ ...row, effectiveStatus: effectivePromotionStatus(row), ...(kind === "ad" ? {
+    destination: row.ctaTarget === "EXTERNAL" ? row.ctaUrl : row.gymId?.slug ? `/gyms/${encodeURIComponent(row.gymId.slug)}${row.ctaTarget === "PLANS" ? "#gym-plans" : row.ctaTarget === "OFFER" ? "#gym-offers" : ""}` : "Gym unavailable",
+  } : {}) })), meta: pageMeta(page, limit, total) });
 }
 export const listOffers = (req: Request, res: Response) => list(req, res, "offer");
 export const listAds = (req: Request, res: Response) => list(req, res, "ad");
+export const listPlatformOffers = (req: Request, res: Response) => list(req, res, "platform");
 async function saveOffer(req: Request, res: Response) {
   const input = offerInput.parse(req.body), gym = await scope(req, input.gymId);
   const planIds = [...new Set(input.applicablePlanIds)];
   if (planIds.length && await MembershipPlan.countDocuments({ _id: { $in: planIds }, gymId: gym._id }) !== planIds.length)
     throw new AppError(422, "OFFER_WRONG_PLAN", "Select plans belonging to this gym.");
-  const values = { ...input, gymId: gym._id, applicablePlanIds: planIds };
+  const values = { ...input, scope: "GYM_MEMBERSHIP", gymId: gym._id, applicablePlanIds: planIds };
   let data;
   try {
     data = req.params.id
-      ? await Offer.findOneAndUpdate({ publicId: req.params.id, gymId: gym._id }, { $set: values, $inc: { reservationVersion: 1 } }, { returnDocument: "after", runValidators: true })
+      ? await Offer.findOneAndUpdate({ publicId: req.params.id, gymId: gym._id, $and: [gymOfferScopeFilter] }, { $set: values, ...(!input.code ? { $unset: { code: 1 } } : {}), $inc: { reservationVersion: 1, version: 1 } }, { returnDocument: "after", runValidators: true })
       : await Offer.create({ ...values, publicId: nanoid(20), createdBy: req.auth!.userId });
   } catch (error: any) {
     if (error?.code === 11000) throw new AppError(409, "OFFER_CODE_EXISTS", "This gym already has an offer with that code.");
@@ -65,7 +92,7 @@ export const updateOffer = saveOffer;
 async function saveAd(req: Request, res: Response) {
   const input = adInput.parse(req.body), gym = await scope(req, input.gymId);
   const data = await mongoose.connection.transaction(async session => {
-    if (input.ctaTarget === "OFFER" && !await Offer.exists({ _id: input.offerId, gymId: gym._id, status: { $ne: "ARCHIVED" } }).session(session))
+    if (input.ctaTarget === "OFFER" && !await Offer.exists({ _id: input.offerId, gymId: gym._id, status: { $ne: "ARCHIVED" }, $and: [gymOfferScopeFilter] }).session(session))
       throw new AppError(422, "AD_OFFER_UNAVAILABLE", "Choose an offer belonging to this gym.");
     if (input.creativeAttachmentId) {
       const file = await Attachment.findOne({ _id: input.creativeAttachmentId, ownerId: req.auth!.userId, gymId: gym._id, purpose: "AD", storageProvider: "s3", status: "READY", deletedAt: null, mimeType: { $in: ["image/jpeg", "image/png", "image/webp"] } }).session(session);
@@ -101,6 +128,7 @@ export async function publicOffers(req: Request, res: Response) {
   const gym = await Gym.findOne({ ...promotionGymFilter(String(req.query.gymId || "")), status: "ACTIVE", platformSubscriptionStatus: "ACTIVE", deletedAt: null }).lean();
   if (!gym) return res.json({ success: true, data: [] });
   const filter: any = { gymId: gym._id, ...activePromotionFilter(), $expr: { $or: [{ $eq: [{ $ifNull: ["$redemptionLimit", null] }, null] }, { $lt: [{ $ifNull: ["$redemptionCount", 0] }, "$redemptionLimit"] }] } };
+  filter.$and = [gymOfferScopeFilter];
   if (req.query.planId) {
     const plan = await MembershipPlan.findOne({ ...promotionGymFilter(String(req.query.planId)), gymId: gym._id, status: "ACTIVE" }).lean();
     if (!plan) return res.json({ success: true, data: [] });
@@ -141,7 +169,7 @@ export async function publicAds(req: Request, res: Response) {
     let href = `/gyms/${encodeURIComponent(ad.gym.slug)}`;
     if (ad.ctaTarget === "PLANS") href += "#gym-plans";
     if (ad.ctaTarget === "OFFER") {
-      if (!await Offer.exists({ _id: ad.offerId, gymId: ad.gymId, ...activePromotionFilter() })) continue;
+      if (!await Offer.exists({ _id: ad.offerId, gymId: ad.gymId, ...activePromotionFilter(), $and: [gymOfferScopeFilter] })) continue;
       href += "#gym-offers";
     }
     if (ad.ctaTarget === "EXTERNAL") {

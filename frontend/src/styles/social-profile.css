@@ -1,4 +1,6 @@
 .social-profile {
+  width: 100%;
+  min-width: 0;
   --muted: var(--text-muted);
   display: grid;
   gap: 1.2rem;
@@ -42,11 +44,14 @@
   padding: 1.2rem;
 }
 .profile-hero {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  display: flex;
+  flex-wrap: wrap;
   gap: 1rem;
   align-items: start;
 }
+.profile-identity { flex: 1 1 12rem; min-width: 0; overflow-wrap: anywhere; }
+.profile-actions { flex-wrap: wrap; min-width: 0; max-width: 100%; }
+.profile-hero > .profile-stats { flex: 1 0 100%; min-width: 0; }
 .profile-identity h2 {
   margin: 0 0 0.4rem;
   font-size: 1.35rem;
@@ -75,7 +80,7 @@
 .profile-stats {
   grid-column: 1/-1;
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 4.5rem), 1fr));
   border-top: 1px solid var(--border);
   padding-top: 0.8rem;
 }
@@ -244,7 +249,6 @@
 }
 @media (max-width: 640px) {
   .profile-hero {
-    grid-template-columns: auto minmax(0, 1fr);
     padding: 1rem;
   }
   .profile-actions {
