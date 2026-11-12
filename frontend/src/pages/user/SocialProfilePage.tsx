@@ -1,3 +1,4 @@
+import { ListViewport } from "../../components/ListViewport";
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -545,62 +546,64 @@ function ProfileContent({ id }: { id: string }) {
                 No posts yet. {person.own && "Share your first workout win."}
               </div>
             )}
-            {posts.data?.data.map((post) => (
-              <article className="profile-post" key={post.publicId}>
-                <header>
-                  <Avatar user={post.author} />
-                  <div>
-                    <strong>{post.author.name || "Member"}</strong>
-                    <small>
-                      {displayDate(post.createdAt)}
-                      {post.editedAt ? " · Edited" : ""}
-                    </small>
-                  </div>
-                  <div className="profile-post-actions">
-                    {person.own && (
-                      <button
-                        className="btn btn-ghost"
-                        onClick={() =>
-                          setComposer({ kind: "posts", initial: post })
-                        }
+            <ListViewport label="Profile posts" resetKey={`${endpoint}:${page}`}>
+              {posts.data?.data.map((post) => (
+                <article className="profile-post" key={post.publicId}>
+                  <header>
+                    <Avatar user={post.author} />
+                    <div>
+                      <strong>{post.author.name || "Member"}</strong>
+                      <small>
+                        {displayDate(post.createdAt)}
+                        {post.editedAt ? " · Edited" : ""}
+                      </small>
+                    </div>
+                    <div className="profile-post-actions">
+                      {person.own && (
+                        <button
+                          className="btn btn-ghost"
+                          onClick={() =>
+                            setComposer({ kind: "posts", initial: post })
+                          }
+                        >
+                          Edit
+                        </button>
+                      )}
+                      {(person.own || person.canModerate) && (
+                        <button
+                          className="btn btn-ghost"
+                          onClick={() =>
+                            setDeleting({
+                              kind: "posts",
+                              publicId: post.publicId,
+                            })
+                          }
+                        >
+                          Delete
+                        </button>
+                      )}
+                    </div>
+                  </header>
+                  <p className="profile-post-text">{post.text}</p>
+                  <div className="profile-post-images">
+                    {post.images.map((image) => (
+                      <a
+                        key={image.id}
+                        href={image.url}
+                        target="_blank"
+                        rel="noreferrer"
                       >
-                        Edit
-                      </button>
-                    )}
-                    {(person.own || person.canModerate) && (
-                      <button
-                        className="btn btn-ghost"
-                        onClick={() =>
-                          setDeleting({
-                            kind: "posts",
-                            publicId: post.publicId,
-                          })
-                        }
-                      >
-                        Delete
-                      </button>
-                    )}
+                        <img
+                          src={image.url}
+                          alt="Post attachment"
+                          loading="lazy"
+                        />
+                      </a>
+                    ))}
                   </div>
-                </header>
-                <p className="profile-post-text">{post.text}</p>
-                <div className="profile-post-images">
-                  {post.images.map((image) => (
-                    <a
-                      key={image.id}
-                      href={image.url}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      <img
-                        src={image.url}
-                        alt="Post attachment"
-                        loading="lazy"
-                      />
-                    </a>
-                  ))}
-                </div>
-              </article>
-            ))}
+                </article>
+              ))}
+            </ListViewport>
             <Pages
               page={page}
               pages={posts.data?.meta?.pages}

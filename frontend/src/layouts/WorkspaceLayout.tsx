@@ -220,6 +220,7 @@ export function WorkspaceLayout() {
               title={text}
               aria-label={text}
               to={`${prefix}/${page}`}
+              className={({ isActive }) => isActive || (page === "messages" && location.pathname === "/owner/whatsapp") ? "active" : undefined}
               onClick={() => setDrawer(false)}
             >
               {i === 0 ? (
@@ -315,7 +316,7 @@ export function WorkspaceLayout() {
       </div>
       <nav className="mobile-bottom-nav" aria-label="Mobile navigation">
         {mobileRows.map(([text, page, Icon]) => (
-          <NavLink key={page} to={`${prefix}/${page}`} className={({ isActive }) => isActive || (page === "profile" && location.pathname === "/profile") ? "active" : undefined} aria-label={text}>
+          <NavLink key={page} to={`${prefix}/${page}`} className={({ isActive }) => isActive || (page === "profile" && location.pathname === "/profile") || (page === "messages" && location.pathname === "/owner/whatsapp") ? "active" : undefined} aria-label={text}>
             <Icon size={21} aria-hidden="true" />
             <span>{text}</span>
           </NavLink>

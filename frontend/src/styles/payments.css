@@ -1,0 +1,69 @@
+.payments-page > .panel { padding: 0; overflow: hidden; border-radius: 14px; }
+.payments-page .resource-record-count { order: 3; margin-left: auto; padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-solid); color: var(--text-secondary); font-size: var(--text-size-caption); white-space: nowrap; }
+.payments-page .table-toolbar { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; padding: 12px; border-bottom: 1px solid var(--border); }
+.payments-page .table-toolbar > .search-field { flex: 1 1 210px; min-width: 0; width: auto; margin: 0; }
+.payments-page .table-toolbar input { min-width: 0; }
+.payments-page .table-toolbar > .compact-filters { flex: 2 1 420px; }
+.payments-page .compact-filter-fields { grid-template-columns: repeat(3, minmax(0,1fr)); }
+.payments-page .compact-filter-fields > select { align-self: end; }
+.payments-page .data-pagination { margin: 0; padding: 10px 12px; border-top: 1px solid var(--border); }
+.payments-page .payments-viewport { --list-max-height: clamp(18rem, calc(100dvh - 18rem), 42rem); }
+.payments-table { width: 100%; min-width: 900px; table-layout: fixed; }
+.payments-table .payment-payer-column { width: 23%; }
+.payments-table .payment-purpose-column { width: 18%; }
+.payments-table .payment-amount-column { width: 14%; }
+.payments-table .payment-status-column { width: 17%; }
+.payments-table .payment-date-column { width: 13%; }
+.payments-table .payment-actions-column { width: 15%; }
+.payments-page .payments-table :is(th, td) { padding: 11px 12px; text-align: left; vertical-align: middle; border-bottom: 1px solid var(--border); }
+.payments-page .payments-table th { color: var(--text-secondary); font-size: var(--text-size-caption); font-weight: 600; white-space: normal; }
+.payments-table tbody tr:hover { background: var(--surface-elevated); }
+.payments-table tbody tr:last-child td { border-bottom: 0; }
+.payments-table .payment-payer { display: flex; gap: 10px; align-items: center; min-width: 0; }
+.payments-table .payment-payer > div { min-width: 0; }
+.payments-table .payment-receipt-icon { width: 34px; height: 38px; flex: 0 0 34px; display: grid; place-items: center; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-elevated); color: var(--text-secondary); }
+.payments-table .payment-payer-name { font-weight: 650; }
+.payments-table .payment-reference { font-size: .75rem; color: var(--text-secondary); margin-top: 4px; }
+.payments-table td small { display: block; margin-top: 5px; color: var(--text-secondary); font-size: .75rem; }
+.payments-page .payments-table :is(.payment-amount-cell, th:nth-child(3)) { text-align: right; font-variant-numeric: tabular-nums; }
+.payments-table .payment-amount-cell strong { white-space: nowrap; font-weight: 650; }
+.payments-table .payment-pricing { margin-top: 4px; font-size: .75rem; }
+.payments-table .payment-pricing summary { cursor: pointer; color: var(--text-secondary); }
+.payments-table .payment-pricing dl { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 6px; margin: 10px 0 0; text-align: left; }
+.payments-table .payment-pricing dd { margin: 0; text-align: right; }
+.payments-table .payment-date-cell time { display: grid; gap: 4px; font-size: .8rem; font-variant-numeric: tabular-nums; }
+.payments-table .payment-date-cell time small { margin: 0; }
+.payments-table .payment-status-cell .status-badge { max-width: 100%; white-space: normal; text-align: left; }
+.payments-page .payments-table :is(.payment-actions-cell, th:last-child) { text-align: right; }
+.payments-table .payment-row-actions { display: flex; justify-content: end; flex-wrap: wrap; gap: 6px; }
+.payments-table .responsive-action-buttons { flex-wrap: nowrap; gap: 4px; justify-content: end; }
+.payments-table .payment-row-actions .payment-more-action { display: inline-flex; }
+.payments-table .invoice-actions-compact { display: flex; flex-wrap: wrap; justify-content: end; gap: 4px; }
+.payments-table .invoice-actions-compact small { flex-basis: 100%; white-space: normal; overflow-wrap: anywhere; }
+.payments-page .payment-row-actions :is(.tooltip-button, .invoice-actions-compact > .btn) { padding: 8px; min-width: 34px; flex: 0 0 auto; justify-content: center; }
+.payments-table .payment-action-notice, .payments-table .payment-row-actions > [role="alert"] { flex-basis: 100%; text-align: left; white-space: normal; overflow-wrap: anywhere; }
+@media (max-width: 1100px) {
+  .payments-page .table-toolbar > .compact-filters { flex-basis: 100%; order: 2; }
+}
+@media (max-width: 680px) {
+  .payments-page .table-toolbar > .compact-filters { flex: 0 0 auto; order: 0; width: auto; }
+  .payments-page .table-toolbar > .search-field { flex-basis: calc(100% - 90px); }
+  .payments-page .compact-filter-content { position: static; }
+  .payments-page .compact-filter-fields { grid-template-columns: minmax(0,1fr); }
+  .payments-page .payments-viewport { --list-max-height: 65dvh; }
+  .payments-table { display: block; min-width: 0; }
+  .payments-table colgroup { display: none; }
+  .payments-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .payments-table tbody { display: block; }
+  .payments-table tbody tr { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; padding: 14px 12px; border-bottom: 1px solid var(--border); }
+  .payments-page .payments-table td { display: block; min-width: 0; padding: 0; border: 0; text-align: left; }
+  .payments-table .payment-payer-cell { grid-column: 1 / -1; }
+  .payments-table td[data-label]::before { content: attr(data-label); display: block; margin-bottom: 5px; color: var(--text-secondary); font-size: .75rem; }
+  .payments-table .payment-amount-cell { grid-column: 2; grid-row: 2; }
+  .payments-table .payment-purpose-cell { grid-column: 1; grid-row: 2; }
+  .payments-table .payment-status-cell { grid-column: 1; grid-row: 3; }
+  .payments-table .payment-date-cell { grid-column: 2; grid-row: 3; }
+  .payments-page .payments-table .payment-actions-cell { grid-column: 1 / -1; padding-top: 8px; border-top: 1px solid var(--border); }
+  .payments-table .payment-row-actions { justify-content: start; }
+  .payments-page .payment-row-actions :is(.tooltip-button, .invoice-actions-compact > .btn) { min-width: 44px; min-height: 44px; }
+}

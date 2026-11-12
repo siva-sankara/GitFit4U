@@ -1,3 +1,4 @@
+import { ListViewport } from "../../components/ListViewport";
 import { useRef, useState } from "react";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
@@ -8,6 +9,7 @@ import { PageHeader } from "../../components/PageHeader";
 import { Modal } from "../../components/Modal";
 import { CompactFilters } from "../../components/CompactFilters";
 import { StatusBadge } from "../../components/StatusBadge";
+import { SupportTicketActivity, SupportTicketProgress, TicketActivityTime } from "../../components/SupportTicketActivity";
 import { Pagination } from "../../components/DataListControls";
 import { QueryState, date, label, type Row } from "../live/LiveData";
 import "../../styles/support-tickets.css";
@@ -65,12 +67,14 @@ export function SupportTicketsPage() {
           <label className="field"><span>Category</span><select className="select" value={categoryFilter} onChange={event => { setCategoryFilter(event.target.value); setPage(1); }}><option value="">All categories</option>{options(categories)}</select></label>
         </CompactFilters>
       </form>
-      <QueryState query={tickets}><table><thead><tr><th>Ticket</th><th>Category / priority</th><th>Status</th><th>Assigned / updated</th><th>Action</th></tr></thead><tbody>
-        {tickets.data?.data.map(row => { const ticket = row.supportTicketId || {}; return <tr key={row.publicId} aria-selected={selected === row.publicId}>
-          <td><strong>{ticket.subject || row.title}</strong><small>{ticket.publicId}</small><small>Created {date(ticket.createdAt)}</small>{row.unreadCount > 0 && <span className="support-unread">{row.unreadCount} new replies</span>}</td>
-          <td data-label="Category / priority">{label(ticket.category || "OTHER")}<small>{label(ticket.priority || "NORMAL")}</small></td><td data-label="Status"><StatusBadge status={ticket.status || "OPEN"} /></td>
-          <td data-label="Assigned / updated">{ticket.assignedTo?.name || "Unassigned"}<small>{date(ticket.updatedAt || row.lastMessageAt)}</small></td><td><button className="btn btn-secondary" onClick={() => setParams({ ticket: row.publicId })}>View ticket</button></td>
-        </tr>; })}</tbody></table>
+      <QueryState query={tickets}><ListViewport label="Support tickets" resetKey={`${page}:${limit}:${query}:${statusFilter}:${categoryFilter}`}>
+        <table><thead><tr><th>Ticket</th><th>Category / priority</th><th>Status</th><th>Assigned / updated</th><th>Action</th></tr></thead><tbody>
+          {tickets.data?.data.map(row => { const ticket = row.supportTicketId || {}; return <tr key={row.publicId} aria-selected={selected === row.publicId}>
+            <td><strong className="overflow-text" title={ticket.subject || row.title}>{ticket.subject || row.title}</strong><small>{ticket.publicId}</small><small>Created {date(ticket.createdAt)}</small>{row.unreadCount > 0 && <span className="support-unread">{row.unreadCount} new replies</span>}</td>
+            <td data-label="Category / priority">{label(ticket.category || "OTHER")}<small>{label(ticket.priority || "NORMAL")}</small></td><td data-label="Status"><StatusBadge status={ticket.status || "OPEN"} /></td>
+            <td data-label="Assigned / updated">{ticket.assignedTo?.name || "Unassigned"}<small>{date(ticket.updatedAt || row.lastMessageAt)}</small></td><td><button className="btn btn-secondary" onClick={() => setParams({ ticket: row.publicId })}>View ticket</button></td>
+          </tr>; })}</tbody></table>
+      </ListViewport>
         {!tickets.data?.data.length && <div className="state-card"><h2>{query || statusFilter || categoryFilter ? "No matching tickets" : "No tickets yet"}</h2><p>{query || statusFilter || categoryFilter ? "Adjust your search or filters." : "Create a ticket when you need help from GETFIT4U."}</p></div>}
         <Pagination page={page} limit={limit} total={tickets.data?.meta?.total || 0} loading={tickets.isFetching} onPageChange={setPage} onLimitChange={value => { setLimit(value); setPage(1); }} />
       </QueryState>
@@ -114,7 +118,8 @@ function TicketDetail({ id, onClose }: { id: string; onClose: () => void }) {
     <div className="support-ticket-detail"><QueryState query={detail}>{detail.data?.data.type !== "SUPPORT" ? <p role="alert">This is not a support ticket.</p> : <>
       <header className="support-ticket-meta"><span>{ticket?.publicId}</span><StatusBadge status={ticket?.status || "OPEN"} /><span>{label(ticket?.category || "OTHER")} · {label(ticket?.priority || "NORMAL")}</span></header>
       {ticket?.related?.label && <p>Related to: {ticket.related.label}</p>}
-      <div className="support-ticket-toolbar">{admin ? <>
+      <SupportTicketProgress ticket={ticket} />
+      <div className="support-ticket-toolbar" aria-label="Ticket actions">{admin ? <>
         <label className="field"><span>Status</span><select className="select" value={ticket?.status || "OPEN"} disabled={update.isPending} onChange={event => update.mutate({ status: event.target.value })}>{options(statuses)}</select></label>
         <label className="field"><span>Priority</span><select className="select" value={ticket?.priority || "NORMAL"} disabled={update.isPending} onChange={event => update.mutate({ priority: event.target.value })}>{options(["LOW", "NORMAL", "HIGH", "URGENT"])}</select></label>
         <label className="field"><span>Assigned support person</span><select className="select" value={ticket?.assignedTo?._id || ""} disabled={update.isPending || management.isPending} onChange={event => update.mutate({ assignedTo: event.target.value || null })}><option value="">Unassigned</option>{management.data?.data.assignees.map(row => <option key={row._id} value={row._id}>{row.name}</option>)}</select></label>
@@ -123,12 +128,12 @@ function TicketDetail({ id, onClose }: { id: string; onClose: () => void }) {
       </div>{update.isError && <p role="alert">{update.error.message}</p>}{read.isError && <p role="alert">{read.error.message}</p>}
       <div className="support-detail-grid"><section aria-label="Ticket replies"><h3>Replies</h3><QueryState query={history}>
         {history.hasNextPage && <button className="btn btn-secondary" disabled={history.isFetchingNextPage} onClick={() => void history.fetchNextPage()}>Earlier replies</button>}
-        <ol className="support-ticket-timeline">{entries.map(entry => <li key={entry.publicId} className={entry.senderId?._id === me.data?.data.user._id ? "support-own-reply" : ""}><header><strong>{entry.senderId?.name || "Support participant"}</strong><time dateTime={entry.createdAt}>{date(entry.createdAt)}</time></header><p>{entry.deletedAt ? "Response deleted" : entry.text}</p>{!entry.deletedAt && entry.attachments?.map((file: Row, index: number) => <a key={index} href={file.url} target="_blank" rel="noopener noreferrer">{file.name || "Attachment"}</a>)}</li>)}</ol>
+        <ol className="support-ticket-timeline">{entries.map(entry => <li key={entry.publicId} className={entry.senderId?._id === me.data?.data.user._id ? "support-own-reply" : ""}><header><strong>{entry.senderId?.name || "Support participant"}{entry.senderId?._id === me.data?.data.user._id && <span className="support-reply-you">You</span>}</strong><TicketActivityTime value={entry.createdAt} /></header><p>{entry.deletedAt ? "Response deleted" : entry.text}</p>{!entry.deletedAt && entry.attachments?.map((file: Row, index: number) => <a key={index} href={file.url} target="_blank" rel="noopener noreferrer">{file.name || "Attachment"}</a>)}</li>)}</ol>
       </QueryState>{closed ? <p>This ticket is closed. Reopen it to add a reply.</p> : <form className="modal-form support-composer" onSubmit={event => { event.preventDefault(); if (!send.isPending && !uploading) send.mutate(); }}>
         <label className="field"><span>{admin ? "Reply to requester" : "Reply to support"}</span><textarea className="textarea" maxLength={5000} value={reply} disabled={send.isPending} onChange={event => { setReply(event.target.value); draft.current = crypto.randomUUID(); }} /></label>
         <TicketAttachments files={files} onChange={value => { setFiles(value); draft.current = crypto.randomUUID(); }} disabled={send.isPending} onBusy={setUploading} />
         {send.isError && <p role="alert">{send.error.message}</p>}<button className="btn btn-primary" disabled={send.isPending || uploading || (!reply.trim() && !files.length)}>{send.isPending ? "Sending…" : "Send reply"}</button>
-      </form>}</section><aside className="support-activity"><h3>Activity</h3><ol>{(ticket?.activity || []).map((entry: Row, index: number) => <li key={entry._id || index}><strong>{entry.type === "ASSIGNMENT" ? "Assignment updated" : `${label(entry.type)}${entry.to ? ` · ${label(entry.to)}` : ""}`}</strong><small>{entry.actorId?.name || "Support"} · {date(entry.at)}</small></li>)}</ol><p className="subtle">Created {date(ticket?.createdAt)}</p>
+      </form>}</section><aside className="support-activity"><SupportTicketActivity ticket={ticket} replies={entries} assignees={management.data?.data.assignees} hasEarlierReplies={history.hasNextPage} />
         {admin && <section className="support-internal"><h3>Internal notes</h3><p className="subtle">Visible only to platform support administrators.</p><QueryState query={management}>{management.data?.data.notes.map(entry => <article key={entry.key}><strong>{entry.authorId?.name || "Support"}</strong><p>{entry.body}</p><small>{date(entry.at)}</small></article>)}</QueryState>
           <form className="modal-form" onSubmit={event => { event.preventDefault(); if (!saveNote.isPending) saveNote.mutate(); }}><label className="field"><span>Add internal note</span><textarea className="textarea" required maxLength={5000} disabled={saveNote.isPending} value={note} onChange={event => { setNote(event.target.value); noteKey.current = crypto.randomUUID(); }} /></label>{saveNote.isError && <p role="alert">{saveNote.error.message}</p>}<button className="btn btn-secondary" disabled={saveNote.isPending || !note.trim()}>Save internal note</button></form>
         </section>}

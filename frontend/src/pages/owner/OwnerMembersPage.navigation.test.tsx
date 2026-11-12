@@ -83,3 +83,95 @@ it("selects only visible members and exports their exact public IDs", async () =
     context.permissions = ["gym:read", "member:read", "finance:read"];
   }
 });
+
+it("keeps pagination outside the member scroll region and resets scrolling on page and filter changes", async () => {
+  network.request.mockReset();
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  sessionStorage.clear();
+  const name = "Asha Rao with a very long member name";
+  const trainer = "Trainer with a long full name";
+  const email = "a.long.email.address.for.the.member@example.com";
+  const plan = "Annual strength and personal training membership";
+  network.request.mockImplementation(async (path: string) => ({
+    data: path.startsWith("/api/v1/owner/members?") ? [{
+      publicId: "member-one", status: "ACTIVE", contact: { name, email, phone: "+919111111111" },
+      assignedTrainerId: { name: trainer, phone: "+919222222222" },
+      currentSubscriptionId: { status: "ACTIVE", planSnapshot: { name: plan } },
+    }] : [],
+    meta: { total: 80, pages: 8 },
+  }));
+  const host = document.createElement("div"), root = createRoot(host), client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+  document.body.append(host);
+  const waitForList = async () => {
+    await act(async () => { await new Promise((resolve) => { setTimeout(resolve, 20); }); });
+    return host.querySelector<HTMLDivElement>('[aria-label="Member list"]')!;
+  };
+  try {
+    await act(async () => { root.render(<QueryClientProvider client={client}><MemoryRouter><OwnerMembersPage /></MemoryRouter></QueryClientProvider>); });
+    let region = await waitForList();
+    expect(region.tabIndex).toBe(0);
+    expect(region.querySelector('[aria-label="Pagination"]')).toBeNull();
+    expect(host.querySelector('[aria-label="Pagination"]')).not.toBeNull();
+    for (const text of [name, trainer, email, plan])
+      expect([...region.querySelectorAll("[title]")].some((node) => node.getAttribute("title") === text && node.textContent === text)).toBe(true);
+
+    region.scrollTop = 320;
+    await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Next page"]')!.click());
+    region = await waitForList();
+    expect(region.scrollTop).toBe(0);
+    expect(host.querySelector('[aria-current="page"]')?.getAttribute("aria-label")).toBe("Page 2");
+    region.scrollTop = 200;
+    // Returning to a cached page must reset the same scroll container too.
+    await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Previous page"]')!.click());
+    region = await waitForList();
+    expect(region.scrollTop).toBe(0);
+    region.scrollTop = 180;
+    await act(async () => {
+      const select = host.querySelector<HTMLSelectElement>('[aria-label="Membership status"]')!;
+      select.value = "ACTIVE";
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect((await waitForList()).scrollTop).toBe(0);
+    expect(network.request.mock.calls.some(([path]) => path.includes("membershipStatus=ACTIVE"))).toBe(true);
+  } finally {
+    await act(async () => root.unmount()); host.remove(); client.clear(); sessionStorage.clear();
+  }
+});
+
+it("opens row actions outside the scroll region and dismisses them with Escape, outside interaction or scrolling", async () => {
+  network.request.mockReset();
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  sessionStorage.clear();
+  context.permissions = ["gym:read", "member:read", "member:write", "finance:read"];
+  network.request.mockImplementation(async (path: string) => ({
+    data: path.startsWith("/api/v1/owner/members?") ? [{ publicId: "member-one", status: "ACTIVE", contact: { name: "Asha" } }] : [],
+    meta: { total: 1 },
+  }));
+  const host = document.createElement("div"), root = createRoot(host), client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  document.body.append(host);
+  const actions = () => document.querySelector('[aria-label="Actions for Asha"]');
+  try {
+    await act(async () => { root.render(<QueryClientProvider client={client}><MemoryRouter><OwnerMembersPage /></MemoryRouter></QueryClientProvider>); });
+    await act(async () => { await new Promise((resolve) => { setTimeout(resolve, 20); }); });
+    const trigger = host.querySelector<HTMLButtonElement>('[aria-label="More actions for Asha"]')!;
+    await act(async () => trigger.click());
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    expect(actions()?.parentElement).toBe(document.body);
+    expect(actions()?.textContent).toContain("Assign trainer");
+    expect(actions()?.querySelector('a[href="/owner/members/member-one#member-payments"]')).not.toBeNull();
+    expect(document.activeElement).toBe(actions()?.querySelector("a"));
+    await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+    expect(actions()).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+    await act(async () => trigger.click());
+    await act(async () => document.body.dispatchEvent(new Event("pointerdown", { bubbles: true })));
+    expect(actions()).toBeNull();
+    await act(async () => trigger.click());
+    await act(async () => host.querySelector('[aria-label="Member list"]')!.dispatchEvent(new Event("scroll")));
+    expect(actions()).toBeNull();
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+  } finally {
+    await act(async () => root.unmount()); host.remove(); client.clear(); sessionStorage.clear();
+    context.permissions = ["gym:read", "member:read", "finance:read"];
+  }
+});

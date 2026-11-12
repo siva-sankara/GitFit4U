@@ -5,6 +5,8 @@ import { useSearchParams } from "react-router-dom";
 import { apiRequest, type ApiEnvelope } from "../services/apiClient";
 import "../styles/whatsapp.css";
 import { Pagination } from "./DataListControls";
+import { BackIconButton } from "./BackIconControl";
+import { ListViewport } from "./ListViewport";
 
 type Conversation = {
   publicId: string;
@@ -94,6 +96,7 @@ export function WhatsAppInbox() {
     onSuccess: () => { const next = new URLSearchParams(params); next.delete("conversation"); setParams(next); void client.invalidateQueries({ queryKey: ["whatsapp-conversations"] }); },
   });
   const select = (id: string) => { const next = new URLSearchParams(params); next.set("channel", "whatsapp"); next.set("conversation", id); setParams(next); };
+  const showList = () => { const next = new URLSearchParams(params); next.delete("conversation"); setParams(next); };
   const conversation = details.data?.data;
   const canText = Boolean(conversation?.serviceWindowOpen && !conversation.sender?.outboundPaused && conversation.sender?.status === "CONNECTED");
   const canTemplate = Boolean(templateKey && !conversation?.sender?.outboundPaused && conversation?.sender?.status === "CONNECTED");
@@ -102,18 +105,20 @@ export function WhatsAppInbox() {
     <aside className={`whatsapp-conversation-list ${active ? "is-selected" : ""}`} aria-label="WhatsApp conversations">
       <div className="whatsapp-list-header"><div><h2>WhatsApp</h2><p>Business API inbox</p></div><button className="icon-button" aria-label="Refresh WhatsApp conversations" onClick={() => void conversations.refetch()}><RefreshCw size={18} /></button></div>
       <div className="whatsapp-list-tools"><input className="input" type="search" value={searchDraft} onChange={(event) => setSearchDraft(event.target.value)} placeholder="Search contacts" aria-label="Search WhatsApp contacts" /><label><input type="checkbox" checked={archived} onChange={(event) => { setArchived(event.target.checked); setPage(1); }} /> Archived</label></div>
-      {conversations.isPending && <p role="status">Loading conversations…</p>}
-      {conversations.isError && <p role="alert">{conversations.error.message}</p>}
-      <div className="whatsapp-list-scroll">{conversations.data?.data.map((item) => <button key={item.publicId} className={`whatsapp-conversation-row ${active === item.publicId ? "active" : ""}`} onClick={() => select(item.publicId)}><span className="whatsapp-avatar"><MessageSquareText size={20} /></span><span><strong>{item.contactName || "WhatsApp contact"}</strong><small>{item.displayPhone || "Private number"}</small><small>{time(item.lastMessageAt)}</small></span>{item.unreadCount > 0 && <b aria-label={`${item.unreadCount} unread`}>{item.unreadCount}</b>}</button>)}</div>
-      {conversations.data && !conversations.data.data.length && <p className="whatsapp-empty">No {archived ? "archived " : ""}WhatsApp conversations.</p>}
+      <ListViewport className="whatsapp-list-scroll" label="WhatsApp conversation list" resetKey={`${page}:${limit}:${archived}:${search}`}>
+        {conversations.isPending && <p role="status">Loading conversations…</p>}
+        {conversations.isError && <p role="alert">{conversations.error.message}</p>}
+        {conversations.data?.data.map((item) => <button key={item.publicId} className={`whatsapp-conversation-row ${active === item.publicId ? "active" : ""}`} aria-current={active === item.publicId ? "true" : undefined} onClick={() => select(item.publicId)}><span className="whatsapp-avatar"><MessageSquareText size={18} /></span><span><strong title={item.contactName || "WhatsApp contact"}>{item.contactName || "WhatsApp contact"}</strong><small title={item.displayPhone || "Private number"}>{item.displayPhone || "Private number"}</small><small title={time(item.lastMessageAt)}>{time(item.lastMessageAt)}</small></span>{item.unreadCount > 0 && <b aria-label={`${item.unreadCount} unread`}>{item.unreadCount}</b>}</button>)}
+        {conversations.data && !conversations.data.data.length && <p className="whatsapp-empty">No {archived ? "archived " : ""}WhatsApp conversations.</p>}
+      </ListViewport>
       <Pagination page={page} limit={limit} total={conversations.data?.meta?.total || 0} loading={conversations.isFetching} onPageChange={setPage} onLimitChange={(value) => { setLimit(value); setPage(1); }} />
     </aside>
     <section className={`whatsapp-chat ${active ? "is-selected" : ""}`}>
       {!active ? <div className="whatsapp-empty-state"><MessageSquareText size={42} /><h2>Select a WhatsApp conversation</h2><p>Member-initiated messages and authorised business conversations appear here.</p></div> : <>
-        <header className="whatsapp-chat-header"><div><h2>{conversation?.contactName || "WhatsApp contact"}</h2><p>{conversation?.displayPhone} · via {conversation?.sender?.name || conversation?.sender?.displayPhoneNumber || "business sender"}</p></div><button className="btn btn-ghost" disabled={archive.isPending} onClick={() => archive.mutate(!conversation?.archivedAt)}>{conversation?.archivedAt ? <ArchiveRestore size={17} /> : <Archive size={17} />}{conversation?.archivedAt ? "Restore" : "Archive"}</button></header>
+        <header className="whatsapp-chat-header"><BackIconButton className="whatsapp-chat-back" label="Back to WhatsApp conversations" onClick={showList} /><div><h2 title={conversation?.contactName || "WhatsApp contact"}>{conversation?.contactName || "WhatsApp contact"}</h2><p title={`${conversation?.displayPhone || ""} · via ${conversation?.sender?.name || conversation?.sender?.displayPhoneNumber || "business sender"}`}>{conversation?.displayPhone} · via {conversation?.sender?.name || conversation?.sender?.displayPhoneNumber || "business sender"}</p></div><button className="btn btn-ghost" disabled={archive.isPending} onClick={() => archive.mutate(!conversation?.archivedAt)}>{conversation?.archivedAt ? <ArchiveRestore size={17} /> : <Archive size={17} />}{conversation?.archivedAt ? "Restore" : "Archive"}</button></header>
         {!conversation?.serviceWindowOpen && <p className="whatsapp-window-notice">The 24-hour customer-service window is closed. Send an approved template to restart contact.</p>}
         {conversation?.sender?.outboundPaused && <p className="whatsapp-window-notice">Outbound WhatsApp delivery is paused for this sender.</p>}
-        <div className="whatsapp-message-history" aria-live="polite">
+        <div className="whatsapp-message-history" role="log" aria-label="WhatsApp message history" aria-live="polite" tabIndex={0}>
           {messages.isPending && <p role="status">Loading messages…</p>}
           {messages.isError && <p role="alert">{messages.error.message}</p>}
           {messages.hasNextPage && <button type="button" className="btn btn-secondary" disabled={messages.isFetchingNextPage} onClick={() => void messages.fetchNextPage()}>{messages.isFetchingNextPage ? "Loading…" : "Load earlier messages"}</button>}

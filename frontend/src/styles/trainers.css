@@ -1,0 +1,44 @@
+.owner-trainers-page .trainer-toolbar { flex: 1 1 400px; justify-content: flex-end; gap: 8px; max-width: 560px; }
+.owner-trainers-page .trainer-search { flex: 1; min-width: 0; width: auto; max-width: none; margin: 0; }
+.owner-trainers-page .trainer-search input { min-width: 0; width: 100%; }
+.owner-trainers-page .trainer-toolbar > .btn { flex-shrink: 0; white-space: nowrap; }
+.owner-trainers-page .trainer-directory { padding: 0; overflow: hidden; border-radius: 14px; }
+.owner-trainers-page .trainer-directory .data-pagination { padding: 12px; margin: 0; border-top: 1px solid var(--border); }
+.owner-trainers-page .member-management-table { min-width: 880px; width: 100%; }
+.owner-trainers-page .trainer-name-column { width: 22%; }
+.owner-trainers-page .trainer-contact-column { width: 23%; }
+.owner-trainers-page .trainer-specialization-column { width: 18%; }
+.owner-trainers-page .trainer-experience-column { width: 13%; }
+.owner-trainers-page .trainer-status-column { width: 11%; }
+.owner-trainers-page .trainer-action-column { width: 13%; }
+.owner-trainers-page .member-management-table :is(th, td) { padding: 10px 12px; vertical-align: middle; text-align: left; }
+.owner-trainers-page .member-management-table th { font-size: var(--text-size-caption); white-space: normal; text-transform: none; letter-spacing: 0; }
+.owner-trainers-page .member-management-table tbody tr:hover { background: var(--surface-elevated); }
+.owner-trainers-page .member-identity { gap: 10px; min-width: 0; }
+.owner-trainers-page .trainer-name { font-weight: 650; }
+.owner-trainers-page .trainer-contact-cell { font-variant-numeric: tabular-nums; }
+.owner-trainers-page .trainer-contact-cell small { display: block; margin-top: 3px; color: var(--text-secondary); }
+.owner-trainers-page .member-management-table :is(th:nth-child(4), .trainer-experience-cell) { text-align: right; font-variant-numeric: tabular-nums; }
+.owner-trainers-page .member-management-table :is(th:last-child, .trainer-action-cell) { text-align: right; }
+.owner-trainers-page .trainer-action-cell .btn { white-space: nowrap; }
+.trainer-availability { border: 1px solid var(--border); border-radius: 12px; padding: 12px; margin: 0; min-width: 0; }
+.trainer-availability legend { padding-inline: 6px; font-weight: 600; }
+.trainer-availability-row { display: grid; grid-template-columns: minmax(90px, 1fr) repeat(2, minmax(0, 1fr)) auto; gap: 10px; align-items: end; margin-bottom: 12px; }
+.trainer-availability-row label { display: grid; gap: 5px; min-width: 0; }
+.trainer-availability-row :is(input, select) { width: 100%; min-width: 0; }
+@media (max-width: 900px) {
+  .owner-trainers-page .trainer-toolbar { flex-basis: 100%; max-width: none; }
+}
+@media (max-width: 680px) {
+  .owner-trainers-page .trainer-directory .member-management-table { display: block; min-width: 0; }
+  .owner-trainers-page .member-management-table colgroup { display: none; }
+  .owner-trainers-page .member-management-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .owner-trainers-page .member-management-table tbody { display: block; }
+  .owner-trainers-page .member-management-table tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 12px; padding: 12px; border-bottom: 1px solid var(--border); }
+  .owner-trainers-page .member-management-table td { display: block; border: 0; padding: 0; min-width: 0; text-align: left; }
+  .owner-trainers-page .trainer-name-cell,
+  .owner-trainers-page .trainer-contact-cell { grid-column: 1 / -1; }
+  .owner-trainers-page .member-management-table td[data-label]::before { content: attr(data-label); display: block; margin-bottom: 4px; color: var(--text-secondary); font-size: var(--text-size-caption); }
+  .owner-trainers-page .member-management-table .trainer-action-cell { align-self: end; text-align: right; }
+  .trainer-availability-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

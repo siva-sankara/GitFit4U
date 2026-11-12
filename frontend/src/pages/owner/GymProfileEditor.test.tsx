@@ -160,6 +160,19 @@ it("removes the gym logo reference without deleting unrelated files", async () =
   });
   expect(mocks.upload).not.toHaveBeenCalled();
 });
+it("discards an unsaved logo preview without changing the saved logo", async () => {
+  URL.createObjectURL = vi.fn(() => "blob:discard-logo");
+  URL.revokeObjectURL = vi.fn();
+  await render(<GymLogoEditor gym={{ name: "Test Gym", logoUrl: "https://storage.test/current-logo" }} />);
+  await choose(new File(["logo"], "new-logo.png", { type: "image/png" }));
+  expect(host.querySelector("img")?.getAttribute("src")).toBe("blob:discard-logo");
+  await act(async () => button("Discard").click());
+  expect(host.querySelector("img")?.getAttribute("src")).toBe("https://storage.test/current-logo");
+  expect(button("Save logo").disabled).toBe(true);
+  expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:discard-logo");
+  expect(mocks.request).not.toHaveBeenCalled();
+  expect(mocks.upload).not.toHaveBeenCalled();
+});
 it("retains the selected video after a cloud failure and retries", async () => {
   mocks.upload.mockRejectedValueOnce(new Error("Cloud access denied"));
   await render(<GymMediaEditor gym={{ mediaAttachmentIds: [], media: [] }} />);

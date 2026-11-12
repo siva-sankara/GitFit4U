@@ -1,3 +1,4 @@
+import { ListViewport } from "../../components/ListViewport";
 import { PageHeader } from "../../components/PageHeader";
 import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -145,31 +146,33 @@ export function AdminBroadcastPage() {
       <section className="broadcast-history" aria-label="Announcement history">
         <h2>Delivery history</h2>
         <QueryState query={history}>
-          {history.data?.data.map((row) => (
-            <article className="panel broadcast-card" key={row.publicId}>
-              <header>
-                <strong>{row.name}</strong>
-                <StatusBadge status={row.status} />
-              </header>
-              <p>{row.message}</p>
-              <small>
-                {date(row.createdAt)} ·{" "}
-                {(row.audience?.roles || [])
-                  .map(
-                    (role: string) =>
-                      audiences.find((item) => item.value === role)?.label ||
-                      role,
-                  )
-                  .join(", ")}
-              </small>
-              <p>
-                {row.analytics?.delivered || 0} inbox deliveries
-                {row.status === "COMPLETED"
-                  ? " · Complete"
-                  : " · Processing in background"}
-              </p>
-            </article>
-          ))}
+          <ListViewport label="Sent announcements" resetKey={page}>
+            {history.data?.data.map((row) => (
+              <article className="panel broadcast-card" key={row.publicId}>
+                <header>
+                  <strong>{row.name}</strong>
+                  <StatusBadge status={row.status} />
+                </header>
+                <p>{row.message}</p>
+                <small>
+                  {date(row.createdAt)} ·{" "}
+                  {(row.audience?.roles || [])
+                    .map(
+                      (role: string) =>
+                        audiences.find((item) => item.value === role)?.label ||
+                        role,
+                    )
+                    .join(", ")}
+                </small>
+                <p>
+                  {row.analytics?.delivered || 0} inbox deliveries
+                  {row.status === "COMPLETED"
+                    ? " · Complete"
+                    : " · Processing in background"}
+                </p>
+              </article>
+            ))}
+          </ListViewport>
           {!history.data?.data.length && (
             <div className="state-card panel">No announcements sent yet.</div>
           )}

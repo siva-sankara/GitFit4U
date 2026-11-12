@@ -1,3 +1,4 @@
+import { ListViewport } from "../../components/ListViewport";
 import { PlatformCheckoutOffers } from "../../components/PlatformCheckoutOffers";
 import { PageHeader } from "../../components/PageHeader";
 import { CompactFilters } from "../../components/CompactFilters";
@@ -406,11 +407,13 @@ export function LiveExplore() {
         <p>
           {query.data?.meta?.total ?? query.data?.data.length ?? 0} gyms found
         </p>
-        <div className="live-card-grid">
-          {query.data?.data.map((gym) => (
-            <DatabaseGymCard key={gym._id} gym={gym} />
-          ))}
-        </div>
+        <ListViewport label="Gyms" resetKey={params.toString()}>
+          <div className="live-card-grid">
+            {query.data?.data.map((gym) => (
+              <DatabaseGymCard key={gym._id} gym={gym} />
+            ))}
+          </div>
+        </ListViewport>
         {!query.data?.data.length && (
           <section className="state-card panel">
             <h2>No gyms match your search</h2>

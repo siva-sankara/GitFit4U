@@ -4,7 +4,7 @@ import { apiRequest, type ApiEnvelope } from "../services/apiClient";
 import type { Row } from "../pages/live/LiveData";
 import { StatusBadge } from "./StatusBadge";
 
-export function RazorpayOAuthSettings({ gym, disabled = false }: { gym: Row; disabled?: boolean }) {
+export function RazorpayOAuthSettings({ gym, disabled = false, embedded = false }: { gym: Row; disabled?: boolean; embedded?: boolean }) {
   const client = useQueryClient();
   const gymId = String(gym.publicId || gym.id || "");
   const query = useQuery({
@@ -36,7 +36,7 @@ export function RazorpayOAuthSettings({ gym, disabled = false }: { gym: Row; dis
   const status = connection?.authorizationStatus || "NOT_CONNECTED";
 
   return (
-    <section className="panel form-section page-stack payment-connection-settings">
+    <section className={`${embedded ? "" : "panel form-section "}page-stack payment-connection-settings`}>
       <div className="section-heading">
         <div>
           <span className="eyebrow">Gym-owned Razorpay merchant</span>
@@ -76,4 +76,3 @@ export function RazorpayOAuthSettings({ gym, disabled = false }: { gym: Row; dis
     </section>
   );
 }
-

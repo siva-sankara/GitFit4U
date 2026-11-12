@@ -202,7 +202,7 @@
 .notification-button span { position: absolute; top: 8px; right: 8px; width: 7px; height: 7px; border: 2px solid var(--bg); border-radius: 50%; background: var(--error); }
 .role-switcher { min-height: 40px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-muted); padding: 0 12px; font-size: var(--text-size-small); }
 
-.workspace-content { width: 100%; max-width: 1600px; margin-inline: auto; padding: clamp(0px, 3vw, 42px); }
+.workspace-content { width: 100%; max-width: 1600px; margin-inline: auto; padding: 0 20px  }
 .page-stack { display: grid; gap: 26px; }
 .page-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; }
 .page-heading h1 { margin: 7px 0 9px; font-size: clamp(2rem, 4vw, 3.3rem); line-height: 1; }

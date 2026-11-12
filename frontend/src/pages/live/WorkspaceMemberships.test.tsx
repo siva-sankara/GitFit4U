@@ -115,15 +115,16 @@ it("renders the owner member directory columns, actions and working row selectio
   expect(
     host.querySelector('select[aria-label="Assigned trainer"]'),
   ).not.toBeNull();
-  expect(
-    host.querySelector('a[href="/owner/members/member-public"]'),
-  ).not.toBeNull();
   expect(host.querySelector('a[aria-label^="Call member "]')).not.toBeNull();
   expect(host.querySelector('button[aria-label^="Open in-app chat "]')).not.toBeNull();
   expect(host.querySelector('button[aria-label^="Send WhatsApp reminder "]')).not.toBeNull();
-  expect(host.querySelector('summary[aria-label^="More actions "]')).not.toBeNull();
-  expect(host.querySelector('a[href="/owner/members/member-public#member-attendance"]')).toBeNull();
-  expect(host.querySelector('a[href="/owner/members/member-public#member-payments"]')).not.toBeNull();
+  const more = host.querySelector<HTMLButtonElement>('button[aria-label^="More actions "]')!;
+  expect(more).not.toBeNull();
+  await act(async () => more.click());
+  const actions = document.querySelector('[aria-label="Actions for Member One"]')!;
+  expect(actions.querySelector('a[href="/owner/members/member-public"]')).not.toBeNull();
+  expect(actions.querySelector('a[href="/owner/members/member-public#member-attendance"]')).toBeNull();
+  expect(actions.querySelector('a[href="/owner/members/member-public#member-payments"]')).not.toBeNull();
   const selection = host.querySelector<HTMLInputElement>('[aria-label="Select Member One"]')!;
   await act(async () => selection.click());
   expect(selection.closest("tr")?.getAttribute("aria-selected")).toBe("true");
@@ -133,8 +134,9 @@ it("omits payment actions for staff without finance access", async () => {
   mocks.role = "GYM_STAFF";
   mocks.permissions = ["member:read"];
   await render("/owner/members");
+  await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label^="More actions "]')!.click());
   expect(
-    host.querySelector('a[href="/owner/members/member-public#member-payments"]'),
+    document.querySelector('[aria-label="Actions for Member One"] a[href="/owner/members/member-public#member-payments"]'),
   ).toBeNull();
 });
 it("uses a compact gym status label and badge instead of an oversized heading", async () => {

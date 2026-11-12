@@ -1,0 +1,99 @@
+/* Shared density across routed pages. Keep content readable and touch targets usable. */
+:root {
+  --page-gap: 12px;
+  --panel-padding: 14px;
+  --control-height: 40px;
+}
+.workspace-content { min-width: 0; padding: 16px; }
+.page-stack, .workspace-content .page-stack { min-width: 0; gap: var(--page-gap); }
+.workspace-content :is(.page-heading, .section-heading), .shared-page-heading { gap: 8px 12px; }
+.workspace-content .page-heading h1, .shared-page-heading h1 { font-size: var(--text-size-page); margin: 0; line-height: 1.25; }
+.workspace-content .page-heading p, .shared-page-heading p { margin: 4px 0 0; font-size: var(--text-size-small); line-height: 1.45; }
+.workspace-content :is(h2, h3) { margin-bottom: 8px; }
+.workspace-content :is(h2, h3, p, dt, dd) { overflow-wrap: anywhere; }
+.workspace-content .heading-actions, .modal-content .heading-actions { gap: 6px; }
+.workspace-content :is(.btn, .input, .select), .modal-content :is(.btn, .input, .select) { min-height: var(--control-height); }
+.workspace-content .btn, .modal-content .btn { padding: 7px 12px; gap: 6px; font-size: var(--text-size-small); }
+.workspace-content :is(.input, .select), .modal-content :is(.input, .select) { padding: 8px 10px; }
+.workspace-content .search-field { min-height: var(--control-height); padding: 0 10px; }
+.workspace-content .field, .modal-content .field { gap: 5px; min-width: 0; }
+.workspace-content :is(.form-grid, .profile-field-grid, .class-form-grid, .member-management-form, .detail-grid),
+.modal-content :is(.form-grid, .class-form-grid, .member-management-form) { gap: 12px; }
+.workspace-content :is(.modal-form, .profile-editor > form, .class-editor) { gap: 12px; }
+.workspace-content .table-toolbar { flex-wrap: wrap; align-items: end; gap: 8px; padding: 10px 12px; }
+.workspace-content .table-toolbar > *, .compact-filter-fields > * { min-width: 0; }
+.workspace-content .table-toolbar :is(input, select) { max-width: 100%; }
+.workspace-content .compact-filter-fields { gap: 8px; }
+.workspace-content :is(.form-section, .chart-card, .dashboard-chart-panel, .dashboard-gym-status,
+  .owner-status-card, .platform-summary-card, .plan-card, .trainer-card,
+  .account-identity, .account-personal, .profile-section, .profile-edit-group) { padding: var(--panel-padding); }
+.workspace-content :is(.stat-grid, .stats-grid, .revenue-kpis, .owner-status-grid,
+  .platform-summary-grid, .dashboard-chart-grid, .plans-grid, .trainer-grid,
+  .member-subscription-grid, .live-card-grid, .account-overview-grid, .profile-columns) { gap: 12px; }
+.workspace-content :is(.metric-tile, .stat-card, .revenue-kpi, .account-stat-grid > *) { padding: 12px; min-height: 0; gap: 5px; }
+.workspace-content :is(.metric-tile, .stat-card, .revenue-kpi) > strong { font-size: clamp(1.25rem, 1.1rem + .7vw, 1.7rem); line-height: 1.2; }
+.workspace-content :is(.metric-tile, .stat-card, .revenue-kpi) > p { margin: 0; }
+.workspace-content :is(.state-card, .feedback-state, .subscription-empty) { padding: 24px 14px; gap: 8px; }
+.workspace-content :is(.state-card, .feedback-state) > :is(p, h2, h3) { margin: 0; }
+.workspace-content :is(th, td) { padding: 8px 10px; }
+.workspace-content .data-pagination { min-height: 50px; padding: 8px 12px; gap: 10px; flex-wrap: wrap; }
+.workspace-content .bulk-action-bar { padding: 8px 12px; gap: 8px; }
+.workspace-content .table-footer { padding: 8px 12px; }
+.workspace-content .member-summary-grid { margin-block: 8px; padding-block: 4px; gap: 10px; }
+.workspace-content .status-badge { padding: 2px 7px; gap: 5px; }
+.workspace-content .social-profile { gap: 12px; }
+.workspace-content :is(.profile-hero, .profile-post, .broadcast-form, .broadcast-card) { padding: 14px; gap: 10px; }
+.workspace-content .profile-post { margin-bottom: 10px; }
+.workspace-content .broadcast-card { margin-bottom: 10px; }
+.workspace-content .gym-identity { gap: 8px; }
+.workspace-content .gym-identity-logo { width: 34px; height: 34px; flex-basis: 34px; border-radius: 9px; }
+.gym-identity-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Card lists use the same outer viewport; cards never add their own vertical scroll. */
+.list-viewport > :is(.class-card-grid, .member-subscription-grid, .live-card-grid, .promotion-grid) {
+  max-height: none; overflow: visible; align-items: start; gap: 10px; padding: 2px;
+}
+.list-viewport > :is(.gd-plans, .class-grid) { gap: 12px; margin: 0; }
+.workspace-content :is(.class-card, .promotion-card, .live-subscription-card) { padding: 12px; gap: 8px; }
+.workspace-content .live-subscription-card h2 { font-size: var(--text-size-card); }
+.workspace-content .live-subscription-details { gap: 10px; padding-block: 10px; }
+.workspace-content .subscriptions-toolbar { gap: 8px; padding: 10px 12px; }
+.workspace-content .subscription-notice { padding: 12px; }
+.workspace-content .class-card dl { gap: 8px; }
+.class-card h3, .class-trainer > span, .class-card > small { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.class-card .class-description { max-height: none; overflow: visible; }
+.class-card .class-image { max-height: 140px; }
+.workspace-content .support-ticket-list { padding: 0; }
+.workspace-content .support-ticket-list .list-viewport { margin-inline: 10px; }
+.workspace-content .support-ticket-list td { white-space: normal; }
+.workspace-content .support-detail-grid { gap: 12px; }
+
+/* Public, account-creation and dialog routes share the compact rhythm. */
+.section { padding-block: clamp(32px, 4vw, 56px); }
+.hero-copy h1, .auth-story h1, .onboarding-aside h1 { font-size: clamp(1.8rem, 1.2rem + 2.2vw, 3rem); }
+.info-page { padding-block: 24px; }
+.gym-card-content { padding: 14px; }
+.gym-card-content :is(h3, p) { margin-bottom: 8px; }
+.gd-section, .gd-join-card, .gd-plan { padding: 16px; }
+.gd-plans { gap: 12px; }
+.auth-desktop > .auth-card { padding: 24px; }
+.activation-page { width: 100%; max-width: 560px; margin: 32px auto; padding: 16px; }
+.activation-page > .panel { padding: 18px; }
+.activation-page .modal-form { gap: 12px; }
+.auth-card form, .registration-section { gap: 12px; }
+.registration-section { padding: 16px; }
+.modal-layer .modal-header { padding: 12px 16px; }
+.modal-layer .modal-content { padding: 14px 16px; }
+.modal-layer :is(.modal-form, .form-grid, .page-stack) { gap: 12px; }
+.modal-layer .modal-footer { padding: 10px 16px; gap: 8px; }
+
+@media (max-width: 680px) {
+  .workspace-content { padding: 12px 10px 24px; }
+  .workspace-content .data-pagination { gap: 8px; }
+  .auth-desktop > .auth-card { padding: 20px 16px; }
+}
+@media (pointer: coarse) {
+  :root { --control-height: 44px; }
+  .workspace-content :is(.btn, .input, .select), .modal-content :is(.btn, .input, .select) { min-height: 44px; }
+  .workspace-content :is(input, select, textarea), .modal-content :is(input, select, textarea) { font-size: 1rem; }
+}

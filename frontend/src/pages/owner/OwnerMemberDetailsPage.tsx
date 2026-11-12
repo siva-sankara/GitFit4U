@@ -1,3 +1,4 @@
+import { ListViewport } from "../../components/ListViewport";
 import { PageHeader } from "../../components/PageHeader";
 import { useEffect, useState } from "react";
 import { useCurrentUser } from "../../api/hooks";
@@ -478,35 +479,37 @@ export function OwnerMemberDetailsPage({ id }: { id: string }) {
             <p>
               Latest 50 payments. The Payments page contains the full history.
             </p>
-            <table className="member-management-table">
-              <thead>
-                <tr>
-                  <th>Date</th>
-                  <th>Amount</th>
-                  <th>Method</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {query.data?.data.payments.map((payment) => (
-                  <tr key={payment.publicId}>
-                    <td>
-                      {gymDate(
-                        payment.capturedAt || payment.createdAt,
-                        timezone,
-                      )}
-                    </td>
-                    <td>{formatMoney(payment.amountMinor)}</td>
-                    <td>
-                      {payment.provider} {payment.methodCategory}
-                    </td>
-                    <td>
-                      <StatusBadge status={payment.status} />
-                    </td>
+            <ListViewport label="Member payments" resetKey={member.publicId}>
+              <table className="member-management-table">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Amount</th>
+                    <th>Method</th>
+                    <th>Status</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {query.data?.data.payments.map((payment) => (
+                    <tr key={payment.publicId}>
+                      <td>
+                        {gymDate(
+                          payment.capturedAt || payment.createdAt,
+                          timezone,
+                        )}
+                      </td>
+                      <td>{formatMoney(payment.amountMinor)}</td>
+                      <td>
+                        {payment.provider} {payment.methodCategory}
+                      </td>
+                      <td>
+                        <StatusBadge status={payment.status} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </ListViewport>
             {!query.data?.data.payments.length && (
               <p className="state-card">No payments recorded.</p>
             )}
@@ -517,30 +520,32 @@ export function OwnerMemberDetailsPage({ id }: { id: string }) {
           className="panel member-management-scroll"
         >
           <h2>Recent attendance</h2>
-          <table className="member-management-table">
-            <thead>
-              <tr>
-                <th>Date and time</th>
-                <th>Event</th>
-                <th>Source</th>
-              </tr>
-            </thead>
-            <tbody>
-              {query.data?.data.attendance.map((event) => (
-                <tr key={event.publicId}>
-                  <td>
-                    {new Date(event.occurredAt).toLocaleString(undefined, {
-                      timeZone: timezone,
-                      dateStyle: "medium",
-                      timeStyle: "short",
-                    })}
-                  </td>
-                  <td>{event.type}</td>
-                  <td>{event.source}</td>
+          <ListViewport label="Member attendance" resetKey={member.publicId}>
+            <table className="member-management-table">
+              <thead>
+                <tr>
+                  <th>Date and time</th>
+                  <th>Event</th>
+                  <th>Source</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {query.data?.data.attendance.map((event) => (
+                  <tr key={event.publicId}>
+                    <td>
+                      {new Date(event.occurredAt).toLocaleString(undefined, {
+                        timeZone: timezone,
+                        dateStyle: "medium",
+                        timeStyle: "short",
+                      })}
+                    </td>
+                    <td>{event.type}</td>
+                    <td>{event.source}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </ListViewport>
           {!query.data?.data.attendance.length && (
             <p className="state-card">No attendance recorded.</p>
           )}

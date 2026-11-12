@@ -16,7 +16,7 @@ import {
 } from "../services/firebasePush";
 import "../styles/notifications.css";
 
-export function PushNotificationSettings() {
+export function PushNotificationSettings({ embedded = false }: { embedded?: boolean } = {}) {
   const client = useQueryClient();
   const [supported, setSupported] = useState<boolean | null>(null);
   const [optedIn, setOptedIn] = useState(pushOptedIn);
@@ -133,15 +133,16 @@ export function PushNotificationSettings() {
       setBusy(false);
     }
   }
+  const Container = embedded ? "section" : "details";
   return (
-    <details className="panel notification-preferences" aria-busy={busy}>
-      <summary>
+    <Container className={embedded ? "notification-preferences notification-preferences-embedded" : "panel notification-preferences"} aria-busy={busy}>
+      {!embedded && <summary>
         Notification settings{" "}
         <span>
           {enabled ? "Push connected" : "Inbox available"} · Sound{" "}
           {soundEnabled ? "on" : "off"}
         </span>
-      </summary>
+      </summary>}
       <div className="notification-preference-row">
         <span className="notification-setting-icon" aria-hidden="true">
           {enabled ? <BellRing size={21} /> : <Bell size={21} />}
@@ -239,6 +240,6 @@ export function PushNotificationSettings() {
         </div>
       </div>
       {message && <p role="status">{message}</p>}
-    </details>
+    </Container>
   );
 }

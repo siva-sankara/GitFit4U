@@ -11,7 +11,7 @@ import { AppError } from "../utils/AppError.js";
 import { sha256 } from "../utils/crypto.js";
 import { issueMemberInvitation } from "./accountInvitationService.js";
 import { enqueueWhatsAppDomainEvent } from "./whatsappDeliveryService.js";
-import { normalizeWhatsAppRecipient } from "./whatsappConnectionService.js";
+import { normalizeWhatsAppRecipient, whatsappChatUrl } from "../utils/whatsappDeepLink.js";
 
 export type MemberReminderType =
   | "activation_invitation"
@@ -124,8 +124,7 @@ export function buildMemberReminderMessage(input: {
 }
 
 export function memberReminderWhatsAppUrl(phone: string, message: string) {
-  const recipient = normalizeWhatsAppRecipient(phone);
-  return `https://wa.me/${recipient}?text=${encodeURIComponent(message)}`;
+  return whatsappChatUrl(phone, message);
 }
 
 function existingResponse(communication: any, messageText: string, phone: string) {

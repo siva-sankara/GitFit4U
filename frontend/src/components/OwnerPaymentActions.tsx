@@ -11,7 +11,7 @@ const paid = new Set(["CAPTURED", "PARTIALLY_REFUNDED", "REFUNDED", "REFUND_PEND
 const due = new Set(["CREATED", "PENDING", "AUTHORIZED"]);
 const refundable = new Set(["CAPTURED", "PARTIALLY_REFUNDED", "REFUND_PENDING"]);
 
-export function OwnerPaymentActions({ payment }: { payment: Row }) {
+export function OwnerPaymentActions({ payment, compact = false }: { payment: Row; compact?: boolean }) {
   const client = useQueryClient();
   const [view, setView] = useState(false), [collect, setCollect] = useState(false), [refund, setRefund] = useState(false), [more, setMore] = useState(false), [notice, setNotice] = useState("");
   const download = useMutation({
@@ -61,11 +61,11 @@ export function OwnerPaymentActions({ payment }: { payment: Row }) {
       <ResponsiveActionButtons>
         <TooltipButton tooltip="Open payment and invoice details" icon={Eye} onClick={() => setView(true)}></TooltipButton>
         {paid.has(status) && <TooltipButton tooltip="Download invoice PDF" icon={Download} disabled={download.isPending} onClick={() => download.mutate()}></TooltipButton>}
-        {paid.has(status) && <TooltipButton tooltip="Send receipt to the payer's verified invoice email" icon={MailCheck} disabled={receipt.isPending} onClick={() => receipt.mutate()}></TooltipButton>}
-        {(due.has(status) || status === "FAILED" || status === "CANCELLED") && <TooltipButton tooltip={status === "FAILED" ? "Mark this failed payment as manually paid" : "Record payment for this invoice"} icon={status === "FAILED" ? RotateCcw : HandCoins} onClick={() => setCollect(true)}>{status === "FAILED" ? "Mark manually paid" : "Collect"}</TooltipButton>}
-        {status === "FAILED" && <TooltipButton tooltip="Ask the payer to retry this failed payment" icon={RefreshCw} disabled={reminder.isPending} onClick={() => reminder.mutate()}>Retry</TooltipButton>}
-        {(due.has(status) || status === "CANCELLED") && <TooltipButton tooltip="Send payment reminder by in-app message, notification, and WhatsApp if enabled" icon={Send} disabled={reminder.isPending} onClick={() => reminder.mutate()}>Send Reminder</TooltipButton>}
-        <TooltipButton tooltip="More payment actions" icon={MoreHorizontal} className="btn btn-ghost payment-more-action" onClick={() => setMore(true)}>More</TooltipButton>
+        {!compact && paid.has(status) && <TooltipButton tooltip="Send receipt to the payer's verified invoice email" icon={MailCheck} disabled={receipt.isPending} onClick={() => receipt.mutate()}></TooltipButton>}
+        {(due.has(status) || status === "FAILED" || status === "CANCELLED") && <TooltipButton tooltip={status === "FAILED" ? "Mark this failed payment as manually paid" : "Record payment for this invoice"} icon={status === "FAILED" ? RotateCcw : HandCoins} onClick={() => setCollect(true)}>{compact ? null : status === "FAILED" ? "Mark manually paid" : "Collect"}</TooltipButton>}
+        {!compact && status === "FAILED" && <TooltipButton tooltip="Ask the payer to retry this failed payment" icon={RefreshCw} disabled={reminder.isPending} onClick={() => reminder.mutate()}>Retry</TooltipButton>}
+        {!compact && (due.has(status) || status === "CANCELLED") && <TooltipButton tooltip="Send payment reminder by in-app message, notification, and WhatsApp if enabled" icon={Send} disabled={reminder.isPending} onClick={() => reminder.mutate()}>Send Reminder</TooltipButton>}
+        <TooltipButton tooltip="More payment actions" icon={MoreHorizontal} className="btn btn-ghost payment-more-action" onClick={() => setMore(true)}>{compact ? null : "More"}</TooltipButton>
       </ResponsiveActionButtons>
       {notice && <small role="status" className="payment-action-notice">{notice}</small>}
       {error && <small role="alert" className="form-alert">{error.message}</small>}

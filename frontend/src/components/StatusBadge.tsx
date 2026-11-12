@@ -14,6 +14,7 @@ const warning = new Set([
   "TRIAL",
   "TRIALING",
   "EXPIRING",
+  "EXPIRING_SOON",
   "GRACE",
   "DUE",
   "QUEUED",

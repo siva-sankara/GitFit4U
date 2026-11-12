@@ -13,6 +13,7 @@ const pages: Record<string, [string, string?]> = {
   payments: ["Payments", "finance:read"], revenue: ["Revenue", "finance:read"],
   "gym-profile": ["Gym Profile Settings", "gym:update"], offers: ["Offers", "campaign:write"],
   ads: ["Advertisements", "campaign:write"], messages: ["Messages"], notifications: ["Notifications"],
+  whatsapp: ["WhatsApp Messaging", "member:read"],
   support: ["Support"], profile: ["Profile"], explore: ["Explore gyms"], gyms: ["Gyms"],
   users: ["Users"], clients: ["Clients"], schedule: ["Schedule"], settings: ["Settings"],
   "platform-subscription": ["Platform subscription"], registrations: ["Registrations"],
@@ -37,6 +38,7 @@ export function workspaceTrail(pathname: string, role: string, permissions: stri
   const canLink = !definition?.[1] || role === "ADMIN" || role === "USER" || role === "TRAINER" || permissions.includes(definition[1]);
   if (!definition || !canLink) return [];
   const trail = [root, { label: definition[0], href: `${prefix}/${parts[1]}` }];
+  if (role === "GYM_OWNER" && parts[1] === "whatsapp") trail.splice(1, 0, { label: "Messages", href: `${prefix}/messages` });
   if (parts.length > 2) trail.push({ label: parts[1] === "attendance" && parts[2] === "qr" ? "Scan gym QR" : parts[1] === "profile" && profileSections[parts[2]] ? profileSections[parts[2]] : "Details", href: pathname });
   return trail;
 }

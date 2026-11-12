@@ -1,3 +1,4 @@
+import { ListViewport } from "../../components/ListViewport";
 import { PageHeader } from "../../components/PageHeader";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -381,34 +382,36 @@ export function OwnerClassManagement({
             <label className="field class-status-filter"><span>Class status</span><select className="select" value={status} onChange={(event) => { setStatus(event.target.value); setPage(1); }}><option value="">All classes</option><option>SCHEDULED</option><option>CANCELLED</option><option>COMPLETED</option></select></label>
           </div>
           <QueryState query={classes}>
-            <div className="class-card-grid">
-              {classes.data?.data.map((session) => (
-                <ClassCard
-                  key={session.publicId}
-                  session={session}
-                  actions={
-                    (
-                      <>
-                        <button className="btn btn-secondary" onClick={() => { setBookingPage(1); setBookingClass(session); }}>View bookings</button>
-                        {write && session.status !== "CANCELLED" && <button className="btn btn-secondary" onClick={() => setEditing(session)}>Edit / assign trainer</button>}
-                        {write && session.status === "SCHEDULED" && (
-                          <button
-                            className="btn btn-secondary"
-                            onClick={() => {
-                              setReason("");
-                              cancel.reset();
-                              setCancelling(session);
-                            }}
-                          >
-                            Cancel class
-                          </button>
-                        )}
-                      </>
-                    )
-                  }
-                />
-              ))}
-            </div>
+            <ListViewport label="Gym classes" resetKey={`${page}:${limit}:${status}:${search}`}>
+              <div className="class-card-grid">
+                {classes.data?.data.map((session) => (
+                  <ClassCard
+                    key={session.publicId}
+                    session={session}
+                    actions={
+                      (
+                        <>
+                          <button className="btn btn-secondary" onClick={() => { setBookingPage(1); setBookingClass(session); }}>View bookings</button>
+                          {write && session.status !== "CANCELLED" && <button className="btn btn-secondary" onClick={() => setEditing(session)}>Edit / assign trainer</button>}
+                          {write && session.status === "SCHEDULED" && (
+                            <button
+                              className="btn btn-secondary"
+                              onClick={() => {
+                                setReason("");
+                                cancel.reset();
+                                setCancelling(session);
+                              }}
+                            >
+                              Cancel class
+                            </button>
+                          )}
+                        </>
+                      )
+                    }
+                  />
+                ))}
+              </div>
+            </ListViewport>
             {!classes.data?.data.length && <EmptyState title="No classes found" detail="Try changing your search or class status." />}
           </QueryState>
           <Pagination page={page} limit={limit} total={classes.data?.meta?.total || 0} loading={classes.isFetching} onPageChange={setPage} onLimitChange={(value) => { setLimit(value); setPage(1); }} />

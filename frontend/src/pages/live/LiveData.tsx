@@ -11,6 +11,7 @@ import { StatusBadge } from "../../components/StatusBadge";
 import { PhoneInput } from "../../components/PhoneInput";
 import { isPhoneField } from "../../services/contactPhoneInput";
 import { EmptyState, Pagination, SkeletonTableRows } from "../../components/DataListControls";
+import { ListViewport, OverflowText } from "../../components/ListViewport";
 export type Row = Record<string, any>;
 export const read = (row: Row, path: string): any =>
   path.split(".").reduce((value, key) => value?.[key], row);
@@ -360,43 +361,45 @@ export function Table({
   rows,
   columns,
   actions,
+  resetKey,
 }: {
   rows: Row[];
   columns: Column[];
   actions?: (row: Row) => ReactNode;
+  resetKey?: string | number;
 }) {
   return rows.length ? (
-    <div
+    <ListViewport
       className="responsive-table"
-      tabIndex={0}
-      role="region"
-      aria-label="Records table"
+      label="Records table"
+      resetKey={resetKey ?? rows.map((row) => row._id || row.publicId || row.code).join("|")}
     >
-      <table>
+      <table className="data-records-table" style={{ minWidth: `${columns.length * 145 + (actions ? 224 : 0)}px` }}>
         <thead>
           <tr>
             {columns.map((c) => (
-              <th key={c.key}>{c.title}</th>
+              <th key={c.key} scope="col" className={c.format === "money" ? "data-number" : undefined}>{c.title}</th>
             ))}
-            {actions && <th>Actions</th>}
+            {actions && <th scope="col" className="data-actions">Actions</th>}
           </tr>
         </thead>
         <tbody>
           {rows.map((row) => (
             <tr key={row._id || row.publicId || row.code}>
-              {columns.map((c) => (
-                <td key={c.key}>
-                  {c.render ? c.render(row) : c.link ? (
-                    <Link to={c.link(row)}>{display(row, c)}</Link>
+              {columns.map((c) => {
+                const content = c.render?.(row);
+                return <td key={c.key} className={c.format === "money" ? "data-number" : undefined}>
+                  {c.render ? (typeof content === "string" || typeof content === "number" ? <OverflowText>{content}</OverflowText> : content) : c.link ? (
+                    <Link to={c.link(row)} title={display(row, c)}>{display(row, c)}</Link>
                   ) : c.format === "status" ? (
                     <StatusBadge status={read(row, c.key)} />
                   ) : (
-                    display(row, c)
+                    <OverflowText>{display(row, c)}</OverflowText>
                   )}
-                </td>
-              ))}
+                </td>;
+              })}
               {actions && (
-                <td>
+                <td className="data-actions">
                   <div className="heading-actions">{actions(row)}</div>
                 </td>
               )}
@@ -404,7 +407,7 @@ export function Table({
           ))}
         </tbody>
       </table>
-    </div>
+    </ListViewport>
   ) : (
     <div className="state-card">No records match this view.</div>
   );
@@ -467,6 +470,10 @@ export function ResourcePage({
   statuses,
   actions,
   transform,
+  className = "",
+  description,
+  searchPlaceholder = "Search records",
+  renderTable,
 }: {
   title: string;
   resource: string;
@@ -477,6 +484,10 @@ export function ResourcePage({
   statuses?: string[];
   actions?: (row: Row) => ReactNode;
   transform?: (body: Row) => Row;
+  className?: string;
+  description?: string;
+  searchPlaceholder?: string;
+  renderTable?: (rows: Row[], resetKey: string) => ReactNode;
 }) {
   const [routeParams, setRouteParams] = useSearchParams();
   const selectedRecord = resource === "payments" ? routeParams.get("payment") : resource === "subscriptions" ? routeParams.get("membership") : resource === "gyms" ? routeParams.get("gym") : null;
@@ -504,14 +515,15 @@ export function ResourcePage({
   const rows = query.data?.data || [],
     meta = query.data?.meta;
   return (
-    <div className="page-stack">
+    <div className={`page-stack ${className}`}>
       <PageHeader>
         <div>
           <span className="eyebrow">Workspace</span>
           <h1>{title}</h1>
-          <p>{meta?.total ?? 0} records</p>
+          <p>{description || `${meta?.total ?? 0} records`}</p>
           {selectedRecord && <p>Showing the record from your notification. <button className="btn btn-ghost" onClick={() => { setRouteParams(current => { current.delete("payment"); current.delete("membership"); current.delete("gym"); return current; }); setPage(1); }}>Show all</button></p>}
         </div>
+        {description && <span className="resource-record-count">{query.isPending ? "Loading…" : `${meta?.total ?? 0} records`}</span>}
         {createPath && fields && (
           <button className="btn btn-primary" onClick={() => setAdding(true)}>
             Create {title.toLowerCase().replace(/s$/, "")}
@@ -533,7 +545,7 @@ export function ResourcePage({
             <input
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="Search records"
+              placeholder={searchPlaceholder}
             />
           </label>
           <button className="btn btn-secondary">Search</button>
@@ -624,9 +636,10 @@ export function ResourcePage({
           </button>
         </form>
         <QueryState query={query}>
-          <Table
+          {renderTable ? renderTable(rows, `${resource}:${page}:${limit}:${search}:${from}:${to}:${status}:${selectedRecord || ""}`) : <Table
             rows={rows}
             columns={columns}
+            resetKey={`${resource}:${page}:${limit}:${search}:${from}:${to}:${status}`}
             actions={
               updatePath || actions
                 ? (row) => (
@@ -644,7 +657,7 @@ export function ResourcePage({
                   )
                 : undefined
             }
-          />
+          />}
           {!rows.length && (
             <EmptyState title="No records found" detail="Try changing your search or filters." />
           )}

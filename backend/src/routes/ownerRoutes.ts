@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { getWhatsAppGroup, updateWhatsAppGroup } from "../controllers/manualWhatsAppController.js";
 import rateLimit from "express-rate-limit";
 import multer from "multer";
 import { resendMemberInvitation } from "../controllers/accountInvitationController.js";
@@ -115,6 +116,8 @@ ownerRoutes.post(
 );
 
 ownerRoutes.use(requireRole("GYM_OWNER", "GYM_STAFF"), requireGymContext);
+ownerRoutes.get("/communication/whatsapp-group", requireRole("GYM_OWNER"), requirePermission("gym:read"), getWhatsAppGroup);
+ownerRoutes.patch("/communication/whatsapp-group", requireRole("GYM_OWNER"), requirePermission("gym:update"), updateWhatsAppGroup);
 ownerRoutes.post("/members/:id/invitation/resend", requirePermission("member:write"), rateLimit({ windowMs: 15 * 60_000, limit: 20, standardHeaders: true, legacyHeaders: false }), resendMemberInvitation);
 ownerRoutes.get(
   "/dashboard",

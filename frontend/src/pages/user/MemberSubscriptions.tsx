@@ -1,3 +1,4 @@
+import { ListViewport } from "../../components/ListViewport";
 import { PageHeader } from "../../components/PageHeader";
 import { useState, type FormEvent } from "react";
 import {
@@ -438,144 +439,146 @@ export function MemberSubscriptions() {
           )}
         </section>
       ) : (
-        <div className="member-subscription-grid" aria-busy={query.isFetching}>
-          {rows.map((subscription) => {
-            const plan = subscription.planSnapshot;
-            const pending = subscription.status === "PENDING_PAYMENT";
-            const started =
-              !subscription.startsAt ||
-              Date.parse(subscription.startsAt) <= Date.now();
-            const current =
-              subscription.status === "ACTIVE" &&
-              started &&
-              !!subscription.endsAt &&
-              Date.parse(subscription.endsAt) > Date.now();
-            const available = !!subscription.gymId?._id;
-            const href = subscription.gymId?.slug
-              ? `/app/gyms/${encodeURIComponent(subscription.gymId.slug)}${pending && plan?.planId ? `?plan=${encodeURIComponent(plan.planId)}` : ""}`
-              : undefined;
-            return (
-              <article
-                className="panel live-subscription-card"
-                key={subscription.publicId}
-              >
-                <header>
-                  <GymIdentity
-                    name={subscription.gymId?.name || "Gym unavailable"}
-                    logoUrl={subscription.gymId?.logoUrl}
-                    subtitle={plan?.name || "Membership details unavailable"}
-                  />
-                  <StatusBadge status={subscription.status} />
-                </header>
-                <dl className="live-subscription-details">
-                  <div>
-                    <dt>
-                      <CalendarDays size={16} aria-hidden="true" />
-                      Starts
-                    </dt>
-                    <dd>{day(subscription.startsAt)}</dd>
-                  </div>
-                  <div>
-                    <dt>Valid until</dt>
-                    <dd>
-                      {subscription.endsAt
-                        ? day(subscription.endsAt)
-                        : "After payment"}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>Membership total</dt>
-                    <dd>{amount(plan?.totalMinor ?? plan?.priceMinor)}</dd>
-                  </div>
-                </dl>
-                {pending && (
-                  <p className="subscription-payment-note">
-                    Payment is pending. Gym access begins only after payment is
-                    verified.
-                  </p>
-                )}
-                {subscription.status === "FROZEN" && (
-                  <p className="subscription-payment-note">
-                    Your membership is paused. Access resumes after your freeze
-                    period.
-                  </p>
-                )}
-                {subscription.status === "DEACTIVATED" && <p className="subscription-payment-note">Gym access has been deactivated. Contact your gym to request reactivation of any remaining paid validity.</p>}
-                {subscription.status === "ACTIVE" && !started && (
-                  <p className="subscription-payment-note">
-                    Your membership starts on {day(subscription.startsAt)}. Your
-                    attendance access will be available then.
-                  </p>
-                )}
-                {!available && (
-                  <p className="subscription-payment-note">
-                    This gym is currently unavailable. Contact support for help
-                    with your membership.
-                  </p>
-                )}
-                <footer className="subscription-actions">
-                  {current && available && (
-                    <Link
-                      className="btn btn-primary"
-                      to={`/app/attendance/qr?gymId=${encodeURIComponent(subscription.gymId!._id)}`}
-                    >
-                      <QrCode size={18} aria-hidden="true" />
-                      Scan gym QR
-                    </Link>
+        <ListViewport label="Memberships" resetKey={path}>
+          <div className="member-subscription-grid" aria-busy={query.isFetching}>
+            {rows.map((subscription) => {
+              const plan = subscription.planSnapshot;
+              const pending = subscription.status === "PENDING_PAYMENT";
+              const started =
+                !subscription.startsAt ||
+                Date.parse(subscription.startsAt) <= Date.now();
+              const current =
+                subscription.status === "ACTIVE" &&
+                started &&
+                !!subscription.endsAt &&
+                Date.parse(subscription.endsAt) > Date.now();
+              const available = !!subscription.gymId?._id;
+              const href = subscription.gymId?.slug
+                ? `/app/gyms/${encodeURIComponent(subscription.gymId.slug)}${pending && plan?.planId ? `?plan=${encodeURIComponent(plan.planId)}` : ""}`
+                : undefined;
+              return (
+                <article
+                  className="panel live-subscription-card"
+                  key={subscription.publicId}
+                >
+                  <header>
+                    <GymIdentity
+                      name={subscription.gymId?.name || "Gym unavailable"}
+                      logoUrl={subscription.gymId?.logoUrl}
+                      subtitle={plan?.name || "Membership details unavailable"}
+                    />
+                    <StatusBadge status={subscription.status} />
+                  </header>
+                  <dl className="live-subscription-details">
+                    <div>
+                      <dt>
+                        <CalendarDays size={16} aria-hidden="true" />
+                        Starts
+                      </dt>
+                      <dd>{day(subscription.startsAt)}</dd>
+                    </div>
+                    <div>
+                      <dt>Valid until</dt>
+                      <dd>
+                        {subscription.endsAt
+                          ? day(subscription.endsAt)
+                          : "After payment"}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Membership total</dt>
+                      <dd>{amount(plan?.totalMinor ?? plan?.priceMinor)}</dd>
+                    </div>
+                  </dl>
+                  {pending && (
+                    <p className="subscription-payment-note">
+                      Payment is pending. Gym access begins only after payment is
+                      verified.
+                    </p>
                   )}
-                  {subscription.status === "FROZEN" && available && (
-                    <button
-                      className="btn btn-primary"
-                      disabled={query.isPlaceholderData}
-                      onClick={() =>
-                        setSelection({ subscription, command: "reactivate" })
-                      }
-                    >
-                      Reactivate
-                    </button>
+                  {subscription.status === "FROZEN" && (
+                    <p className="subscription-payment-note">
+                      Your membership is paused. Access resumes after your freeze
+                      period.
+                    </p>
                   )}
-                  {href && (
-                    <Link
-                      className={`btn ${pending ? "btn-primary" : "btn-secondary"}`}
-                      to={href}
-                    >
-                      {pending ? "Continue payment" : "Renew / change plan"}
-                    </Link>
-                  )}
-                  {current && freezeDaysRemaining(subscription) > 0 && (
-                    <button
-                      className="btn btn-secondary"
-                      disabled={query.isPlaceholderData}
-                      onClick={() =>
-                        setSelection({ subscription, command: "freeze" })
-                      }
-                    >
-                      Freeze
-                    </button>
-                  )}
-                  {["ACTIVE", "FROZEN", "GRACE"].includes(
-                    subscription.status,
-                  ) && (
-                    <button
-                      className="btn btn-secondary"
-                      disabled={query.isPlaceholderData}
-                      onClick={() =>
-                        setSelection({ subscription, command: "cancel" })
-                      }
-                    >
-                      Cancel
-                    </button>
+                  {subscription.status === "DEACTIVATED" && <p className="subscription-payment-note">Gym access has been deactivated. Contact your gym to request reactivation of any remaining paid validity.</p>}
+                  {subscription.status === "ACTIVE" && !started && (
+                    <p className="subscription-payment-note">
+                      Your membership starts on {day(subscription.startsAt)}. Your
+                      attendance access will be available then.
+                    </p>
                   )}
                   {!available && (
-                    <Link className="btn btn-secondary" to="/app/support">
-                      Contact support
-                    </Link>
+                    <p className="subscription-payment-note">
+                      This gym is currently unavailable. Contact support for help
+                      with your membership.
+                    </p>
                   )}
-                </footer>
-              </article>
-            );
-          })}
-        </div>
+                  <footer className="subscription-actions">
+                    {current && available && (
+                      <Link
+                        className="btn btn-primary"
+                        to={`/app/attendance/qr?gymId=${encodeURIComponent(subscription.gymId!._id)}`}
+                      >
+                        <QrCode size={18} aria-hidden="true" />
+                        Scan gym QR
+                      </Link>
+                    )}
+                    {subscription.status === "FROZEN" && available && (
+                      <button
+                        className="btn btn-primary"
+                        disabled={query.isPlaceholderData}
+                        onClick={() =>
+                          setSelection({ subscription, command: "reactivate" })
+                        }
+                      >
+                        Reactivate
+                      </button>
+                    )}
+                    {href && (
+                      <Link
+                        className={`btn ${pending ? "btn-primary" : "btn-secondary"}`}
+                        to={href}
+                      >
+                        {pending ? "Continue payment" : "Renew / change plan"}
+                      </Link>
+                    )}
+                    {current && freezeDaysRemaining(subscription) > 0 && (
+                      <button
+                        className="btn btn-secondary"
+                        disabled={query.isPlaceholderData}
+                        onClick={() =>
+                          setSelection({ subscription, command: "freeze" })
+                        }
+                      >
+                        Freeze
+                      </button>
+                    )}
+                    {["ACTIVE", "FROZEN", "GRACE"].includes(
+                      subscription.status,
+                    ) && (
+                      <button
+                        className="btn btn-secondary"
+                        disabled={query.isPlaceholderData}
+                        onClick={() =>
+                          setSelection({ subscription, command: "cancel" })
+                        }
+                      >
+                        Cancel
+                      </button>
+                    )}
+                    {!available && (
+                      <Link className="btn btn-secondary" to="/app/support">
+                        Contact support
+                      </Link>
+                    )}
+                  </footer>
+                </article>
+              );
+            })}
+          </div>
+        </ListViewport>
       )}
       {!!rows.length && (
         <div className="panel"><Pagination page={page} limit={limit} total={meta?.total || 0} loading={query.isFetching} onPageChange={setPage} onLimitChange={(value) => { setLimit(value); setPage(1); }} /></div>

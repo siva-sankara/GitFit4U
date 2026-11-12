@@ -43,6 +43,22 @@ const labels = () => [...host.querySelectorAll("button")].map(
   (button) => button.textContent?.trim() || button.getAttribute("aria-label"),
 );
 
+it.each([
+  ["CAPTURED", ["Download Invoice", "Send Receipt", "Refund"]],
+  ["PENDING", ["Collect", "Send Reminder"]],
+  ["FAILED", ["Mark manually paid", "Retry"]],
+])("keeps all %s payment actions available from the compact row menu", async (status, expected) => {
+  await act(async () => root.render(<QueryClientProvider client={client}>
+    <OwnerPaymentActions payment={{ publicId: "pay-one", status, amountMinor: 150000 }} compact />
+  </QueryClientProvider>));
+  expect(host.querySelectorAll("button")).toHaveLength(3);
+  await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="More payment actions"]')!.click());
+  const dialog = document.querySelector('[role="dialog"]')!;
+  for (const text of expected) expect(dialog.textContent).toContain(text);
+  expect(mocks.request).not.toHaveBeenCalled();
+  expect(mocks.download).not.toHaveBeenCalled();
+});
+
 it("shows receipt actions for a paid invoice and hides collection", async () => {
   await renderStatus("CAPTURED");
   expect(labels()).toEqual(expect.arrayContaining([
