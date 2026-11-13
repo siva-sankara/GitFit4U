@@ -46,7 +46,7 @@ export function UserClassesPage() {
     userId,
   );
   return (
-    <div className="page-stack">
+    <div className="page-stack member-classes-page">
       <PageHeader>
         <div>
           <h1>Classes and bookings</h1>
@@ -63,24 +63,27 @@ export function UserClassesPage() {
           </>}
         </QueryState>}
       </section>}
-      <form className="table-toolbar" onSubmit={event => { event.preventDefault(); setQuery(searchDraft.trim()); setPage(1); }}>
-        <label className="field">
-          <span>Search subscribed gym classes</span>
-          <input className="input" type="search" maxLength={80} value={searchDraft} onChange={event => setSearchDraft(event.target.value)} />
+      <form className="panel member-classes-toolbar" role="search" aria-label="Search and filter classes" onSubmit={event => { event.preventDefault(); setQuery(searchDraft.trim()); setPage(1); }}>
+        <label className="field member-classes-search">
+          <span>Search classes</span>
+          <input className="input" type="search" placeholder="Search your subscribed gym classes" maxLength={80} value={searchDraft} onChange={event => setSearchDraft(event.target.value)} />
         </label>
-        <button className="btn btn-secondary">Search classes</button>
-      </form>
-      <label className="field class-status-filter">
-        <span>Filter by gym-local date</span>
+        <label className="field member-classes-date">
+        <span>Gym-local date</span>
         <input
           className="input"
           type="date"
           value={day}
           onChange={(event) => { setDay(event.target.value); setPage(1); }}
         />
-      </label>
+        </label>
+        <div className="member-classes-actions">
+          <button className="btn btn-secondary">Search classes</button>
+          {(searchDraft || day) && <button type="button" className="btn btn-ghost" onClick={() => { setSearchDraft(""); setQuery(""); setDay(""); setPage(1); }}>Clear filters</button>}
+        </div>
+      </form>
       <QueryState query={sessions}>
-        <ListViewport label="Available classes" resetKey={`${page}:${sessionLimit}:${day}:${query}`}>
+        {!!sessions.data?.data.length && <ListViewport label="Available classes" resetKey={`${page}:${sessionLimit}:${day}:${query}`}>
           <div className="class-card-grid">
             {sessions.data?.data.map((row) => {
               const booking = row.myBooking;
@@ -111,7 +114,7 @@ export function UserClassesPage() {
               );
             })}
           </div>
-        </ListViewport>
+        </ListViewport>}
         {!sessions.data?.data.length && (
           <div className="state-card">
             {sessions.data?.meta?.eligibleGymCount === 0 ? <>
@@ -121,8 +124,8 @@ export function UserClassesPage() {
             </> : <p>No upcoming classes match your filters at your subscribed gyms.</p>}
           </div>
         )}
+        <Pagination page={page} limit={sessionLimit} total={sessions.data?.meta?.total || 0} loading={sessions.isFetching} onPageChange={setPage} onLimitChange={(value) => { setSessionLimit(value); setPage(1); }} />
       </QueryState>
-      <Pagination page={page} limit={sessionLimit} total={sessions.data?.meta?.total || 0} loading={sessions.isFetching} onPageChange={setPage} onLimitChange={(value) => { setSessionLimit(value); setPage(1); }} />
       <section className="panel form-section">
         <h2>Your bookings</h2>
         <p>Your booking history stays available when a membership ends or changes.</p>
@@ -138,8 +141,9 @@ export function UserClassesPage() {
               ? <Action method="DELETE" path={`/api/v1/users/classes/${booking.sessionId.publicId}/bookings/${booking._id}`} confirmMessage="Cancel your place in this class?">Cancel booking</Action>
               : null}
           />
+          {!bookings.data?.data.length && <p className="state-card">No bookings yet. Book an available class to get started.</p>}
+          <Pagination page={bookingPage} limit={bookingLimit} total={bookings.data?.meta?.total || 0} loading={bookings.isFetching} onPageChange={setBookingPage} onLimitChange={(value) => { setBookingLimit(value); setBookingPage(1); }} />
         </QueryState>
-        <Pagination page={bookingPage} limit={bookingLimit} total={bookings.data?.meta?.total || 0} loading={bookings.isFetching} onPageChange={setBookingPage} onLimitChange={(value) => { setBookingLimit(value); setBookingPage(1); }} />
       </section>
     </div>
   );

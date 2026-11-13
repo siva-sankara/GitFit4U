@@ -75,17 +75,20 @@ function InternalMessagesPage({
     [cursor, setCursor] = useState<string | undefined>();
   const [attachments, setAttachments] = useState<Row[]>([]),
     [notice, setNotice] = useState("");
+  const [focusAfterSend, setFocusAfterSend] = useState<ConversationScope | null>(null);
   const draftId = useRef(crypto.randomUUID()),
     supportDraftId = useRef(crypto.randomUUID()),
     previous = useRef("");
   const history = useRef<HTMLDivElement>(null),
-    fileInput = useRef<HTMLInputElement>(null);
+    fileInput = useRef<HTMLInputElement>(null),
+    composer = useRef<HTMLTextAreaElement>(null);
   // Every selection gets a fresh identity, including A -> B -> A. Late work
   // must not attach a file or clear a draft created during a later selection.
   const scope = useRef<ConversationScope>({ conversationId: active });
   function selectConversation(id: string) {
     if (scope.current.conversationId === id) return;
     scope.current = { conversationId: id };
+    setFocusAfterSend(null);
     setActive(id);
     setOlder([]);
     setCursor(undefined);
@@ -195,6 +198,7 @@ function InternalMessagesPage({
       }),
     onSuccess: (_result, draft) => {
       if (draft.scope === scope.current && draft.clientMessageId === draftId.current) {
+        setFocusAfterSend(draft.scope);
         setText("");
         setAttachments([]);
         draftId.current = crypto.randomUUID();
@@ -342,6 +346,15 @@ function InternalMessagesPage({
   ].filter((mutation) => mutation.isError && mutation.variables?.scope === scope.current);
   const sendingHere = send.isPending && send.variables?.scope === scope.current;
   const uploadingHere = upload.isPending && upload.variables?.scope === scope.current;
+  useEffect(() => {
+    if (!focusAfterSend || sendingHere) return;
+    setFocusAfterSend(null);
+    // Wait until React re-enables the textarea, and ignore a completed send
+    // from an earlier selection of this conversation.
+    if (focusAfterSend === scope.current && !closed && !isArchived) {
+      composer.current?.focus({ preventScroll: true });
+    }
+  }, [focusAfterSend, sendingHere, closed, isArchived]);
   return (
     <div className="page-stack messaging-page">
       <PageHeader>
@@ -570,7 +583,7 @@ function InternalMessagesPage({
               <button type="button" className="btn btn-secondary" aria-label="Next contacts" disabled={contactPage >= (contacts.data?.meta?.pages || 1) || contacts.isFetching} onClick={() => setContactPage(value => value + 1)}>Next</button>
             </div>
           )}
-          <div className="chat-pagination">
+          {(visible.length > 0 || page > 1) && <div className="chat-pagination" aria-label="Conversation pages">
             <button
               className="btn btn-secondary"
               disabled={page <= 1}
@@ -588,7 +601,7 @@ function InternalMessagesPage({
             >
               Next
             </button>
-          </div>
+          </div>}
         </aside>
         <article className="chat-panel">
           {!active ? (
@@ -881,6 +894,7 @@ function InternalMessagesPage({
                     </button>
                     <textarea
                       aria-label="Message"
+                      ref={composer}
                       value={text}
                       rows={1}
                       maxLength={5000}

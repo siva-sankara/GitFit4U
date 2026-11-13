@@ -63,6 +63,7 @@ export function Pagination({
     const first = Math.max(1, Math.min(totalPages - 4, safePage - 2));
     return Array.from({ length: Math.min(5, totalPages) }, (_, index) => first + index);
   }, [safePage, totalPages]);
+  if (!(total > 0)) return null;
   return (
     <nav className="data-pagination" aria-label="Pagination">
       <span className="pagination-summary">Showing {start}–{end} of {total}</span>

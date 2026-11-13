@@ -33,7 +33,7 @@
 .workspace-content :is(.metric-tile, .stat-card, .revenue-kpi, .account-stat-grid > *) { padding: 12px; min-height: 0; gap: 5px; }
 .workspace-content :is(.metric-tile, .stat-card, .revenue-kpi) > strong { font-size: clamp(1.25rem, 1.1rem + .7vw, 1.7rem); line-height: 1.2; }
 .workspace-content :is(.metric-tile, .stat-card, .revenue-kpi) > p { margin: 0; }
-.workspace-content :is(.state-card, .feedback-state, .subscription-empty) { padding: 24px 14px; gap: 8px; }
+.workspace-content :is(.state-card, .feedback-state, .subscription-empty) { min-height: 230px; padding: 24px 14px; gap: 8px; }
 .workspace-content :is(.state-card, .feedback-state) > :is(p, h2, h3) { margin: 0; }
 .workspace-content :is(th, td) { padding: 8px 10px; }
 .workspace-content .data-pagination { min-height: 50px; padding: 8px 12px; gap: 10px; flex-wrap: wrap; }

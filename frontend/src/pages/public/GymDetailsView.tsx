@@ -438,7 +438,7 @@ export function GymDetailsView({
                 ? "Choose a plan to join this gym. Your membership starts after payment is verified."
                 : "Send a join request to the gym. Its team will confirm access and available membership options."}
             </p>
-            <ListViewport label="Gym membership plans" resetKey={`${gym.publicId}:${plansState?.page}:${plansState?.limit}`}>
+            {/* <ListViewport label="Gym membership plans" resetKey={`${gym.publicId}:${plansState?.page}:${plansState?.limit}`}> */}
               <div className="gd-plans">
                 {plans.map((p) => (
                   <article className="gd-plan" key={p._id || p.publicId}>
@@ -493,8 +493,8 @@ export function GymDetailsView({
                   </article>
                 ))}
               </div>
-            </ListViewport>
-            {plansState && <Pagination page={plansState.page} limit={plansState.limit} total={plansState.total} loading={plansState.loading} onPageChange={plansState.onPage} onLimitChange={plansState.onLimit} />}
+            {/* </ListViewport> */}
+            {/* {plansState && <Pagination page={plansState.page} limit={plansState.limit} total={plansState.total} loading={plansState.loading} onPageChange={plansState.onPage} onLimitChange={plansState.onLimit} />} */}
             {!plans.length && (
               <div className="gd-empty">
                 <CalendarDays />

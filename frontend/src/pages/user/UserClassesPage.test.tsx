@@ -102,3 +102,31 @@ it("searches only the subscribed class endpoint and resets pagination", async ()
   await act(async () => input.closest("form")!.dispatchEvent(new Event("submit",{ bubbles:true, cancelable:true })));
   await until(() => mocks.request.mock.calls.some(([path]) => String(path).includes("q=Yoga") && String(path).includes("page=1")));
 });
+
+it("shows empty class and booking states without pagination or an empty scroll region", async () => {
+  mocks.request.mockResolvedValue({ data: [], meta: { total: 0, pages: 1, eligibleGymCount: 1 } });
+  await act(async () => root.render(<MemoryRouter><QueryClientProvider client={client}><UserClassesPage /></QueryClientProvider></MemoryRouter>));
+  await until(() => host.textContent!.includes("No upcoming classes") && host.textContent!.includes("No bookings yet"));
+  expect(host.querySelector('[aria-label="Pagination"]')).toBeNull();
+  expect(host.querySelector('[aria-label="Available classes"]')).toBeNull();
+  expect(host.querySelector('[aria-label="Rows per page"]')).toBeNull();
+});
+
+it("keeps search and date filters together and clears both without changing booking history", async () => {
+  await act(async () => root.render(<MemoryRouter><QueryClientProvider client={client}><UserClassesPage /></QueryClientProvider></MemoryRouter>));
+  await until(() => host.textContent!.includes("Class page 1") && host.textContent!.includes("Booking page 1"));
+  const toolbar = host.querySelector<HTMLFormElement>('[aria-label="Search and filter classes"]')!;
+  const search = toolbar.querySelector<HTMLInputElement>('input[type="search"]')!;
+  const day = toolbar.querySelector<HTMLInputElement>('input[type="date"]')!;
+  await act(async () => {
+    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+    setValue.call(search, "Yoga"); search.dispatchEvent(new Event("input", { bubbles: true }));
+    setValue.call(day, "2026-11-15"); day.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await act(async () => toolbar.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+  await until(() => mocks.request.mock.calls.some(([path]) => String(path).includes("q=Yoga") && String(path).includes("day=2026-11-15")));
+  await act(async () => [...toolbar.querySelectorAll("button")].find(button => button.textContent === "Clear filters")!.click());
+  await until(() => search.value === "" && day.value === "");
+  expect(host.textContent).toContain("Booking page 1");
+  expect(mocks.request.mock.calls.some(([path]) => String(path).includes("/users/classes?day=&q=&page=1"))).toBe(true);
+});

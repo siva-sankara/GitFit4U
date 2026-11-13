@@ -580,9 +580,9 @@ export function MemberSubscriptions() {
           </div>
         </ListViewport>
       )}
-      {!!rows.length && (
+      {/* {!!rows.length && (
         <div className="panel"><Pagination page={page} limit={limit} total={meta?.total || 0} loading={query.isFetching} onPageChange={setPage} onLimitChange={(value) => { setLimit(value); setPage(1); }} /></div>
-      )}
+      )} */}
       {selection && (
         <SubscriptionCommand
           key={`${selection.subscription.publicId}-${selection.command}`}
