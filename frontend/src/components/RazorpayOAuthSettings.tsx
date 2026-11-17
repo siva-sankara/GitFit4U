@@ -3,7 +3,6 @@ import { AlertTriangle, ExternalLink, Landmark, ShieldCheck, Unplug } from "luci
 import { apiRequest, type ApiEnvelope } from "../services/apiClient";
 import type { Row } from "../pages/live/LiveData";
 import { StatusBadge } from "./StatusBadge";
-import { useRazorpayConnect } from "../services/razorpayConnection";
 
 export function RazorpayOAuthSettings({ gym, disabled = false, embedded = false }: { gym: Row; disabled?: boolean; embedded?: boolean }) {
   const client = useQueryClient();
@@ -13,7 +12,17 @@ export function RazorpayOAuthSettings({ gym, disabled = false, embedded = false 
     queryFn: () => apiRequest<ApiEnvelope<Row>>(`/api/v1/gyms/${gymId}/payments/razorpay/status`),
     enabled: Boolean(gymId),
   });
-  const connect = useRazorpayConnect(gymId);
+  const connect = useMutation({
+    mutationFn: () => apiRequest<ApiEnvelope<Row>>(`/api/v1/gyms/${gymId}/payments/razorpay/connect`, {
+      method: "POST",
+      idempotencyKey: crypto.randomUUID(),
+      body: JSON.stringify({ returnTo: `${window.location.pathname}${window.location.search}` }),
+    }),
+    onSuccess: response => {
+      const authorizationUrl = response.data?.authorizationUrl;
+      if (typeof authorizationUrl === "string") window.location.assign(authorizationUrl);
+    },
+  });
   const disconnect = useMutation({
     mutationFn: () => apiRequest<ApiEnvelope<Row>>(`/api/v1/gyms/${gymId}/payments/razorpay/disconnect`, {
       method: "POST",
@@ -52,7 +61,7 @@ export function RazorpayOAuthSettings({ gym, disabled = false, embedded = false 
         {connection?.merchantAccountId && <p><strong>Merchant account:</strong> {`${connection.merchantAccountId.slice(0, 8)}…${connection.merchantAccountId.slice(-4)}`}</p>}
         <p><strong>GETFIT4U membership commission:</strong> 0. Razorpay processing fees and bank settlement remain the gym merchant's provider relationship.</p>
         <div className="page-actions">
-          <button className="btn btn-primary" type="button" disabled={disabled || connect.isPending} onClick={connect.start}>
+          <button className="btn btn-primary" type="button" disabled={disabled || connect.isPending} onClick={() => connect.mutate()}>
             {connect.isPending ? "Opening Razorpay…" : status === "CONNECTED" ? "Reconnect Razorpay" : "Connect Razorpay"}
           </button>
           {status === "CONNECTED" && !data.onlineMembershipPaymentsAvailable && <a className="btn btn-secondary" href="https://dashboard.razorpay.com/" target="_blank" rel="noreferrer">Complete setup <ExternalLink size={16} aria-hidden="true" /></a>}
@@ -60,7 +69,7 @@ export function RazorpayOAuthSettings({ gym, disabled = false, embedded = false 
             if (window.confirm("Disconnect Razorpay for this gym? New online membership payments will stop.")) disconnect.mutate();
           }}><Unplug size={16} aria-hidden="true" /> {disconnect.isPending ? "Disconnecting…" : "Disconnect"}</button>}
         </div>
-        {connect.isError && <p className="form-alert" role="alert">{connect.error?.message}</p>}
+        {connect.isError && <p className="form-alert" role="alert">{connect.error.message}</p>}
         {disconnect.isError && <p className="form-alert" role="alert">{disconnect.error.message}</p>}
         {disconnect.isSuccess && <p role="status">Razorpay disconnected. Historical payments were preserved.</p>}
       </>}

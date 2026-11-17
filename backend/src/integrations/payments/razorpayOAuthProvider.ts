@@ -1,6 +1,5 @@
 import crypto from "node:crypto";
 import { env } from "../../config/env.js";
-import { oauthUrlBlockers } from "../../config/razorpayOAuth.js";
 import { AppError } from "../../utils/AppError.js";
 import type { CreatePaymentInput, ProviderPaymentOrder, ProviderRefund } from "./paymentProvider.js";
 
@@ -22,7 +21,6 @@ export function oauthConfigurationBlockers() {
   if (!env.RAZORPAY_OAUTH_REDIRECT_URI) blockers.push("RAZORPAY_OAUTH_REDIRECT_URI is not configured.");
   if (!env.RAZORPAY_OAUTH_WEBHOOK_SECRET) blockers.push("RAZORPAY_OAUTH_WEBHOOK_SECRET is not configured.");
   if (!env.PAYMENT_TOKEN_ENCRYPTION_KEY) blockers.push("PAYMENT_TOKEN_ENCRYPTION_KEY is not configured.");
-  blockers.push(...oauthUrlBlockers(env));
   return blockers;
 }
 

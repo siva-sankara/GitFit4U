@@ -16,7 +16,6 @@ import { ProtectedRoute } from "./routes/ProtectedRoute";
 import { profileSections, ProfileSectionRedirect } from "./routes/ProfileSectionRedirect";
 import { lazyWithRetry } from "./services/lazyWithRetry";
 import { RouteErrorPage } from "./components/RouteErrorPage";
-import { RazorpayConnectionResult } from "./pages/owner/RazorpayConnectionResult";
 const LiveWorkspace = lazyWithRetry("live-workspace", () =>
   import("./pages/live/LiveWorkspace").then((m) => ({
     default: m.LiveWorkspace,
@@ -49,7 +48,6 @@ const router = createBrowserRouter([{
   children: [
   { path: "/notification-open/:id", element: <ProtectedRoute><NotificationOpenPage /></ProtectedRoute> },
   { path: "/payment-return", element: <ProtectedRoute><PaymentReturn /></ProtectedRoute> },
-  { path: "/razorpay-connection-result", element: <ProtectedRoute><RazorpayConnectionResult /></ProtectedRoute> },
   { path: "/activate-account", element: <ActivateAccountPage /> },
   ...publicPolicyRoutes,
   {

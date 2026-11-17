@@ -400,20 +400,6 @@ const paymentOAuthStateSchema = new Schema(
     publicId: { type: String, required: true, unique: true },
     stateHash: { type: String, required: true, select: false },
     browserNonceHash: { type: String, required: true, select: false },
-    // Optional for compatibility with old, short-lived attempts. Callbacks for
-    // attempts without the new configuration binding must start again.
-    clientIdHash: { type: String, select: false },
-    initiationKeyHash: { type: String, select: false },
-    redirectUri: String,
-    browserApiOrigin: String,
-    frontendOrigin: String,
-    previousConnectionId: { type: Schema.Types.ObjectId, ref: "PaymentConnection" },
-    previousConnectionRevision: Number,
-    previousConnectionVersion: Number,
-    connectionId: { type: Schema.Types.ObjectId, ref: "PaymentConnection" },
-    connectionRevision: Number,
-    initiationRequestId: String,
-    callbackRequestId: String,
     ownerId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
     gymId: { type: Schema.Types.ObjectId, ref: "Gym", required: true, index: true },
     sessionId: { type: String, required: true },
@@ -433,8 +419,6 @@ const paymentOAuthStateSchema = new Schema(
   { timestamps: true },
 );
 paymentOAuthStateSchema.index({ gymId: 1, status: 1, createdAt: -1 });
-paymentOAuthStateSchema.index({ stateHash: 1 }, { unique: true });
-paymentOAuthStateSchema.index({ initiationKeyHash: 1 }, { unique: true, sparse: true });
 paymentConnectionSchema.index(
   { linkedAccountId: 1, provider: 1, environment: 1 },
   {
