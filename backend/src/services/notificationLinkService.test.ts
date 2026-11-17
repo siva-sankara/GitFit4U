@@ -23,3 +23,19 @@ it("leaves already-bound and unrelated notifications unchanged without database 
   expect(await withNotificationLinks(rows)).toEqual(rows);
   expect(find).not.toHaveBeenCalled();
 });
+it("reuses the committed purchase notification, exposes only a protected destination, and never returns the invite", async () => {
+  vi.spyOn(Gym, "find").mockReturnValue({ select: () => ({ lean: async () => [{ _id: gymId, name: "Gym A", whatsappUpdates: { enabled: true, inviteUrl: "https://chat.whatsapp.com/PrivateToken" } }] }) } as never);
+  const purchase = { _id: "notice", event: "membership.activated", gymId, entityId: "membership", dedupeKey: "membership.activated:membership:once", metadata: { membershipPurchaseConfirmed: true } };
+  const [result] = await withNotificationLinks([purchase]);
+  expect(result).toMatchObject({ actionUrl: "/notification-open/notice", dedupeKey: purchase.dedupeKey, message: expect.stringContaining("Your membership at Gym A is confirmed") });
+  expect(JSON.stringify(result)).not.toContain("PrivateToken");
+});
+it("keeps purchase confirmation available when invitation lookup fails", async () => {
+  vi.spyOn(Gym, "find").mockReturnValue({ select: () => ({ lean: async () => { throw new Error("temporary"); } }) } as never);
+  const purchase = { _id: "notice", event: "membership.renewed", gymId, message: "Membership renewed", metadata: { membershipPurchaseConfirmed: true } };
+  expect(await withNotificationLinks([purchase])).toEqual([{ ...purchase, actionUrl: "/notification-open/notice" }]);
+});
+it("does not display a looping view-details action for announcements", async () => {
+  const [result] = await withNotificationLinks([{ _id: "notice", dedupeKey: "campaign:one", actionUrl: "/notifications" }]);
+  expect(result.actionUrl).toBeUndefined();
+});

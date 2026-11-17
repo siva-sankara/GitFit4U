@@ -48,7 +48,7 @@ There is no edge from the gym membership path to the GETFIT4U platform merchant 
 
 ## Required server configuration
 
-Use the actual public backend origin; the custom website domain is the frontend origin unless it also routes `/api` to the backend.
+Use the browser-facing API origin for the OAuth callback. The connection request sets a browser cookie that must also reach the callback. This frontend proxies `/api` through Vite locally and through the configured rewrite in production, so its callback uses the website origin. `BACKEND_PUBLIC_URL` and webhook URLs may still use the separately hosted backend.
 
 ```dotenv
 PAYMENT_PROVIDER=razorpay
@@ -64,7 +64,7 @@ RAZORPAY_PLATFORM_ACCOUNT_ID=
 RAZORPAY_PLATFORM_WEBHOOK_SECRET=
 RAZORPAY_OAUTH_CLIENT_ID=
 RAZORPAY_OAUTH_CLIENT_SECRET=
-RAZORPAY_OAUTH_REDIRECT_URI=https://git-fit4-u.vercel.app/api/v1/payments/razorpay/oauth/callback
+RAZORPAY_OAUTH_REDIRECT_URI=https://www.getfit4u.in/api/v1/payments/razorpay/oauth/callback
 RAZORPAY_OAUTH_WEBHOOK_SECRET=
 PAYMENT_TOKEN_ENCRYPTION_KEY=
 PAYMENT_TOKEN_ENCRYPTION_KEY_VERSION=1
@@ -82,8 +82,8 @@ Do not rotate that value until all stored token envelopes have been re-encrypted
 
 ## Razorpay dashboard setup
 
-1. Obtain the approved Technology Partner application's development client.
-2. Add the exact redirect URI `https://git-fit4-u.vercel.app/api/v1/payments/razorpay/oauth/callback`.
+1. Obtain the approved Technology Partner application's development client for integration testing. Use that client's ID and secret together; `RAZORPAY_MODE=test` does not select the development client automatically. Production clients require HTTPS callbacks and live mode.
+2. Add the exact `RAZORPAY_OAUTH_REDIRECT_URI` to that same client's Redirect URIs. For the website at `https://www.getfit4u.in` with the same-origin API proxy, use `https://www.getfit4u.in/api/v1/payments/razorpay/oauth/callback`. The hostname, port, path and trailing slash must match the configured URI.
 3. Configure platform merchant webhooks at `https://git-fit4-u.vercel.app/api/v1/webhooks/razorpay/platform` with a unique secret.
 4. Configure partner OAuth application webhooks at `https://git-fit4-u.vercel.app/api/v1/webhooks/razorpay/oauth` with a different secret.
 5. Subscribe the platform receiver to payment/refund events for platform-fee orders. Subscribe the OAuth receiver to payment/refund events, available account-status events and `account.app.authorization_revoked`.
@@ -91,6 +91,32 @@ Do not rotate that value until all stored token envelopes have been re-encrypted
 7. Keep flags false until callback, signatures, account evidence and sandbox checkout are verified.
 
 OAuth consent does not prove KYC, payment eligibility or settlement readiness. Admin review records evidence and enables collection only after those dimensions are verified. QR remains disabled unless both the global flag and individual merchant capability are enabled.
+
+### Local development
+
+For the website opened at `http://localhost:5173`, use these backend settings and the development client's credentials:
+
+```dotenv
+FRONTEND_URL=http://localhost:5173
+RAZORPAY_MODE=test
+RAZORPAY_OAUTH_REDIRECT_URI=http://localhost:5173/api/v1/payments/razorpay/oauth/callback
+```
+
+Keep `COOKIE_DOMAIN` unset locally. The frontend's `VITE_DEV_API_TARGET` must point to the running local backend (currently `http://localhost:5001`). Register the following plain URL in the development client's Redirect URIs field, without quotes, query parameters or percent encoding:
+
+```text
+http://localhost:5173/api/v1/payments/razorpay/oauth/callback
+```
+
+Preserve other registered callbacks when adding it to a comma-separated list. Save successfully, reopen the application to confirm the URL persisted, restart the backend after configuration changes, and start a fresh Connect Razorpay attempt. Complete it within ten minutes. Do not reuse an old authorization URL or send a localhost-started callback to the separately hosted backend: that host will not receive the localhost browser cookie.
+
+### Authorization troubleshooting
+
+- **`Client authentication failed` on `auth.razorpay.com/authorize`:** Razorpay documents an incorrect `client_id` or `redirect_uri` as the cause. Confirm that the configured client ID belongs to the client whose redirect list you edited, and that the exact callback was saved. The client secret is used later during the server-side token exchange, not in this browser authorization request.
+- **`Couldn't save application` in the Razorpay dashboard:** This generic dashboard message does not identify which setting failed. Development clients support localhost callbacks. In the dashboard's browser Network panel, inspect the failed Save request's HTTP status and error code/message. Check the selected client and the submitted URI list against those details; do not infer that localhost is prohibited or change the callback to another host to bypass the error. Share only the status and error fields when requesting help, never cookies, authorization headers or secrets.
+- **`RAZORPAY_OAUTH_STATE_INVALID` from GETFIT4U:** The callback could not be matched to the initiating browser and pending authorization. Check the browser-facing callback host, cookie domain/path, expiry and whether the attempt was already used. Keep the state and browser-cookie validation enabled.
+
+Official references: [Razorpay OAuth client and redirect setup](https://razorpay.com/docs/partners/technology-partners/onboard-businesses/integrate-oauth/integration-steps), [Razorpay OAuth errors](https://razorpay.com/docs/partners/technology-partners/onboard-businesses/integrate-oauth/errors).
 
 ## API endpoints
 
@@ -114,7 +140,7 @@ OAuth consent does not prove KYC, payment eligibility or settlement readiness. A
 ## External release gates
 
 - Razorpay Technology Partner approval and correct test/live client credentials.
-- Redirect URI allowlisting for the exact deployed backend URL.
+- Redirect URI allowlisting for the exact browser-facing callback URL, with the initiating browser cookie available at that URL.
 - Both webhook subscriptions and distinct secrets.
 - Merchant activation and settlement evidence for each gym.
 - Real Razorpay sandbox OAuth consent, Checkout capture, webhook, refund and disconnect tests.

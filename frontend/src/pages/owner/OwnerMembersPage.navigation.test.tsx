@@ -11,6 +11,32 @@ vi.mock("../../api/hooks", () => ({ useCurrentUser: () => ({ data: { data: { con
 vi.mock("../../services/apiClient", () => ({ apiRequest: network.request, apiFileDownload: network.download }));
 import { OwnerMembersPage } from "./OwnerMembersPage";
 
+it("shows paid owner-added members as active before login setup while preserving scheduled and restricted access", async () => {
+  network.request.mockReset();
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  sessionStorage.clear();
+  const base = { status: "ACTIVE", offlineAccessGranted: true, invitation: { status: "PENDING", kind: "ACTIVATE" }, currentSubscriptionId: { status: "ACTIVE", startsAt: "2026-11-01T00:00:00Z", endsAt: "2026-12-14T00:00:00Z", planSnapshot: { name: "Monthly" } } };
+  const members = [
+    { ...base, publicId: "active", contact: { name: "Paid member" } },
+    { ...base, publicId: "future", contact: { name: "Future member" }, currentSubscriptionId: { ...base.currentSubscriptionId, startsAt: "2026-11-20T00:00:00Z" } },
+    { ...base, publicId: "restricted", contact: { name: "Restricted member" }, status: "SUSPENDED" },
+    { ...base, publicId: "legacy", contact: { name: "Legacy invitation" }, offlineAccessGranted: false, status: "INACTIVE" },
+  ];
+  network.request.mockImplementation(async (path: string) => ({ data: path.startsWith("/api/v1/owner/members?") ? members : [], meta: { total: 4, serverNow: "2026-11-14T12:00:00Z", timezone: "Asia/Kolkata", summary: { total: 4, active: 1, pendingActivation: 1, paymentDue: 0 } } }));
+  const host = document.createElement("div"), root = createRoot(host), client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  document.body.append(host);
+  try {
+    await act(async () => root.render(<QueryClientProvider client={client}><MemoryRouter><OwnerMembersPage /></MemoryRouter></QueryClientProvider>));
+    for (let i = 0; i < 40 && !host.querySelector('[aria-label="Select Paid member"]'); i++)
+      await act(async () => { await new Promise(resolve => { setTimeout(resolve, 10); }); });
+    const badge = (name: string) => host.querySelector(`[aria-label="Select ${name}"]`)?.closest("tr")?.querySelector(".status-badge")?.textContent;
+    expect(badge("Paid member")).toBe("Active");
+    expect(badge("Future member")).toBe("Scheduled");
+    expect(badge("Restricted member")).toBe("Deactivated");
+    expect(badge("Legacy invitation")).toBe("Pending activation");
+  } finally { await act(async () => root.unmount()); host.remove(); client.clear(); sessionStorage.clear(); }
+});
+
 it("restores member-list search, filters, sort and page in its first API request", async () => {
   const request = network.request;
   request.mockReset();

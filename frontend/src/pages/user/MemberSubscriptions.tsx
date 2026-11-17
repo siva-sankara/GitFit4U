@@ -15,6 +15,7 @@ import { StatusBadge } from "../../components/StatusBadge";
 import { GymIdentity } from "../../components/GymIdentity";
 import "../../styles/member-workspace.css";
 import { Pagination } from "../../components/DataListControls";
+import { MembershipWhatsAppUpdates } from "../../components/MembershipWhatsAppUpdates";
 
 export interface MemberSubscription {
   _id: string;
@@ -251,11 +252,11 @@ export function MemberSubscriptions() {
   const [draftSearch, setDraftSearch] = useState("");
   const [selection, setSelection] = useState<Selection | null>(null);
   const [notice, setNotice] = useState("");
-  const path = `${resourcePath}?${new URLSearchParams({ page: String(page), limit: String(limit), status, q: search, ...(selectedMembership ? { selected: selectedMembership } : {}) })}`;
+  const path = `${resourcePath}?${new URLSearchParams({ page: String(selectedMembership ? 1 : page), limit: String(limit), status: selectedMembership ? "" : status, q: selectedMembership ? "" : search, ...(selectedMembership ? { selected: selectedMembership } : {}) })}`;
   const query = useQuery({
     queryKey: ["api", path],
     queryFn: () => apiRequest<ApiEnvelope<MemberSubscription[]>>(path),
-    placeholderData: keepPreviousData,
+    placeholderData: selectedMembership ? undefined : keepPreviousData,
     staleTime: 30000,
     refetchOnWindowFocus: true,
     retry: false,
@@ -287,6 +288,7 @@ export function MemberSubscriptions() {
           : previous,
     );
     setSelection(null);
+    void client.invalidateQueries({ queryKey: ["membership-whatsapp-updates"] });
     setNotice(
       command === "cancel"
         ? "Membership cancelled."
@@ -339,7 +341,7 @@ export function MemberSubscriptions() {
           {notice}
         </p>
       )}
-      <form
+      {!selectedMembership && <form
         className="panel subscriptions-toolbar"
         onSubmit={(event) => {
           event.preventDefault();
@@ -392,7 +394,7 @@ export function MemberSubscriptions() {
           )}
           {query.isFetching ? "Updating…" : "Refresh"}
         </button>
-      </form>
+      </form>}
       {query.isError && (
         <div className="panel state-card" role="alert">
           <p>Unable to load your memberships. {query.error.message}</p>
@@ -490,6 +492,7 @@ export function MemberSubscriptions() {
                       <dd>{amount(plan?.totalMinor ?? plan?.priceMinor)}</dd>
                     </div>
                   </dl>
+                  {["ACTIVE", "FROZEN"].includes(subscription.status) && <MembershipWhatsAppUpdates membershipId={subscription.publicId} />}
                   {pending && (
                     <p className="subscription-payment-note">
                       Payment is pending. Gym access begins only after payment is
@@ -580,7 +583,7 @@ export function MemberSubscriptions() {
           </div>
         </ListViewport>
       )}
-      {!!rows.length && (
+      {!selectedMembership && !!rows.length && (
         <div className="panel"><Pagination page={page} limit={limit} total={meta?.total || 0} loading={query.isFetching} onPageChange={setPage} onLimitChange={(value) => { setLimit(value); setPage(1); }} /></div>
       )}
       {selection && (

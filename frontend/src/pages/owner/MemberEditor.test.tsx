@@ -6,6 +6,8 @@ import { beforeEach, afterEach, expect, it, vi } from "vitest";
 import { gymCalendarDate } from "../../services/gymCalendar";
 const mocks = vi.hoisted(() => ({ request: vi.fn() }));
 vi.mock("../../services/apiClient", () => ({ apiRequest: mocks.request }));
+vi.mock("../../api/hooks", () => ({ useCurrentUser: () => ({ data: { data: { context: { role: "GYM_OWNER", userId: "owner", gymId: "gym" } } } }) }));
+vi.mock("../../components/MemberCreationSuccess", () => ({ MemberCreationSuccess: () => <p>Member saved</p> }));
 vi.mock("../../components/MediaImageEditor", () => ({ MediaImageEditor: ({ purpose, gymId, onChange }: any) => <button type="button" data-upload-gym={gymId} onClick={() => onChange("507f1f77bcf86cd799439011", "https://media.test/photo.webp")}>Upload {purpose}</button> }));
 import { MemberEditor } from "./OwnerMembersPage";
 let host: HTMLDivElement, root: Root, client: QueryClient;
@@ -27,6 +29,7 @@ it("sends gym-local calendar inputs and an uploaded member photo reference, neve
   expect(dialog.querySelector<HTMLInputElement>('[name="paidAt"]')!.max).toBe(today);
   (dialog.querySelector('[name="name"]') as HTMLInputElement).value = "Member One";
   (dialog.querySelector('[name="email"]') as HTMLInputElement).value = "member@example.com";
+  (dialog.querySelector('[name="paymentReceived"]') as HTMLInputElement).checked = true;
   await act(async () => {
     const phone = dialog.querySelector<HTMLInputElement>('[name="phone"]')!;
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(phone, "9876543210");

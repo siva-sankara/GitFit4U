@@ -1,5 +1,8 @@
 import { Router } from "express";
 import { getWhatsAppGroup, updateWhatsAppGroup } from "../controllers/manualWhatsAppController.js";
+import { getWhatsAppUpdates, updateWhatsAppUpdates, uploadInvitationQr, getOwnersInvitation } from "../controllers/whatsappUpdatesController.js";
+import { invitationQrUpload, invitationQrLimiter } from "./invitationQrUpload.js";
+import { memberWelcomeDetails, sendMemberWelcome } from "../controllers/memberWelcomeController.js";
 import rateLimit from "express-rate-limit";
 import multer from "multer";
 import { resendMemberInvitation } from "../controllers/accountInvitationController.js";
@@ -69,6 +72,7 @@ ownerRoutes.use((req, _res, next) => {
     !(base === "/members" && req.path.includes("/bulk/")) &&
     !(base === "/gym" && req.path.includes("/media")) &&
     !req.path.endsWith("/invitation/resend") &&
+    !req.path.endsWith("/welcome") &&
     !(base === "/classes" && req.path.endsWith("/cancel"))
   ) {
     const schema =
@@ -116,9 +120,15 @@ ownerRoutes.post(
 );
 
 ownerRoutes.use(requireRole("GYM_OWNER", "GYM_STAFF"), requireGymContext);
+ownerRoutes.get("/communication/whatsapp-updates", requireRole("GYM_OWNER"), requirePermission("gym:read"), getWhatsAppUpdates);
+ownerRoutes.patch("/communication/whatsapp-updates", requireRole("GYM_OWNER"), requirePermission("gym:update"), updateWhatsAppUpdates);
+ownerRoutes.post("/communication/whatsapp-updates/qr", requireRole("GYM_OWNER"), requirePermission("gym:update"), invitationQrLimiter, invitationQrUpload, uploadInvitationQr);
+ownerRoutes.get("/platform/whatsapp-invitation", requireRole("GYM_OWNER"), getOwnersInvitation);
 ownerRoutes.get("/communication/whatsapp-group", requireRole("GYM_OWNER"), requirePermission("gym:read"), getWhatsAppGroup);
 ownerRoutes.patch("/communication/whatsapp-group", requireRole("GYM_OWNER"), requirePermission("gym:update"), updateWhatsAppGroup);
 ownerRoutes.post("/members/:id/invitation/resend", requirePermission("member:write"), rateLimit({ windowMs: 15 * 60_000, limit: 20, standardHeaders: true, legacyHeaders: false }), resendMemberInvitation);
+ownerRoutes.get("/members/:id/welcome", requireRole("GYM_OWNER"), requirePermission("member:read"), memberWelcomeDetails);
+ownerRoutes.post("/members/:id/welcome", requireRole("GYM_OWNER"), requirePermission("member:write"), invitationQrLimiter, requireIdempotencyKey, sendMemberWelcome);
 ownerRoutes.get(
   "/dashboard",
   requirePermission("gym:read"),
@@ -285,6 +295,7 @@ ownerRoutes.post(
 ownerRoutes.post(
   "/members",
   requirePermission("member:write"),
+  requireIdempotencyKey,
   controller.createMember,
 );
 ownerRoutes.get(

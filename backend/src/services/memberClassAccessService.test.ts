@@ -10,7 +10,7 @@ it("returns a deny-all scope without querying gyms when the user has no active m
   vi.spyOn(MemberProfile, "find").mockReturnValue(chain([]));
   const gyms = vi.spyOn(Gym, "find");
   expect(await memberClassScope("user", { now })).toEqual({ filter: { _id: { $in: [] } }, eligibleGymCount: 0 });
-  expect(MemberProfile.find).toHaveBeenCalledWith({ userId: "user", status: "ACTIVE", "invitation.status": { $ne: "PENDING" } });
+  expect(MemberProfile.find).toHaveBeenCalledWith({ userId: "user", status: "ACTIVE", $or: [{ "invitation.status": { $ne: "PENDING" } }, { offlineAccessGranted: true }] });
   expect(gyms).not.toHaveBeenCalled();
 });
 it("requires the user's currently active subscription, current cycle and matching member/gym tuple", async () => {

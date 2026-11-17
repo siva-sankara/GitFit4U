@@ -29,6 +29,7 @@ export const requireAuth: RequestHandler = async (req, _res, next) => {
       !user ||
       (user.developmentTestAccount && env.OTP_MODE !== "development_preview") ||
       user.status !== "ACTIVE" ||
+        user.firstAccessPending ||
       !user.roles.includes(session.activeRole)
     ) {
       throw new AppError(

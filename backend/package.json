@@ -32,7 +32,9 @@
     "db:migrate-promotions": "tsx src/scripts/migrate-promotions.ts",
     "test:push": "tsx src/scripts/firebase-push-check.ts",
     "db:migrate-promotion-scopes": "tsx src/scripts/migrate-promotion-scopes.ts",
-    "test:platform-offers": "tsx src/scripts/check-platform-offers.ts --run-isolated"
+    "test:platform-offers": "tsx src/scripts/check-platform-offers.ts --run-isolated",
+    "test:member-welcome": "tsx src/scripts/check-member-welcome.ts --run-isolated",
+    "db:migrate-manual-member-access": "tsx src/scripts/migrate-manual-member-access.ts"
   },
   "dependencies": {
     "@fontsource/noto-sans": "^5.3.0",
@@ -58,7 +60,8 @@
     "sharp": "^0.35.5",
     "socket.io": "^4.8.3",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
-    "zod": "^4.5.4"
+    "zod": "^4.5.4",
+    "zxing-wasm": "3.1.6"
   },
   "overrides": {
     "gaxios@6.7.1": {

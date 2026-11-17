@@ -135,7 +135,7 @@ try {
   const gymNotice = await Notification.findOne({ gymId: pendingGym._id, userId: owner._id, event: "gym.activated" });
   assert(gymNotice);
   const gymDestination = status(await call("post", `/users/me/notifications/${gymNotice._id}/open`, ownerToken));
-  assert.equal(gymDestination.path, `/platform-renewal?gym=${pendingGym.publicId}`);
+  assert.equal(gymDestination.path, "/owner/gym-profile");
   const memberWorkspaceNotice = await Notification.create({ userId: owner._id, event: "attendance.checked_in", entityId: nanoid(20), title: "Attendance update", message: "Review your attendance", category: "ATTENDANCE" });
   const roleDestination = status(await call("post", `/users/me/notifications/${memberWorkspaceNotice._id}/open`, ownerToken));
   assert.equal(roleDestination.available, false);

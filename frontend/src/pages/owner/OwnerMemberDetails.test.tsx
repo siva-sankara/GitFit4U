@@ -97,3 +97,13 @@ it("loads editable trainer choices and payment history only with their respectiv
     ),
   ).toBe(true);
 });
+it("separates login setup from activation on a paid member's profile", async () => {
+  mocks.permissions = ["member:read", "member:write"];
+  mocks.request.mockResolvedValue({ data: { timezone: "Asia/Kolkata", member: { publicId: "member", memberCode: "M001", status: "ACTIVE", offlineAccessGranted: true, invitation: { status: "PENDING", kind: "ACTIVATE" }, contact: { name: "Paid member", email: "paid@example.test" } }, payments: [], attendance: [] } });
+  await render();
+  expect(host.textContent).toContain("Account active");
+  expect(host.textContent).toContain("login password setup is separate from gym access");
+  expect(host.querySelector('[aria-label="Send login setup"]')).not.toBeNull();
+  expect(host.textContent).not.toContain("Account activation pending");
+  expect(host.textContent).not.toContain("Resend invitation");
+});

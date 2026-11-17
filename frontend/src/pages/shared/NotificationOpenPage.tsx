@@ -3,15 +3,16 @@ import { Link, Navigate, useParams } from "react-router-dom";
 import { apiRequest, type ApiEnvelope } from "../../services/apiClient";
 import { safeReturnTo } from "../../services/authRedirect";
 import { useCurrentUser } from "../../api/hooks";
+import { navigationSessionScope } from "../../services/navigationSession";
 
 export function NotificationOpenPage() {
   const { id = "" } = useParams(), me = useCurrentUser();
   const valid = /^[a-f\d]{24}$/i.test(id);
   const result = useQuery({
-    queryKey: ["notification-destination", id, me.data?.data.user._id],
+    queryKey: ["notification-destination", id, me.data?.data.user._id, navigationSessionScope(me.data?.data.context), me.data?.data.context?.role],
     queryFn: () => apiRequest<ApiEnvelope<{ path: string; available: boolean; explanation?: string }>>(
       `/api/v1/users/me/notifications/${id}/open`, { method: "POST" }),
-    enabled: valid && Boolean(me.data?.data.user._id), retry: false,
+    enabled: valid && Boolean(me.data?.data.user._id), retry: false, staleTime: 0, gcTime: 0,
   });
   const destination = result.data?.data;
   if (destination?.available && safeReturnTo(destination.path) && !destination.path.startsWith("/notification-open"))

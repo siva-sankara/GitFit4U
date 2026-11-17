@@ -66,6 +66,21 @@ const gymSchema = new Schema(
       type: new Schema({ name: { type: String, maxlength: 100 }, inviteLink: { type: String, maxlength: 300 } }, { _id: false }),
       select: false,
     },
+    // Private, opt-in invitation. Never selected by public gym queries/populates.
+    whatsappUpdates: {
+      type: new Schema({
+        enabled: { type: Boolean, default: false },
+        type: { type: String, enum: ["group", "channel"], default: "group" },
+        displayName: { type: String, maxlength: 100 },
+        inviteUrl: { type: String, maxlength: 500 },
+        description: { type: String, maxlength: 400 },
+          qrId: String,
+        version: { type: Number, default: 0 },
+        updatedAt: Date,
+        updatedBy: { type: Schema.Types.ObjectId, ref: "User" },
+      }, { _id: false }),
+      select: false,
+    },
     address: {
       line1: String,
       line2: String,

@@ -58,6 +58,11 @@ it("does not classify frozen or deactivated access as active merely because date
       .state,
   ).toBe("CANCELLED");
 });
+it("shows future paid membership as scheduled without replacing access restrictions", () => {
+  const future = { ...member, offlineAccessGranted: true, invitation: { status: "PENDING" }, currentSubscriptionId: { ...member.currentSubscriptionId, startsAt: "2026-09-28T00:00:00Z" } };
+  expect(membershipPresentation(future, timezone, now).state).toBe("SCHEDULED");
+  expect(membershipPresentation({ ...future, status: "SUSPENDED" }, timezone, now).state).toBe("DEACTIVATED");
+});
 it("exposes status and plan to keyboard and touch users without a large status badge", async () => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   const host = document.createElement("div");

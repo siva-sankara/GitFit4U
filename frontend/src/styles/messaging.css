@@ -39,12 +39,25 @@
   opacity: 1;
 }
 .modern-chat .message-bubble footer {
+  display: flex;
+  align-items: center;
   flex-wrap: nowrap;
   white-space: nowrap;
+  gap: 6px;
+  line-height: 1.2;
 }
-.modern-chat .message-bubble footer time {
+.modern-chat .message-bubble footer :is(time, small) {
+  position: static;
+  inset: auto;
+  display: inline-block;
+  flex: 0 0 auto;
+  margin: 0;
+  font-size: inherit;
+  line-height: inherit;
+  color: inherit;
   white-space: nowrap;
 }
+.modern-chat .message-bubble footer .message-delete { flex: 0 0 auto; align-items: center; justify-content: center; margin: 0; }
 .chat-start {
   padding: 10px 12px;
 }

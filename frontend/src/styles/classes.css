@@ -1,6 +1,6 @@
 .class-card-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
   gap: 14px;
   /* max-height: 68vh; */
   overflow: auto;
@@ -86,6 +86,25 @@
 }
 .class-status-filter {
   max-width: 230px;
+}
+.member-classes-page .member-classes-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(160px, 210px) auto;
+  align-items: end;
+  gap: 10px 12px;
+  padding: 12px;
+}
+.member-classes-toolbar .field { margin: 0; min-width: 0; }
+.member-classes-toolbar .input { width: 100%; min-width: 0; min-height: var(--control-height, 40px); }
+.member-classes-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.member-classes-actions .btn { min-height: var(--control-height, 40px); white-space: nowrap; }
+@media (max-width: 900px) {
+  .member-classes-page .member-classes-toolbar { grid-template-columns: minmax(0, 1fr) minmax(150px, 210px); }
+  .member-classes-actions { grid-column: 1 / -1; justify-content: flex-end; }
+}
+@media (max-width: 420px) {
+  .member-classes-page .member-classes-toolbar { grid-template-columns: minmax(0, 1fr); }
+  .member-classes-actions { justify-content: flex-start; }
 }
 @media (max-width: 600px) {
   .class-form-grid {

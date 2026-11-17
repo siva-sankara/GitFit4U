@@ -1,5 +1,9 @@
 import { expect, it } from "vitest";
 import { safeReturnTo, loginDestination, canRegisterGym, workspacePath } from "./authRedirect";
+it("restores a payment return after login without trusting success flags", () => {
+  expect(loginDestination("USER", "/payment-return?paymentId=payment_123")).toBe("/payment-return?paymentId=payment_123");
+  expect(safeReturnTo("/payment-return?paymentId=payment_123&success=true")).toBeUndefined();
+});
 it("preserves gym-bound platform renewal reminders regardless of the currently active role", () => {
   const destination = "/platform-renewal?gym=owned_gym_123";
   for (const role of ["USER", "TRAINER", "GYM_OWNER", "GYM_STAFF", "ADMIN"])

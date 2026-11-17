@@ -12,7 +12,7 @@ vi.mock("../services/apiClient", () => ({ apiRequest: mocks.request }));
 vi.mock("../context/AppContext", () => ({
   useOptionalApp: () => ({ notify: mocks.notify }),
 }));
-import { MemberWhatsAppReminderAction } from "./MemberWhatsAppReminderAction";
+import { MemberWhatsAppReminderAction, memberReminderReason } from "./MemberWhatsAppReminderAction";
 
 let host: HTMLDivElement;
 let root: Root;
@@ -21,6 +21,11 @@ const member = {
   contact: { name: "Mark" },
   invitation: { status: "PENDING" },
 };
+
+it("does not request activation for an already enabled offline member", () => {
+  expect(memberReminderReason({ ...member, status: "ACTIVE", offlineAccessGranted: true })).toBe("general_followup");
+  expect(memberReminderReason({ ...member, status: "INACTIVE" })).toBe("activation_invitation");
+});
 
 beforeEach(() => {
   vi.clearAllMocks();

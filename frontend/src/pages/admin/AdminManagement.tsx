@@ -488,6 +488,7 @@ export function AdminSettings() {
           />
         </section>
       </QueryState>
+      <WhatsAppUpdatesSettings platform />
     </div>
   );
 }
@@ -548,3 +549,4 @@ export function RefundAction({ payment }: { payment: Row }) {
   );
 }
 import { GymActivationForm } from "./GymActivationForm";
+import { WhatsAppUpdatesSettings } from "../../components/WhatsAppUpdatesSettings";

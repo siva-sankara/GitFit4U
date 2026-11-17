@@ -23,6 +23,7 @@ export function needsOwnerOnboarding(identity: AuthIdentity): boolean {
 // Only local, known application destinations may be restored after authentication.
 export function safeReturnTo(value: unknown): string | undefined {
   if (typeof value === "string" && /^\/notification-open\/[a-f\d]{24}$/i.test(value)) return value;
+  if (typeof value === "string" && /^\/payment-return(?:\?paymentId=[A-Za-z0-9_-]{1,80})?$/.test(value)) return value;
   if (
     typeof value !== "string" ||
     value.includes("\\") ||
@@ -62,6 +63,7 @@ export function authPath(path: string, returnTo?: string): string {
 export function loginDestination(identity: AuthIdentity, returnTo?: string): string {
   const user = account(identity), role = user.activeRole || "USER";
   const safe = safeReturnTo(returnTo);
+  if (safe && /^\/payment-return(?:\?|$)/.test(safe)) return safe;
   if (safe && /^\/notification-open\/[a-f\d]{24}$/i.test(safe)) return safe;
   if (needsOwnerOnboarding(identity)) return safe && isOwnerAccountDestination(safe) ? safe : "/register-gym";
   const home =

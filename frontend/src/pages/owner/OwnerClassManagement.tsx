@@ -369,6 +369,10 @@ export function OwnerClassManagement({
           )}
           <p>Manage schedules, trainers and available places.</p>
         </div>
+           <div className="table-toolbar">
+            <label className="search-field"><span className="sr-only">Search classes</span><input value={q} onChange={(event) => setQ(event.target.value)} placeholder="Search classes" /></label>
+            <label className="field class-status-filter"><span>Class status</span><select className="select" value={status} onChange={(event) => { setStatus(event.target.value); setPage(1); }}><option value="">All classes</option><option>SCHEDULED</option><option>CANCELLED</option><option>COMPLETED</option></select></label>
+          </div>
         {write && (
           <button className="btn btn-primary" onClick={() => setEditing({})}>
             Create class
@@ -377,10 +381,7 @@ export function OwnerClassManagement({
       </PageHeader>
       {read && (
         <>
-          <div className="table-toolbar">
-            <label className="search-field"><span className="sr-only">Search classes</span><input value={q} onChange={(event) => setQ(event.target.value)} placeholder="Search classes" /></label>
-            <label className="field class-status-filter"><span>Class status</span><select className="select" value={status} onChange={(event) => { setStatus(event.target.value); setPage(1); }}><option value="">All classes</option><option>SCHEDULED</option><option>CANCELLED</option><option>COMPLETED</option></select></label>
-          </div>
+       
           <QueryState query={classes}>
             <ListViewport label="Gym classes" resetKey={`${page}:${limit}:${status}:${search}`}>
               <div className="class-card-grid">

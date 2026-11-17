@@ -1,7 +1,8 @@
 import { PageHeader } from "../../components/PageHeader";
+import { OwnersWhatsAppInvitation } from "../../components/MembershipWhatsAppUpdates";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useSearchParams, useNavigate } from "react-router-dom";
 import { useCurrentUser } from "../../api/hooks";
 import { apiRequest, setAccessToken, type ApiEnvelope } from "../../services/apiClient";
 import { Modal } from "../../components/Modal";
@@ -12,6 +13,7 @@ import "../../styles/platform-subscription.css";
 import { PaymentCheckout } from "../live/LivePublic";
 import { useData, QueryState, money, type Row } from "../live/LiveData";
 export function PlatformSubscriptionPage() {
+  const navigate = useNavigate();
   const me = useCurrentUser(), [params] = useSearchParams();
   const requestedGym = params.get("gym"), hasTarget = params.has("gym");
   const assignments = me.data?.data.assignments || [];
@@ -77,6 +79,7 @@ export function PlatformSubscriptionPage() {
         <h1>Platform subscription</h1>
         <p>Renew <strong>{target.name}</strong>'s GETFIT4U subscription with verified payment.</p>
       </PageHeader>
+      <OwnersWhatsAppInvitation />
       {["SUSPENDED", "ARCHIVED"].includes(target.status) && <p role="alert">
         This gym is {target.status.toLowerCase()}. Contact support about its status. Renewal does not remove administrative restrictions.
       </p>}
@@ -156,9 +159,10 @@ export function PlatformSubscriptionPage() {
             quoteBody={{ renewal: true, planId: plan._id, expectedGymId: target._id }}
             onBusyChange={setBusy}
             onGatewayOpenChange={setGatewayOpen}
-            onComplete={() => {
+            onComplete={(paymentId) => {
               setSelection(null);
               void client.invalidateQueries();
+              navigate(`/payment-return?paymentId=${encodeURIComponent(paymentId)}`);
             }}
           />
         )}

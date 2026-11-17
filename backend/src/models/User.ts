@@ -28,6 +28,7 @@ const userSchema = new Schema(
     },
     phoneVerifiedAt: Date,
     emailVerifiedAt: Date,
+    firstAccessPending: { type: Boolean, default: false },
     avatarUrl: { type: String },
     avatarAttachmentId: { type: Schema.Types.ObjectId, ref: "Attachment" },
     social: {

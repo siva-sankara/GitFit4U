@@ -18,7 +18,9 @@ import { normalizePhone } from "../services/otpService.js";
 import { emitDomainEvent } from "../services/domainEventService.js";
 import { writeAudit } from "../services/auditService.js";
 import { ensurePaymentInvoice } from "../services/invoiceService.js";
-import { issueMemberInvitation } from "../services/accountInvitationService.js";
+import { createMemberBootstrap } from "../services/memberBootstrapService.js";
+import { IdempotencyRecord } from "../models/Operations.js";
+import { sha256 } from "../utils/crypto.js";
 import { transitionMemberAccess } from "../services/membershipLifecycleService.js";
 import { AppError } from "../utils/AppError.js";
 import { normalizeEmail } from "../utils/accountIdentity.js";
@@ -67,8 +69,17 @@ export async function createMemberWithMembership(req: Request, res: Response) {
   const body = ownerMemberCreateInput.parse(req.body),
     gymId = req.auth!.gymId!;
   const now = new Date();
+  const key = req.idempotencyKey || req.header("idempotency-key");
+  if (!key || key.length < 8 || key.length > 128) throw new AppError(400, "IDEMPOTENCY_KEY_REQUIRED", "A request key is required to record this payment safely.");
+  const scope = `member.offline:${req.auth!.userId}:${gymId}`;
+  const requestHash = sha256(JSON.stringify(body));
   const result = await mongoose.connection.transaction(async (session) => {
-    const gym = await Gym.findOne({ _id: gymId, status: "ACTIVE" }).session(
+    const replay = await IdempotencyRecord.findOne({ scope, key }).session(session);
+    if (replay) {
+      if (replay.requestHash !== requestHash) throw new AppError(409, "IDEMPOTENCY_CONFLICT", "This request key was used for different member details.");
+      return { ...replay.responseBody, replayed: true };
+    }
+    const gym = await Gym.findOne({ _id: gymId, status: "ACTIVE", deletedAt: null, ...(req.auth!.role === "ADMIN" ? {} : { ownerId: req.auth!.userId }) }).session(
       session,
     );
     if (!gym)
@@ -143,6 +154,8 @@ export async function createMemberWithMembership(req: Request, res: Response) {
         "MEMBER_ACCOUNT_UNAVAILABLE",
         "This account is not available for membership creation.",
       );
+    if (user && user.status !== "ACTIVE")
+      throw new AppError(409, "MEMBER_ACCOUNT_SETUP_REQUIRED", "Ask the member to complete their existing account verification before recording this membership. Existing paid invitation-held members can be reviewed by an administrator.");
     if (!user && !email)
       throw new AppError(
         422,
@@ -151,6 +164,7 @@ export async function createMemberWithMembership(req: Request, res: Response) {
       );
     if (user && (!user.email || (email && user.email !== email) || (phone && user.phone && user.phone !== phone)))
       throw new AppError(409, "CONTACT_ACCOUNT_CONFLICT", "Verify the member's existing account email before inviting them.");
+    const newAccount = !user;
     if (!user)
       [user] = await User.create(
         [
@@ -160,7 +174,8 @@ export async function createMemberWithMembership(req: Request, res: Response) {
             email,
             phone,
             roles: ["USER"],
-            status: "PENDING_VERIFICATION",
+            status: "ACTIVE",
+            firstAccessPending: true,
           },
         ],
         { session },
@@ -169,6 +184,8 @@ export async function createMemberWithMembership(req: Request, res: Response) {
       gymId,
       userId: user._id,
     }).session(session);
+    if (member && (["SUSPENDED", "ARCHIVED"].includes(member.status) || member.deactivatedAt))
+      throw new AppError(409, "MEMBER_RESTRICTED", "Resolve this member's access restriction before recording a new membership.");
     if (member?.isDeleted)
       throw new AppError(
         409,
@@ -192,7 +209,8 @@ export async function createMemberWithMembership(req: Request, res: Response) {
         "This member already has a current membership. Use their membership controls.",
       );
     const details = {
-      status: needsInvitation ? "INACTIVE" : "ACTIVE",
+      status: "ACTIVE",
+      offlineAccessGranted: true,
       directAccess: false,
       contact: {
         name: body.name,
@@ -269,9 +287,11 @@ export async function createMemberWithMembership(req: Request, res: Response) {
           provider: "OFFLINE",
           methodCategory: body.payment.method,
           status: "CAPTURED",
+          fulfillmentStatus: "APPLIED",
           capturedAt: paidAt,
           metadata: {
             collectorId: req.auth!.userId,
+            recordedAt: now,
             reference: body.payment.reference,
             notes: body.payment.notes,
           },
@@ -283,7 +303,11 @@ export async function createMemberWithMembership(req: Request, res: Response) {
     await subscription.save({ session });
     member.currentSubscriptionId = subscription._id;
     await member.save({ session });
-    if (needsInvitation) await issueMemberInvitation(member, user, gym, session);
+    if (needsInvitation) {
+      member.invitation = { status: "PENDING", kind: newAccount ? "ACTIVATE" : "LINK" };
+      await member.save({ session });
+    }
+    const temporaryCredential = newAccount ? await createMemberBootstrap(user._id, session) : undefined;
     await ensurePaymentInvoice(payment, { session, subscription });
     await SubscriptionEvent.create(
       [
@@ -298,14 +322,16 @@ export async function createMemberWithMembership(req: Request, res: Response) {
     );
     await emitDomainEvent({
       event: "membership.created",
+      skipWhatsApp: true,
       userId: user._id,
       gymId,
       entityId: subscription.publicId,
       actionUrl: "/app/subscriptions",
       session,
     });
-    await emitDomainEvent({
+    if (startsAt <= now) await emitDomainEvent({
       event: "membership.activated",
+      skipWhatsApp: true,
       userId: user._id,
       gymId,
       entityId: subscription.publicId,
@@ -320,14 +346,29 @@ export async function createMemberWithMembership(req: Request, res: Response) {
       actionUrl: "/app/payments",
       session,
     });
-    return { member, subscription, payment };
+    const saved = {
+      member: { publicId: member.publicId, memberCode: member.memberCode, contact: member.contact, status: member.status },
+      subscription: { publicId: subscription.publicId, planSnapshot: subscription.planSnapshot, startsAt, endsAt, status: startsAt > now ? "SCHEDULED" : "ACTIVE" },
+      payment: { publicId: payment.publicId, amountMinor: payment.amountMinor, currency: payment.currency, methodCategory: payment.methodCategory, status: payment.status },
+      gym: { name: gym.name, timezone }, account: { state: newAccount ? "NEW" : "EXISTING", status: user.status, firstAccessPending: Boolean(user.firstAccessPending) },
+      welcomeStatus: "NOT_REQUESTED",
+    };
+    // Only non-secret creation facts are replayable. Never archive the temporary password.
+    await IdempotencyRecord.create([{ scope, key, requestHash, status: "COMPLETED", statusCode: 201, responseBody: saved, expiresAt: new Date(now.getTime() + 30 * 86400_000) }], { session });
+    return { ...saved, temporaryCredential };
+  }).catch(async error => {
+    if (error?.code === 11000) {
+      const replay = await IdempotencyRecord.findOne({ scope, key }).lean();
+      if (replay?.requestHash === requestHash) return { ...replay.responseBody, replayed: true };
+    }
+    throw error;
   });
   await writeAudit(req, {
     action: "member.offline.created",
     entityType: "MemberProfile",
     entityId: result.member.publicId,
   });
-  res.status(201).json({ success: true, data: result });
+  res.set("Cache-Control", "private, no-store").status(201).json({ success: true, data: result });
 }
 export async function updateMember(req: Request, res: Response) {
   const body = ownerMemberUpdateInput.parse(req.body);

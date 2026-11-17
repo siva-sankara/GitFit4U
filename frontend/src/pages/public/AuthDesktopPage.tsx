@@ -58,6 +58,7 @@ type Challenge = {
     | "SIMULATED";
 };
 type AuthResponse = ApiEnvelope<{
+  setupRequired?: boolean; setupToken?: string; resetToken?: string;
   accessToken: string;
   user: { activeRole: ActiveRole; roles?: ActiveRole[]; onboarding?: OwnerOnboarding };
   session?: SessionData;
@@ -82,6 +83,7 @@ function otpChannelAccepted(status?: string) {
 }
 
 export function AuthDesktopPage() {
+  const [setupToken, setSetupToken] = useState<string>();
   const location = useLocation(),
     path = location.pathname,
     navigate = useNavigate(),
@@ -215,6 +217,13 @@ export function AuthDesktopPage() {
     if (resetState) setChallenge(null);
   }
   function finish(response: AuthResponse, fromSignup = false) {
+    if (response.data.setupRequired) {
+      if (response.data.resetToken) {
+        setResetToken(response.data.resetToken);
+        navigate(authLink("/auth/reset-password"), { state: location.state });
+      } else setSetupToken(response.data.setupToken);
+      return;
+    }
     setAccessToken(response.data.accessToken);
     if (response.data.session) {
       queryClient.setQueryData(["me"], {
@@ -257,11 +266,12 @@ export function AuthDesktopPage() {
       setBusy(false);
     }
   }
-  async function requestCode(identifier: string, purpose: Challenge["purpose"]) {
+  async function requestCode(identifier: string, purpose: Challenge["purpose"], limitedSetupToken?: string) {
     await run(async () => {
       const r = await apiRequest<
         ApiEnvelope<{
           challengeId: string;
+          setupIdentifier?: string;
           maskedPhone: string;
           maskedEmail?: string;
           dualDelivery?: boolean;
@@ -272,19 +282,17 @@ export function AuthDesktopPage() {
           developmentPreview?: { code: string; simulated: true };
         }>
       >(
-        purpose === "LOGIN"
+        limitedSetupToken ? "/api/v1/auth/setup/otp" : purpose === "LOGIN"
           ? "/api/v1/auth/otp/request"
           : "/api/v1/auth/forgot-password",
         {
           method: "POST",
-          body: JSON.stringify({
-            identifier,
-          }),
+          body: JSON.stringify(limitedSetupToken ? { setupToken: limitedSetupToken } : { identifier }),
         },
       );
       const next: Challenge = {
         challengeId: r.data.challengeId,
-        identifier,
+        identifier: r.data.setupIdentifier || identifier,
         maskedPhone: r.data.maskedPhone,
         maskedEmail: r.data.maskedEmail,
         dualDelivery: r.data.dualDelivery,
@@ -295,6 +303,7 @@ export function AuthDesktopPage() {
         deliveryStatus: r.data.deliveryStatus,
       };
       saveChallenge(next, r.data.developmentPreview);
+      setSetupToken(undefined);
       otp.reset();
       navigate(
         authLink(purpose === "LOGIN" ? "/auth/otp" : "/auth/recovery-otp"),
@@ -795,6 +804,12 @@ export function AuthDesktopPage() {
                 Need help recovering your account?
               </Link>
             )}
+          </form>
+        ) : setupToken ? (
+          <form onSubmit={event => { event.preventDefault(); void requestCode(login.getValues("identifier"), "ACCOUNT_RECOVERY", setupToken); }}>
+            <h1>Finish account setup</h1><p>Your temporary password opens setup only. Verify the code sent to your recorded email, then choose your own password.</p>
+            <button className="btn btn-primary" disabled={busy}>{busy ? "Requesting code…" : "Verify my email"}</button>
+            <button className="btn btn-secondary" type="button" onClick={() => setSetupToken(undefined)}>Back to login</button>
           </form>
         ) : (
           <form

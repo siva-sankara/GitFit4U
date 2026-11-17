@@ -2,6 +2,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { InboxNotification } from "../../services/notificationAlerts";
 
@@ -15,11 +16,14 @@ const state = vi.hoisted(() => ({
   refetch: vi.fn(),
   query: vi.fn(),
   remove: vi.fn(),
+  request: vi.fn(),
 }));
+vi.mock("../../services/apiClient", () => ({ apiRequest: state.request }));
 vi.mock("../../components/PushNotificationSettings", () => ({
   PushNotificationSettings: () => null,
 }));
 vi.mock("../../api/hooks", () => ({
+  useCurrentUser: () => ({ data: { data: { user: { _id: "user-one" }, context: { userId: "user-one", sessionId: "session-one", role: "USER" } } } }),
   useNotifications: (page: number, category: string) => {
     state.query(page, category);
     return {
@@ -49,9 +53,10 @@ vi.mock("../../api/hooks", () => ({
   useDeleteNotifications: () => ({ mutate: state.remove, isPending: false, isError: false }),
 }));
 import { NotificationsApiPage } from "./NotificationsApiPage";
-let host: HTMLDivElement, root: Root;
+let host: HTMLDivElement, root: Root, client: QueryClient;
 beforeEach(() => {
   vi.clearAllMocks();
+  client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   state.loading = false;
   state.error = false;
   state.rows = [
@@ -71,17 +76,27 @@ beforeEach(() => {
 });
 afterEach(async () => {
   await act(async () => root.unmount());
+  client.clear();
   host.remove();
 });
-const render = async () => {
+const render = async (path = "/app/notifications") => {
   await act(async () =>
     root.render(
-      <MemoryRouter>
+      <QueryClientProvider client={client}><MemoryRouter initialEntries={[path]}>
         <NotificationsApiPage />
-      </MemoryRouter>,
+      </MemoryRouter></QueryClientProvider>,
     ),
   );
 };
+it("opens a push-linked announcement even when it is outside the current inbox page", async () => {
+  const id = "507f1f77bcf86cd799439011";
+  state.request.mockResolvedValue({ data: { _id: id, category: "GYM", title: "Gym announcement", message: "New holiday hours", createdAt: "2026-11-01T10:00:00Z" } });
+  await render(`/app/notifications?notification=${id}`);
+  await act(async () => { await new Promise(resolve => { setTimeout(resolve, 40); }); });
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain("New holiday hours");
+  expect(state.request).toHaveBeenCalledWith(`/api/v1/users/me/notifications/${id}`, expect.any(Object));
+  expect([...document.querySelectorAll("button")].some(button => button.textContent === "View details")).toBe(false);
+});
 const button = (text: string) =>
   [...document.querySelectorAll<HTMLButtonElement>("button")].find(
     (element) => element.textContent === text,

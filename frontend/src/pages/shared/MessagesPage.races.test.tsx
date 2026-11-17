@@ -83,8 +83,49 @@ it("keeps a new draft after sending, switching away, and returning before the ol
   const first = mocks.request.mock.calls.find(([path, options]) => path === "/api/v1/conversations/a/messages" && options?.method === "POST")!;
   expect(JSON.parse(first[1].body).text).toBe("First A message");
   await choose("b"); await choose("a"); await type("New unsent draft");
+  const otherControl = host.querySelector<HTMLButtonElement>('[aria-label="Attach a file"]')!;
+  otherControl.focus();
   await act(async () => sent.resolve(envelope({})));
   await flush();
   expect(host.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')!.value).toBe("New unsent draft");
   expect(host.querySelector<HTMLButtonElement>('[aria-label="Send message"]')!.disabled).toBe(false);
+  expect(document.activeElement).toBe(otherControl);
+});
+
+it("focuses the enabled composer after a successful send, including a second immediate response", async () => {
+  const sent = deferred<any>();
+  mocks.request.mockImplementation((path: string, options?: { method?: string }) => path === "/api/v1/conversations/a/messages" && options?.method === "POST" ? sent.promise : defaultRequest(path));
+  await type("First message");
+  const textarea = host.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')!;
+  const submit = host.querySelector<HTMLButtonElement>('[aria-label="Send message"]')!;
+  await act(async () => { submit.focus(); submit.click(); });
+  await flush();
+  expect(textarea.disabled).toBe(true);
+  await act(async () => sent.resolve(envelope({})));
+  await flush();
+  expect(textarea.value).toBe("");
+  expect(textarea.disabled).toBe(false);
+  expect(document.activeElement).toBe(textarea);
+
+  await type("Second message");
+  await act(async () => { submit.focus(); submit.click(); });
+  await flush();
+  expect(textarea.value).toBe("");
+  expect(document.activeElement).toBe(textarea);
+  const sends = mocks.request.mock.calls.filter(([path, options]) => path.endsWith("/a/messages") && options?.method === "POST");
+  expect(sends.map(([, options]) => JSON.parse(options.body).text)).toEqual(["First message", "Second message"]);
+});
+
+it("does not move focus into another chat when a send completes after switching", async () => {
+  const sent = deferred<any>();
+  mocks.request.mockImplementation((path: string, options?: { method?: string }) => path === "/api/v1/conversations/a/messages" && options?.method === "POST" ? sent.promise : defaultRequest(path));
+  await type("For chat A");
+  await act(async () => host.querySelector<HTMLFormElement>(".message-composer")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+  await choose("b");
+  const otherControl = host.querySelector<HTMLButtonElement>('[aria-label="Attach a file"]')!;
+  otherControl.focus();
+  await act(async () => sent.resolve(envelope({})));
+  await flush();
+  expect(document.activeElement).toBe(otherControl);
+  expect(host.textContent).toContain("b recent message");
 });

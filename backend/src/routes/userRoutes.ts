@@ -16,6 +16,7 @@ import { requestGymJoin } from "../controllers/memberManagementController.js";
 import { requireIdempotencyKey } from "../middleware/idempotency.js";
 import { deleteNotifications, notificationDetails, openNotification } from "../controllers/notificationController.js";
 import { supportContext } from "../services/supportContextService.js";
+import { getMembershipWhatsAppUpdates } from "../controllers/whatsappUpdatesController.js";
 
 export const userRoutes = Router();
 userRoutes.use(
@@ -37,6 +38,7 @@ userRoutes.post("/me/contact/phone/confirm", contactLimit, contact.confirmPhoneC
 userRoutes.post("/me/contact/email", contactLimit, contact.changeEmail);
 userRoutes.get("/me/subscriptions", controller.subscriptions);
 userRoutes.get("/me/subscriptions/:id", controller.subscriptionDetails);
+userRoutes.get("/me/subscriptions/:id/whatsapp-updates", getMembershipWhatsAppUpdates);
 userRoutes.get("/me/payments", controller.payments);
 userRoutes.get("/me/attendance", controller.attendance);
 userRoutes.post("/me/attendance/qr", deprecatedMemberQr);

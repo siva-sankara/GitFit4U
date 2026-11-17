@@ -21,8 +21,9 @@ export function ActivateAccountPage() {
   const client = useQueryClient();
   const isLink = invitation?.kind === "LINK";
   useEffect(() => {
-    if (invitation) sessionStorage.setItem(storageKey, JSON.stringify(invitation));
-    // The token stays only in this tab's session state after initial navigation.
+    if (invitation?.kind === "LINK") sessionStorage.setItem(storageKey, JSON.stringify(invitation));
+    else sessionStorage.removeItem(storageKey);
+    // New-account setup secrets remain in memory; existing-account LINK survives its sign-in redirect.
     if (window.location.hash) window.history.replaceState(window.history.state, "", window.location.pathname);
   }, [invitation]);
   const accept = useMutation({
@@ -43,7 +44,7 @@ export function ActivateAccountPage() {
   return <main className="public-page activation-page">
     <section className="panel">
       <Link to="/">GETFIT4U</Link>
-      <h1>{isLink ? "Accept your gym invitation" : "Activate your account"}</h1>
+      <h1>{isLink ? "Accept your gym invitation" : "Set up account access"}</h1>
       {accept.isSuccess ? <><p role="status">{isLink ? "Your gym membership is linked." : "Your account is active. Sign in with your new password."} Gym access remains subject to your membership eligibility.</p><Link className="btn btn-primary" to={isLink ? loginDestination(me.data?.data || "USER", "/app/profile/membership") : authPath("/login", "/app/profile/membership")}>{isLink ? "Continue to your account" : "Sign in"}</Link></>
         : !invitation ? <p role="alert">Open the invitation from your email. If the link has expired, ask your gym to resend it.</p>
         : <>

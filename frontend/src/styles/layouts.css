@@ -228,8 +228,8 @@ tbody tr[aria-selected="true"] { background: var(--selected-bg); box-shadow: ins
 td small { display: block; color: var(--text-muted); }
 .table-more { width: 34px; height: 34px; flex-basis: 34px; }
 .table-action { display: inline-flex; align-items: center; gap: 5px; background: transparent; color: var(--brand-text); cursor: pointer; }
-.table-toolbar { display: flex; align-items: center; gap: 12px; padding: 18px; border-bottom: 1px solid var(--border); }
-.table-toolbar .search-field { min-height: 44px; width: min(420px, 100%); box-shadow: none; }
+.table-toolbar { display: flex; align-items: center; gap: 12px; padding: 18px;  }
+.table-toolbar .search-field { min-height: 34px; width: min(250px, 100%); box-shadow: none; }
 .filter-tabs { display: flex; align-items: center; gap: 4px; margin-left: auto; padding: 4px; border-radius: 999px; background: var(--surface-muted); }
 .filter-tabs button { display: inline-flex; min-height: 36px; align-items: center; gap: 7px; border-radius: 999px; background: transparent; color: var(--text-muted); padding: 0 13px; cursor: pointer; font-size: var(--text-size-small); font-weight: 700; }
 .filter-tabs button.active { background: var(--surface-elevated); color: var(--text); box-shadow: var(--shadow-sm); }

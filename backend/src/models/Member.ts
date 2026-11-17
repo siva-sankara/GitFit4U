@@ -18,6 +18,9 @@ const memberProfileSchema = new Schema(
       index: true,
     },
     memberCode: { type: String, required: true },
+    offlineAccessGranted: { type: Boolean, default: false },
+    welcomeLastQueuedAt: Date,
+    welcomeRevision: { type: Number, default: 0 },
     invitation: {
       status: { type: String, enum: ["PENDING", "ACCEPTED"] },
       kind: { type: String, enum: ["ACTIVATE", "LINK"] },

@@ -31,6 +31,28 @@ it("shows a bounded page range, record range and disables unavailable navigation
   expect(host.querySelectorAll(".pagination-pages button")).toHaveLength(5);
 });
 
+it("hides all pagination controls for an empty result and restores them when records arrive", async () => {
+  const onPageChange = vi.fn(), onLimitChange = vi.fn();
+  const render = (total: number, loading = false) => root.render(<Pagination page={1} limit={10} total={total} loading={loading} onPageChange={onPageChange} onLimitChange={onLimitChange} />);
+  await act(async () => render(0, true));
+  expect(host.querySelector("nav")).toBeNull();
+  await act(async () => render(0));
+  expect(host.querySelector("select")).toBeNull();
+  expect(host.textContent).toBe("");
+  await act(async () => render(21));
+  expect(host.querySelector('[aria-label="Pagination"]')).not.toBeNull();
+  expect(host.querySelector('[aria-label="Rows per page"]')).not.toBeNull();
+  await act(async () => render(0));
+  expect(host.textContent).toBe("");
+});
+
+it("allows returning from an empty last page when records still exist on earlier pages", async () => {
+  const onPageChange = vi.fn();
+  await act(async () => root.render(<Pagination page={3} limit={10} total={12} onPageChange={onPageChange} />));
+  await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Previous page"]')!.click());
+  expect(onPageChange).toHaveBeenCalledWith(1);
+});
+
 it("exposes tooltip help to keyboard users", async () => {
   await act(async () => root.render(
     <TooltipButton tooltip="Open payment and invoice details">View</TooltipButton>,
