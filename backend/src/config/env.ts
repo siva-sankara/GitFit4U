@@ -2,7 +2,6 @@ import "dotenv/config";
 import { z } from "zod";
 import { normalizeClientOrigins } from "./clientOrigins.js";
 import { assertSafeOtpPreview } from "./otpPreviewPolicy.js";
-import { oauthUrlBlockers } from "./razorpayOAuth.js";
 
 const schema = z
   .object({
@@ -196,9 +195,6 @@ const schema = z
       });
     }
     if (value.RAZORPAY_GYM_OAUTH_ENABLED) {
-      for (const message of oauthUrlBlockers(value)) context.addIssue({
-        code: "custom", path: [message.startsWith("FRONTEND_URL") ? "FRONTEND_URL" : "RAZORPAY_OAUTH_REDIRECT_URI"], message,
-      });
       for (const key of [
         "RAZORPAY_OAUTH_CLIENT_ID",
         "RAZORPAY_OAUTH_CLIENT_SECRET",

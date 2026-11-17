@@ -4,7 +4,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 vi.mock("../../config/env.js", () => ({
   env: {
     RAZORPAY_MODE: "test",
-    FRONTEND_URL: "https://www.getfit4u.in",
     RAZORPAY_GYM_OAUTH_ENABLED: true,
     RAZORPAY_OAUTH_CLIENT_ID: "oauth-client",
     RAZORPAY_OAUTH_CLIENT_SECRET: "oauth-client-secret",

@@ -6,7 +6,6 @@ import {
   completeGymRazorpayConnection,
   disconnectGymRazorpay,
   gymRazorpayStatus,
-  gymRazorpayAttempt,
 } from "../controllers/razorpayOAuthController.js";
 import { requireAuth, requireGymContext, requirePermission, requireRole } from "../middleware/auth.js";
 import { requireIdempotencyKey } from "../middleware/idempotency.js";
@@ -29,20 +28,11 @@ razorpayConnectionRoutes.post(
   requirePermission("gym:update"),
   requireIdempotencyKey,
   validate(z.object({
-    body: z.object({ returnTo: z.string().max(500).optional(), browserApiOrigin: z.string().url().max(300).optional() }).strict(),
+    body: z.object({ returnTo: z.string().max(500).optional() }).strict(),
     params: gymParams,
     query: z.object({}),
   })),
   beginGymRazorpayConnection,
-);
-razorpayConnectionRoutes.get(
-  "/payments/razorpay/oauth/attempts/:reference",
-  requireAuth,
-  requireRole("GYM_OWNER"),
-  requireGymContext,
-  requirePermission("gym:update"),
-  validate(z.object({ body: z.any().optional(), params: z.object({ reference: z.string().regex(/^[A-Za-z0-9_-]{24}$/) }), query: z.object({}) })),
-  gymRazorpayAttempt,
 );
 razorpayConnectionRoutes.get(
   "/gyms/:gymId/payments/razorpay/status",
