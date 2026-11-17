@@ -465,7 +465,7 @@ export function PaymentCheckout({
 }: {
   quotePath: string;
   quoteBody: Row;
-  onComplete?: () => void;
+  onComplete?: (paymentId: string) => void;
   onBusyChange?: (busy: boolean) => void;
   onGatewayOpenChange?: (open: boolean) => void;
 }) {
@@ -650,7 +650,7 @@ export function PaymentCheckout({
       completed.current = paymentId;
       void client.invalidateQueries({ queryKey: ["api"] });
       void client.invalidateQueries({ queryKey: ["notifications"] });
-      onComplete?.();
+      onComplete?.(paymentId);
     }
   }, [payment.data?.data.status, paymentId, onComplete, quotePath]);
   const checkoutMoney = (amount: number) =>
@@ -710,7 +710,7 @@ export function PaymentCheckout({
                   client.invalidateQueries();
                   if (completed.current !== paymentId) {
                     completed.current = paymentId;
-                    onComplete?.();
+                    onComplete?.(paymentId);
                   }
                 }}
               >
@@ -975,8 +975,8 @@ export function LiveGymDetails() {
                   quoteBody={{ gymId: gym._id, planId: plan._id }}
                   onBusyChange={setCheckoutBusy}
                   onGatewayOpenChange={setGatewayOpen}
-                  onComplete={() =>
-                    navigate("/app/subscriptions", {
+                  onComplete={(paymentId) =>
+                    navigate(`/payment-return?paymentId=${encodeURIComponent(paymentId)}`, {
                       state: { joinedGymName: gym.name },
                     })
                   }

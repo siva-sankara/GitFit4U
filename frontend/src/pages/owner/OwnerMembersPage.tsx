@@ -1,4 +1,5 @@
 import { PageHeader } from "../../components/PageHeader";
+import { MemberCreationSuccess, type MemberCreationResult } from "../../components/MemberCreationSuccess";
 import { CompactFilters } from "../../components/CompactFilters";
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -100,6 +101,13 @@ export function MemberEditor({
   uploadGymId?: string;
 }) {
   const edit = !!member;
+  const context = useCurrentUser().data?.data.context;
+  const scope = navigationSessionScope(context) || "";
+  const initialScope = useRef(scope);
+  const client = useQueryClient();
+  const [created, setCreated] = useState<MemberCreationResult>();
+  const request = useRef<{ body: string; key: string } | undefined>(undefined);
+  useEffect(() => { if (scope !== initialScope.current) onClose(); }, [scope, onClose]);
   const [planId, setPlanId] = useState("");
   const [photo, setPhoto] = useState<{ id: string | null; url?: string }>();
   const [imageBusy, setImageBusy] = useState(false);
@@ -127,13 +135,22 @@ export function MemberEditor({
       ? gymDate(addCalendarDays(startsAt, plan.durationDays) + "T00:00:00Z", "UTC")
       : "Select a plan";
   const save = useMutation({
-    mutationFn: (body: object) =>
-      apiRequest(endpoint + (edit ? "/" + member.publicId : ""), {
+    gcTime: 0,
+    mutationFn: (body: object) => {
+      const serialized = JSON.stringify(body);
+      if (request.current?.body !== serialized) request.current = { body: serialized, key: crypto.randomUUID() };
+      return apiRequest<ApiEnvelope<MemberCreationResult>>(endpoint + (edit ? "/" + member.publicId : ""), {
         method: edit ? "PATCH" : "POST",
-        body: JSON.stringify(body),
-        idempotencyKey: crypto.randomUUID(),
-      }),
-    onSuccess: onSaved,
+        body: serialized,
+        idempotencyKey: request.current.key,
+      });
+    },
+    onSuccess: response => {
+      void client.invalidateQueries();
+      if (edit || !endpoint.startsWith("/api/v1/owner/")) onSaved();
+      else setCreated(response.data);
+      save.reset();
+    },
   });
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -174,6 +191,8 @@ export function MemberEditor({
         : {}),
     });
   }
+  if (scope !== initialScope.current) return null;
+  if (created) return <MemberCreationSuccess saved={created} scope={scope} onClose={() => { setCreated(undefined); onSaved(); }} />;
   return (
     <Modal
       open
@@ -187,7 +206,7 @@ export function MemberEditor({
         <p className="full-width">
           {edit
             ? "These details are stored in this gym's member record. Account sign-in details remain managed by the member."
-            : "The selected plan, membership and offline receipt are saved together. New members receive an email to set their own password; existing members sign in and accept a secure gym invitation."}
+            : "Save the member, selected plan and actual offline payment together. Membership access follows its start date. After saving, review account details and choose how to send a welcome message."}
         </p>
         {(
           [
@@ -315,6 +334,7 @@ export function MemberEditor({
               <span>Payment notes</span>
               <input className="input" name="notes" maxLength={1000} />
             </label>
+            <label className="full-width"><input type="checkbox" name="paymentReceived" required /> I confirm that {formatMoney(totalMinor)} has been received in full by the selected offline method.</label>
             {plans.isError && (
               <p className="form-alert full-width" role="alert">
                 {plans.error.message}
@@ -522,7 +542,7 @@ export function OwnerMembersPage() {
           icon={<Clock3 size={26} />}
           label="Pending Activation"
           value={summary?.pendingActivation ?? "—"}
-          detail="Invitations not accepted"
+          detail="Access waiting for invitation acceptance"
           tone="warning"
         />
         {canReadFinance && (
@@ -719,7 +739,7 @@ export function OwnerMembersPage() {
               <tbody>
                 {rows.map((row) => {
                   const presentation = membershipPresentation(row, timezone, now);
-                  const pendingInvitation = row.invitation?.status === "PENDING";
+                  const pendingActivation = row.invitation?.status === "PENDING" && !row.offlineAccessGranted;
                   const phone = row.contact?.phone || row.userId?.phone;
                   const email = row.contact?.email || row.userId?.email;
                   const trainerName = row.assignedTrainerId?.name || (canManage ? "Assign trainer" : "Not assigned");
@@ -759,7 +779,7 @@ export function OwnerMembersPage() {
                           <div className="member-primary">
                             <strong title={memberName(row)}>{memberName(row)}</strong>
                             <StatusBadge
-                              status={pendingInvitation ? "PENDING_ACTIVATION" : row.status === "JOIN_REQUESTED" ? "JOIN_REQUESTED" : presentation.state}
+                              status={pendingActivation ? "PENDING_ACTIVATION" : row.status === "JOIN_REQUESTED" ? "JOIN_REQUESTED" : presentation.state}
                             />
                           </div>
                         </div>

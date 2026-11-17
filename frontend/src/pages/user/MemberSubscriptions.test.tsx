@@ -6,6 +6,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ request: vi.fn() }));
 vi.mock("../../services/apiClient", () => ({ apiRequest: mocks.request }));
+vi.mock("../../api/hooks", () => ({ useCurrentUser: () => ({ data: undefined }) }));
 import {
   MemberSubscriptions,
   type MemberSubscription,
@@ -212,10 +213,11 @@ it("shows submitting feedback, blocks duplicates, and closes after backend succe
   expect(host.textContent).toContain("Membership cancelled.");
   expect(host.textContent).toContain("Oak Gym");
   expect(host.textContent).not.toContain("Scan gym QR");
-  expect(invalidate.mock.calls[0][0]).toMatchObject({
+  expect(invalidate).toHaveBeenCalledWith({
     queryKey: ["api"],
     predicate: expect.any(Function),
   });
+  expect(invalidate).toHaveBeenCalledWith({ queryKey: ["membership-whatsapp-updates"] });
   expect(
     mocks.request.mock.calls.filter(
       ([, options]) => options?.method === "POST",

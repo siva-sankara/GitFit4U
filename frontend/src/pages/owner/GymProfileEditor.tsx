@@ -4,7 +4,7 @@ import { Modal } from "../../components/Modal";
 import { GymLogoEditor } from "./GymLogoEditor";
 import { GymTermsEditor } from "./GymTermsEditor";
 import { WhatsAppConnectionSettings } from "../../components/WhatsAppConnectionSettings";
-import { WhatsAppGroupSettings } from "../../components/WhatsAppGroupSettings";
+import { WhatsAppUpdatesSettings } from "../../components/WhatsAppUpdatesSettings";
 import { RazorpayOAuthSettings } from "../../components/RazorpayOAuthSettings";
 import { Link } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -162,7 +162,7 @@ export function GymProfileEditor({
             </SectionAccordion>
             <SectionAccordion id="gym-communication" title="Notification and communication settings" description="WhatsApp connection and automated member reminders.">
               <div className="gym-profile-nested-grid">
-                {me.data?.data.context?.role === "GYM_OWNER" && <WhatsAppGroupSettings disabled={!canEdit} />}
+                {me.data?.data.context?.role === "GYM_OWNER" && <WhatsAppUpdatesSettings disabled={!canEdit} />}
                 {canEdit && <WhatsAppConnectionSettings />}
                 <ClassReminderSettings gym={gym.data.data} disabled={!canEdit} />
                 <MembershipReminderSettings gym={gym.data.data} disabled={!canEdit} />

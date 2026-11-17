@@ -1,4 +1,5 @@
 import { PageHeader } from "../../components/PageHeader";
+import { OwnersWhatsAppInvitation } from "../../components/MembershipWhatsAppUpdates";
 import { Link } from "react-router-dom";
 import {
   Bar,
@@ -42,6 +43,7 @@ export function OwnerDashboardPage() {
           <p>Memberships, attendance and your gym's performance.</p>
         </div>
       </PageHeader>
+      <OwnersWhatsAppInvitation />
       
       <QueryState query={stats}>
         {data && (

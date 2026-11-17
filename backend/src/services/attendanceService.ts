@@ -60,7 +60,7 @@ export async function checkIn(input: {
       const member = await MemberProfile.findOne({
         gymId: input.gymId,
         status: "ACTIVE",
-        "invitation.status": { $ne: "PENDING" },
+        $and: [{ $or: [{ "invitation.status": { $ne: "PENDING" } }, { offlineAccessGranted: true }] }],
         ...(input.memberUserId ? { userId: input.memberUserId } : {}),
         $or: [
           { publicId: input.memberIdentifier },

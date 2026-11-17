@@ -14,7 +14,7 @@ vi.mock("../live/LivePublic", () => ({
   PaymentCheckout: ({ quoteBody, onComplete }: any) => (
     <div>
       Backend checkout for {quoteBody.planId}
-      <button onClick={onComplete}>Refresh verified payment</button>
+      <button onClick={() => onComplete("confirmed-payment")}>Refresh verified payment</button>
     </div>
   ),
 }));
@@ -106,6 +106,7 @@ async function render() {
             <Route path="/register-gym" element={<RegisterGymPage />} />
             <Route path="/auth/login" element={<p>User login opened</p>} />
             <Route path="/profile" element={<p>Account profile opened</p>} />
+              <Route path="/payment-return" element={<p>Verified payment invitation screen</p>} />
             <Route
               path="/owner/dashboard"
               element={<p>Owner dashboard opened</p>}
@@ -183,8 +184,7 @@ it("refreshes registration from the backend after verified checkout", async () =
     },
   ];
   await act(async () => button("Refresh verified payment").click());
-  await until(() => Boolean(button("Open gym owner workspace")));
-  expect(host.textContent).toContain("Members can now find it");
+  await until(() => host.textContent!.includes("Verified payment invitation screen"));
 });
 it("requires changed location to be confirmed and saved before payment", async () => {
   registrations[0].selectedPlatformPlanId = "plan-one";

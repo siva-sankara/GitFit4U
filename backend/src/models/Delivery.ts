@@ -20,7 +20,8 @@ const invitationSchema = new Schema({
 const emailSchema = new Schema({
   eventKey: { type: String, required: true, unique: true },
   userId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
-  kind: { type: String, enum: ["INVITATION", "INVOICE"], required: true },
+  kind: { type: String, enum: ["INVITATION", "INVOICE", "WELCOME"], required: true },
+  provider: { type: String, enum: ["RESEND", "GRAPH"], default: "RESEND" },
   entityId: { type: Schema.Types.ObjectId, required: true },
   revision: Number,
   encryptedPayload: { type: String, required: true, select: false },

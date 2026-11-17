@@ -6,19 +6,12 @@ type CachedToken = { value: string; refreshAt: number };
 let cachedToken: CachedToken | undefined;
 let tokenPromise: Promise<string> | undefined;
 
-function configured() {
-  return Boolean(
-    env.AUTH_OTP_DUAL_DELIVERY_ENABLED &&
-      env.AUTH_OTP_EMAIL_PROVIDER === "microsoft_graph" &&
-      env.M365_TENANT_ID &&
-      env.M365_CLIENT_ID &&
-      env.M365_CLIENT_SECRET &&
-      env.M365_SENDER_MAILBOX,
-  );
+export function microsoftGraphOtpConfigured() {
+  return Boolean(env.M365_TENANT_ID && env.M365_CLIENT_ID && env.M365_CLIENT_SECRET && env.M365_SENDER_MAILBOX);
 }
 
 async function graphToken() {
-  if (!configured())
+  if (!microsoftGraphOtpConfigured())
     throw new AppError(
       503,
       "M365_OTP_NOT_CONFIGURED",
@@ -125,7 +118,7 @@ export type MicrosoftGraphOtpMessage = {
   html: string;
 };
 
-export async function sendMicrosoftGraphOtpEmail(
+export async function sendMicrosoftGraphEmail(
   message: MicrosoftGraphOtpMessage,
 ) {
   const accessToken = await graphToken();
@@ -179,6 +172,12 @@ export async function sendMicrosoftGraphOtpEmail(
       response.headers.get("client-request-id") ||
       correlationId,
   };
+}
+
+export async function sendMicrosoftGraphOtpEmail(message: MicrosoftGraphOtpMessage) {
+  if (!env.AUTH_OTP_DUAL_DELIVERY_ENABLED || env.AUTH_OTP_EMAIL_PROVIDER !== "microsoft_graph")
+    throw new AppError(503, "M365_OTP_NOT_CONFIGURED", "Microsoft 365 OTP email delivery is not configured.");
+  return sendMicrosoftGraphEmail(message);
 }
 
 /** Test-only cache isolation; contains no credential value. */

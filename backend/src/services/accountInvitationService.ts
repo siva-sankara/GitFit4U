@@ -13,6 +13,7 @@ import { AppError } from "../utils/AppError.js";
 import { sha256 } from "../utils/crypto.js";
 import { appEmailUrl, emailTemplate, queueTransactionalEmail } from "./transactionalEmailService.js";
 import { emitDomainEvent } from "./domainEventService.js";
+import { completeMemberSetup } from "./memberBootstrapService.js";
 
 const EXPIRY_MS = 48 * 3600_000;
 export const invitationError = () => new AppError(400, "INVITATION_INVALID", "This invitation is expired, replaced or already used. Ask the gym to resend it.");
@@ -22,7 +23,7 @@ export async function issueMemberInvitation(
   gym: any,
   session: ClientSession,
   now = new Date(),
-  options: { includeActionUrl?: boolean; bypassCooldown?: boolean } = {},
+  options: { bypassCooldown?: boolean; welcomeMessage?: string } = {},
 ) {
   if (!user.email) throw new AppError(422, "INVITATION_EMAIL_REQUIRED", "An account email is required to send a secure invitation.");
   const existing = await AccountInvitation.findOne({ memberId: member._id }).session(session);
@@ -38,21 +39,20 @@ export async function issueMemberInvitation(
   const token = `${publicId}.${secret}`, expiresAt = new Date(now.getTime() + EXPIRY_MS);
   // An established account always signs in and accepts; its password and roles
   // are never changed by gym management or a possession-only invitation.
-  const kind = user.status === "PENDING_VERIFICATION" && !await AuthIdentity.exists({ userId: user._id }).session(session) ? "ACTIVATE" : "LINK";
+  const kind = user.firstAccessPending || (user.status === "PENDING_VERIFICATION" && !await AuthIdentity.exists({ userId: user._id }).session(session)) ? "ACTIVATE" : "LINK";
   const revision = (existing?.revision || 0) + 1;
   const invitation = await AccountInvitation.findOneAndUpdate({ memberId: member._id }, { $set: { publicId, userId: user._id, gymId: gym._id, kind, email: user.email, tokenHash: sha256(token), expiresAt, consumedAt: null, lastQueuedAt: now, revision } }, { upsert: true, returnDocument: "after", session });
   await TransactionalEmail.updateMany({ kind: "INVITATION", entityId: invitation._id, status: { $in: ["QUEUED", "FAILED"] } }, { $set: { status: "CANCELLED" } }, { session });
-  const action = kind === "ACTIVATE" ? "Activate Account" : "Accept gym invitation";
+  const action = kind === "ACTIVATE" ? "Set up your password" : options.welcomeMessage ? "Login to GETFIT4U" : "Accept gym invitation";
   // Fragment keeps the bearer secret out of server access logs and referrers.
   const url = appEmailUrl(`/activate-account#token=${encodeURIComponent(token)}&kind=${kind}`);
-  await queueTransactionalEmail({ eventKey: `invitation:${publicId}:${revision}`, userId: user._id, entityId: invitation._id, kind: "INVITATION", revision, content: { to: user.email, ...emailTemplate(`Welcome to ${gym.name}`, `Your membership at ${gym.name} is ready to review. ${kind === "ACTIVATE" ? "Set your own password to activate your GETFIT4U account." : "Sign in to your existing GETFIT4U account and accept this gym invitation."}`, action, url, "This single-use invitation expires in 48 hours. If you were not expecting it, ignore this email or contact the gym. Opening the link does not activate your account.") } }, session);
+  await queueTransactionalEmail({ eventKey: `invitation:${publicId}:${revision}`, userId: user._id, entityId: invitation._id, kind: "INVITATION", ...(options.welcomeMessage ? { provider: "GRAPH" as const } : {}), revision, content: { to: user.email, ...emailTemplate(`Welcome to ${gym.name}`, options.welcomeMessage || `Your membership at ${gym.name} is ready to review. ${kind === "ACTIVATE" ? "Set your own password to access your GETFIT4U account." : "Sign in to your existing GETFIT4U account and accept this gym invitation."}`, action, url, "This single-use invitation expires in 48 hours. If you were not expecting it, ignore this email or contact the gym. Opening the link does not activate your account.") } }, session);
   member.invitation = { status: "PENDING", kind, expiresAt, lastQueuedAt: now };
   await member.save({ session });
   return {
     status: "PENDING",
     expiresAt,
     kind,
-    ...(options.includeActionUrl ? { actionUrl: url } : {}),
   };
 }
 
@@ -65,11 +65,11 @@ export async function acceptMemberInvitation(input: { token: string; password?: 
     const user = await User.findById(invitation.userId).session(session);
     if (!member || !user || ["BLOCKED", "DISABLED"].includes(user.status) || user.email !== invitation.email) throw invitationError();
     if (invitation.kind === "ACTIVATE") {
-      if (!passwordHash || user.status !== "PENDING_VERIFICATION" || await AuthIdentity.exists({ userId: user._id }).session(session)) throw invitationError();
+      if (!passwordHash || !(user.firstAccessPending || user.status === "PENDING_VERIFICATION") || await AuthIdentity.exists({ userId: user._id, ...(user.firstAccessPending ? { provider: "PASSWORD" } : {}) }).session(session)) throw invitationError();
       await AuthIdentity.create([{ userId: user._id, provider: "PASSWORD", providerSubject: user.email, verifiedAt: now, passwordHash }], { session });
       user.status = "ACTIVE";
       user.emailVerifiedAt = now;
-      await user.save({ session });
+      await completeMemberSetup(user, session);
     } else if (!input.userId || String(user._id) !== input.userId || user.status !== "ACTIVE") {
       throw new AppError(403, "INVITATION_ACCOUNT_REQUIRED", "Sign in to the account that received this invitation before accepting it.");
     }
@@ -88,8 +88,8 @@ export async function acceptMemberInvitation(input: { token: string; password?: 
     }
     await member.save({ session });
     await emitDomainEvent({ event: "account.verified", userId: user._id, gymId: member.gymId, entityId: invitation.publicId, actionUrl: "/app/profile/membership", session });
-    // Owner-created memberships stay on invitation hold until acceptance. Reuse
-    // the subscription activation key so only the now-active membership welcomes.
+    // Legacy invitation-held memberships may become active here. Newly recorded
+    // offline payments already grant membership access independently of setup.
     if (membershipActivated)
       await emitDomainEvent({ event: "membership.activated", userId: user._id, gymId: member.gymId, entityId: subscription.publicId, actionUrl: "/app/subscriptions", session });
     return { activated: invitation.kind === "ACTIVATE", linked: true };

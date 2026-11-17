@@ -1,4 +1,6 @@
 import { Router } from "express";
+import { platformInvitationSettings, uploadInvitationQr } from "../controllers/whatsappUpdatesController.js";
+import { invitationQrUpload, invitationQrLimiter } from "./invitationQrUpload.js";
 import { z } from "zod";
 import * as controller from "../controllers/adminController.js";
 import * as management from "../controllers/adminManagementController.js";
@@ -33,6 +35,9 @@ adminRoutes.use(
   requirePermission("admin:platform"),
 );
 adminRoutes.get("/dashboard", controller.dashboard);
+adminRoutes.get("/settings/owners-whatsapp", platformInvitationSettings);
+adminRoutes.patch("/settings/owners-whatsapp", platformInvitationSettings);
+adminRoutes.post("/settings/owners-whatsapp/qr", invitationQrLimiter, invitationQrUpload, uploadInvitationQr);
 adminRoutes.get(
   "/payment-connections",
   paymentConnections.listPaymentConnections,

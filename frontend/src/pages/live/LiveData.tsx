@@ -510,7 +510,7 @@ export function ResourcePage({
     return () => window.clearTimeout(timer);
   }, [q, search]);
   const query = useData<Row[]>(
-    `/api/v1/workspace/records/${resource}?${new URLSearchParams({ page: String(page), limit: String(limit), q: search, status, ...(selectedRecord ? { selected: selectedRecord } : {}), ...(from ? { from } : {}), ...(to ? { to } : {}) })}`,
+    `/api/v1/workspace/records/${resource}?${new URLSearchParams(selectedRecord ? { page: "1", limit: String(limit), selected: selectedRecord } : { page: String(page), limit: String(limit), q: search, status, ...(from ? { from } : {}), ...(to ? { to } : {}) })}`,
   );
   const rows = query.data?.data || [],
     meta = query.data?.meta;
@@ -531,7 +531,7 @@ export function ResourcePage({
         )}
       </PageHeader>
       <section className="panel">
-        <form
+        {!selectedRecord && <form
           className="table-toolbar"
           role="search"
           onSubmit={(e) => {
@@ -634,7 +634,7 @@ export function ResourcePage({
           >
             Download
           </button>
-        </form>
+        </form>}
         <QueryState query={query}>
           {renderTable ? renderTable(rows, `${resource}:${page}:${limit}:${search}:${from}:${to}:${status}:${selectedRecord || ""}`) : <Table
             rows={rows}
@@ -662,7 +662,7 @@ export function ResourcePage({
             <EmptyState title="No records found" detail="Try changing your search or filters." />
           )}
           <Pagination
-            page={page}
+            page={selectedRecord ? 1 : page}
             limit={limit}
             total={meta?.total || 0}
             loading={query.isFetching}

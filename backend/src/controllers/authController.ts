@@ -1,4 +1,5 @@
 import { DeviceToken } from "../models/Collaboration.js";
+import { completeMemberSetup, MemberBootstrap, setupAccount, temporaryMemberLogin } from "../services/memberBootstrapService.js";
 import type { Request, Response } from "express";
 import { emitDomainEvent } from "../services/domainEventService.js";
 import mongoose from "mongoose";
@@ -47,6 +48,15 @@ async function loginResponse(
   res: Response,
   user: InstanceType<typeof User>,
 ) {
+  if (user.firstAccessPending) {
+    if (!user.emailVerifiedAt && !user.phoneVerifiedAt)
+      throw new AppError(403, "CONTACT_VERIFICATION_REQUIRED", "Verify your email using account recovery or your setup email before signing in.");
+    await MemberBootstrap.deleteMany({ userId: user._id });
+    const token = `${nanoid(20)}.${crypto.randomBytes(48).toString("base64url")}`;
+    await PasswordResetGrant.create({ publicId: token.split(".")[0], userId: user._id, tokenHash: sha256(token), expiresAt: new Date(Date.now() + 600_000) });
+    res.set("Cache-Control", "no-store").json({ success: true, data: { setupRequired: true, resetToken: token } });
+    return;
+  }
   if (user.developmentTestAccount && env.OTP_MODE !== "development_preview")
     throw new AppError(403, "TEST_ACCOUNT_DISABLED", "Development test accounts are disabled outside the isolated preview server.");
   let role = (user.activeRole || "USER") as Role;
@@ -367,6 +377,10 @@ export async function passwordLogin(req: Request, res: Response) {
   const valid = identity?.passwordHash
     ? await bcrypt.compare(req.body.password, identity.passwordHash)
     : false;
+  if (!identity || !valid) {
+    const setup = await temporaryMemberLogin(identifier.includes("@") ? identifier : normalizePhone(identifier), req.body.password);
+    if (setup) { res.set("Cache-Control", "no-store").json({ success: true, data: setup }); return; }
+  }
   if (!identity || !valid)
     throw new AppError(
       401,
@@ -487,6 +501,13 @@ export async function forgotPassword(req: Request, res: Response) {
   });
 }
 
+export async function requestSetupOtp(req: Request, res: Response) {
+  const user = await setupAccount(req.body.setupToken);
+  req.body = { identifier: user.email };
+  const data = await requestAccountOtp(req, "ACCOUNT_RECOVERY");
+  res.set("Cache-Control", "no-store").status(202).json({ success: true, data: { ...data, setupIdentifier: user.email } });
+}
+
 export async function verifyRecoveryOtp(req: Request, res: Response) {
   const verified = await verifyOtp(req.body.challengeId, req.body.code, {
     expectedPurpose: "ACCOUNT_RECOVERY",
@@ -541,6 +562,7 @@ export async function verifyRecoveryOtp(req: Request, res: Response) {
       ],
       { session },
     );
+    if (user.firstAccessPending) await MemberBootstrap.deleteMany({ userId: user._id }, { session });
   });
   res.json({
     success: true,
@@ -599,6 +621,7 @@ export async function resetPassword(req: Request, res: Response) {
       { $set: { consumedAt: new Date() } },
       { session },
     );
+    if (user.firstAccessPending) await completeMemberSetup(user, session);
     await Session.updateMany(
       { userId: user._id, revokedAt: null },
       { $set: { revokedAt: new Date(), revokeReason: "PASSWORD_RESET" } },

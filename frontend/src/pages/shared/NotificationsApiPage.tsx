@@ -15,13 +15,17 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
+import { apiRequest, type ApiEnvelope } from "../../services/apiClient";
+import { navigationSessionScope } from "../../services/navigationSession";
 import {
   useNotifications,
   useReadAllNotifications,
   useReadNotification,
   useUnreadNotification,
   useDeleteNotifications,
+  useCurrentUser,
 } from "../../api/hooks";
 import { Modal } from "../../components/Modal";
 import { PushNotificationSettings } from "../../components/PushNotificationSettings";
@@ -70,7 +74,21 @@ export function NotificationsApiPage() {
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(10);
   const [filter, setFilter] = useState<Filter>("ALL");
-  const [selected, setSelected] = useState<InboxNotification>();
+  const [clicked, setClicked] = useState<InboxNotification>();
+  const [params, setParams] = useSearchParams();
+  const me = useCurrentUser();
+  const notificationId = params.get("notification") || "";
+  const detail = useQuery({
+    queryKey: ["notification-detail", notificationId, navigationSessionScope(me.data?.data.context), me.data?.data.user._id],
+    queryFn: ({ signal }) => apiRequest<ApiEnvelope<InboxNotification>>(`/api/v1/users/me/notifications/${notificationId}`, { signal }),
+    enabled: /^[a-f\d]{24}$/i.test(notificationId) && Boolean(me.data?.data.user._id),
+    staleTime: 0, gcTime: 0, retry: false,
+  });
+  const selected = clicked || detail.data?.data;
+  function setSelected(value?: InboxNotification) {
+    setClicked(value);
+    if (notificationId) setParams(current => { current.delete("notification"); return current; }, { replace: true });
+  }
   const [checked, setChecked] = useState<string[]>([]);
   const [deleteSelection, setDeleteSelection] = useState<{
     ids?: string[];
@@ -95,6 +113,7 @@ export function NotificationsApiPage() {
 
   return (
     <div className="page-stack notifications-page">
+      {detail.isError && <p role="alert">This notification is no longer available. Your other updates are below.</p>}
       <PageHeader>
         <div>
           <h1>Notifications</h1>

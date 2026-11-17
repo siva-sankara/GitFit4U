@@ -77,7 +77,7 @@ export async function rotateRefreshToken(refreshToken: string, { activity = fals
   for (let attempt = 0; attempt < 3; attempt++) {
     const session = await Session.findOne({ publicId: sessionId })
       .select("+refreshTokenHash +previousRefreshTokenHash");
-    const active = session && !session.revokedAt && await User.exists({ _id: session.userId, status: "ACTIVE",
+    const active = session && !session.revokedAt && await User.exists({ _id: session.userId, status: "ACTIVE", firstAccessPending: { $ne: true },
       ...(env.OTP_MODE !== "development_preview" ? { developmentTestAccount: { $ne: true } } : {}) });
     const now = new Date();
     if (!active || sessionExpiry(session) <= now)

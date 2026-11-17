@@ -57,7 +57,7 @@ export async function openInAppConversation(req: Request, res: Response) {
     let invitationMessageCreated = false;
     let notificationCreated = false;
     const pendingActivation =
-      member.invitation?.status === "PENDING" ||
+      (member.invitation?.status === "PENDING" && !member.offlineAccessGranted) ||
       user.status === "PENDING_VERIFICATION";
     if (pendingActivation) {
       const clientMessageId = `member-activation-thread:${member.publicId}`;

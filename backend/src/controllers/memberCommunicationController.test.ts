@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
-import { beforeEach, expect, it, vi } from "vitest";
-import { Conversation } from "../models/Collaboration.js";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { Conversation, Message } from "../models/Collaboration.js";
+import { Notification } from "../models/Engagement.js";
 import { Gym } from "../models/Gym.js";
 import { MemberProfile } from "../models/Member.js";
 import { User } from "../models/User.js";
@@ -21,6 +22,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.to.mockReturnValue({ emit: mocks.emit });
 });
+afterEach(() => vi.restoreAllMocks());
 
 function response() {
   const res: any = {
@@ -117,7 +119,7 @@ it("returns the fallback URL and does not re-emit idempotent duplicate records",
   });
 });
 
-it("opens an owner-scoped chat for an active linked member without exposing participant selection", async () => {
+it.each([false, true])("opens a normal chat without requesting activation for an active member (offline access: %s)", async offlineAccessGranted => {
   const ownerId = "507f1f77bcf86cd799439011";
   const userId = "507f191e810c19729de860ea";
   const conversation = { publicId: "conversation-public", _id: "conversation-id" };
@@ -127,7 +129,8 @@ it("opens an owner-scoped chat for an active linked member without exposing part
       publicId: "member-public",
       userId,
       status: "ACTIVE",
-      invitation: { status: "ACCEPTED" },
+      offlineAccessGranted,
+      invitation: { status: offlineAccessGranted ? "PENDING" : "ACCEPTED" },
     }),
   } as any);
   vi.spyOn(User, "findOne").mockReturnValue({
@@ -137,6 +140,8 @@ it("opens an owner-scoped chat for an active linked member without exposing part
     session: vi.fn().mockResolvedValue({ _id: "507f1f77bcf86cd799439012", name: "Gym One" }),
   } as any);
   vi.spyOn(Conversation, "findOneAndUpdate").mockResolvedValue(conversation as any);
+  const activationMessage = vi.spyOn(Message, "findOne").mockImplementation(() => { throw new Error("No activation reminder should be generated for an active member"); });
+  const activationNotice = vi.spyOn(Notification, "findOne").mockImplementation(() => { throw new Error("No activation notice should be generated for an active member"); });
   const req: any = {
     auth: { gymId: "507f1f77bcf86cd799439012", userId: ownerId },
     params: { id: "member-public" },
@@ -146,6 +151,8 @@ it("opens an owner-scoped chat for an active linked member without exposing part
   };
   const res = response();
   await openInAppConversation(req, res);
+  expect(activationMessage).not.toHaveBeenCalled();
+  expect(activationNotice).not.toHaveBeenCalled();
   expect(Conversation.findOneAndUpdate).toHaveBeenCalledWith(
     { directKey: [ownerId, userId].sort().join(":") },
     expect.any(Object),

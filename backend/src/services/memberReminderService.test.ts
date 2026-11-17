@@ -10,6 +10,7 @@ describe("member WhatsApp reminders", () => {
     expect(
       selectMemberReminderType({ invitation: { status: "PENDING" } }),
     ).toBe("activation_invitation");
+    expect(selectMemberReminderType({ offlineAccessGranted: true, invitation: { status: "PENDING" } })).toBe("general_followup");
     expect(
       selectMemberReminderType(
         {},
@@ -29,17 +30,16 @@ describe("member WhatsApp reminders", () => {
     );
   });
 
-  it("builds server-owned copy with the secure activation link and renewal data", () => {
+  it("keeps setup secrets in email and uses ordinary login guidance in WhatsApp", () => {
     expect(
       buildMemberReminderMessage({
         type: "activation_invitation",
         memberName: "Mark",
         gymName: "Gym Two",
-        activationLink: "https://app.example/activate-account#token=secret",
         gymOwnerPhone: "+91 90000 00000",
       }),
     ).toContain(
-      "verify and activate your account using this link: https://app.example/activate-account#token=secret",
+      "Check your email for your secure account setup",
     );
     const renewal = buildMemberReminderMessage({
       type: "renewal_reminder",

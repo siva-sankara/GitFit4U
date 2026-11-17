@@ -119,6 +119,17 @@ async function verifySignup() {
   await submit();
 }
 describe("account screens", () => {
+  it("keeps a temporary-password sign-in restricted to email verification and never stores its setup grant", async () => {
+    mocks.request.mockResolvedValue({ data: { setupRequired: true, setupToken: "limited-setup-only" } });
+    await render("/auth/login"); await fill("identifier", "member@example.com"); await fill("password", "UniqueTemporaryPassword"); await submit();
+    expect(host.textContent).toContain("Finish account setup");
+    expect(mocks.setToken).not.toHaveBeenCalled();
+    expect(JSON.stringify(sessionStorage)).not.toContain("limited-setup-only");
+    mocks.request.mockResolvedValue(submittedOtp);
+    await submit();
+    expect(mocks.request).toHaveBeenCalledWith("/api/v1/auth/setup/otp", expect.objectContaining({ body: JSON.stringify({ setupToken: "limited-setup-only" }) }));
+    expect(host.querySelector('input[name="code"]')).not.toBeNull();
+  });
   it("shows the transient test OTP in the login flow and clears it on successful login", async () => {
     mocks.request.mockImplementation(async (path) => path === "/api/v1/auth/otp/request"
       ? { data: { ...submittedOtp.data, deliveryStatus: "SIMULATED", developmentPreview: { code: "135790", simulated: true } } }

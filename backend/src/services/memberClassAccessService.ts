@@ -6,7 +6,7 @@ import { shiftCalendarDate, zonedDayStart } from "../utils/gymCalendar.js";
 /** One authoritative scope for member discovery and direct class links. */
 export async function memberClassScope(userId: string, options: { now?: Date; from?: Date; day?: string; gymId?: string; search?: string } = {}) {
   const now = options.now || new Date();
-  const members = await MemberProfile.find({ userId, status: "ACTIVE", "invitation.status": { $ne: "PENDING" } })
+  const members = await MemberProfile.find({ userId, status: "ACTIVE", $or: [{ "invitation.status": { $ne: "PENDING" } }, { offlineAccessGranted: true }] })
     .select("_id gymId currentSubscriptionId").lean();
   const empty = { filter: { _id: { $in: [] } }, eligibleGymCount: 0 };
   if (!members.length) return empty;

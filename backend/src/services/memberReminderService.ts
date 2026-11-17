@@ -10,6 +10,7 @@ import { User } from "../models/User.js";
 import { AppError } from "../utils/AppError.js";
 import { sha256 } from "../utils/crypto.js";
 import { issueMemberInvitation } from "./accountInvitationService.js";
+import { appEmailUrl } from "./transactionalEmailService.js";
 import { enqueueWhatsAppDomainEvent } from "./whatsappDeliveryService.js";
 import { normalizeWhatsAppRecipient, whatsappChatUrl } from "../utils/whatsappDeepLink.js";
 
@@ -57,7 +58,7 @@ export function selectMemberReminderType(
   subscription?: Record<string, any> | null,
   payment?: Record<string, any> | null,
 ): MemberReminderType {
-  if (member.invitation?.status === "PENDING") return "activation_invitation";
+  if (member.invitation?.status === "PENDING") return member.offlineAccessGranted ? "general_followup" : "activation_invitation";
   if (member.directAccess && !subscription) return "general_followup";
   if (
     subscription &&
@@ -91,23 +92,16 @@ export function buildMemberReminderMessage(input: {
   memberName: string;
   gymName: string;
   gymOwnerPhone?: string;
-  activationLink?: string;
   planName?: string;
   renewalDate?: Date | string;
   timezone?: string;
 }) {
   const name = input.memberName || "Member";
   if (input.type === "activation_invitation") {
-    if (!input.activationLink)
-      throw new AppError(
-        409,
-        "ACTIVATION_LINK_UNAVAILABLE",
-        "A secure activation link could not be prepared.",
-      );
     const contact = input.gymOwnerPhone
       ? `For help, contact ${input.gymOwnerPhone}.`
       : "For help, contact the gym.";
-    return `Hi ${name}, this is ${input.gymName}. Your GETFIT4U gym account is ready. Please verify and activate your account using this link: ${input.activationLink}. ${contact}`;
+    return `Hi ${name}, this is ${input.gymName}. Check your email for your secure account setup or gym invitation. Complete the steps there, then sign in: ${appEmailUrl("/auth/login")}. ${contact}`;
   }
   if (input.type === "renewal_reminder") {
     if (!input.renewalDate)
@@ -128,6 +122,7 @@ export function memberReminderWhatsAppUrl(phone: string, message: string) {
 }
 
 function existingResponse(communication: any, messageText: string, phone: string) {
+  messageText = messageText.replace(/https?:\/\/\S*activate-account#\S+/g, appEmailUrl("/auth/login"));
   const integrated = communication.mode === "INTEGRATED";
   return {
     communicationId: communication.publicId,
@@ -204,10 +199,7 @@ export async function prepareMemberWhatsAppReminder(input: {
       })
     : null;
   const messageType = selectMemberReminderType(member, subscription, payment);
-  const rawPhone =
-    user.status === "ACTIVE"
-      ? user.phone
-      : member.contact?.phone || user.phone;
+  const rawPhone = member.invitation?.status === "PENDING" ? member.contact?.phone : user.phone || member.contact?.phone;
   if (!rawPhone)
     throw new AppError(
       422,
@@ -309,17 +301,15 @@ export async function prepareMemberWhatsAppReminder(input: {
 
   try {
     const result = await mongoose.connection.transaction(async (session) => {
-      let activationLink: string | undefined;
       if (messageType === "activation_invitation") {
-        const invitation = await issueMemberInvitation(
+        await issueMemberInvitation(
           member,
           user,
           gym,
           session,
           now,
-          { includeActionUrl: true, bypassCooldown: true },
+          { bypassCooldown: true },
         );
-        activationLink = invitation.actionUrl;
       }
       const memberName = member.contact?.name || user.name || "Member";
       const messageText = buildMemberReminderMessage({
@@ -327,7 +317,6 @@ export async function prepareMemberWhatsAppReminder(input: {
         memberName,
         gymName: gym.name,
         gymOwnerPhone: gym.contact?.phone || gym.contact?.whatsapp,
-        activationLink,
         planName: subscription?.planSnapshot?.name,
         renewalDate: subscription?.renewalAt,
         timezone: gym.timezone,
@@ -426,16 +415,13 @@ export async function prepareMemberWhatsAppReminder(input: {
         user,
       );
       const integrated = outbox?.status === "QUEUED";
-      const preview = activationLink
-        ? messageText.replace(activationLink, "[secure activation link]")
-        : messageText;
       await MemberCommunication.updateOne(
         { _id: communication._id, status: "PROCESSING" },
         {
           $set: {
             mode: integrated ? "INTEGRATED" : "FALLBACK",
             fallbackUsed: !integrated,
-            messagePreview: preview.slice(0, 500),
+            messagePreview: messageText.slice(0, 500),
             inAppConversationId: conversation._id,
             inAppConversationPublicId: conversation.publicId,
             inAppMessageId: inAppMessage._id,

@@ -1,4 +1,5 @@
 import { PageHeader } from "../../components/PageHeader";
+import { ProfileSectionRedirect } from "../../routes/ProfileSectionRedirect";
 import { BackIconLink } from "../../components/BackIconControl";
 import { Suspense, useState } from "react";
 import { Link, Navigate, useLocation } from "react-router-dom";
@@ -743,7 +744,8 @@ function Monitoring() {
   );
 }
 export function LiveWorkspace() {
-  const path = useLocation().pathname.split("/").filter(Boolean),
+  const location = useLocation();
+  const path = location.pathname.split("/").filter(Boolean),
     role = path[0],
     page = path[0] === "profile" ? "profile" : path[1] || "dashboard",
     me = useCurrentUser();
@@ -769,7 +771,8 @@ export function LiveWorkspace() {
         : page === "subscriptions"
           ? "membership"
           : page;
-    return <Navigate to={`/app/profile?section=${section}`} replace />;
+    const key = page === "subscriptions" ? "membership" : page === "payments" ? "payment" : page === "invoices" ? "invoice" : undefined;
+    return <ProfileSectionRedirect section={section} record={key && path[2] ? { key, id: path[2] } : undefined} />;
   }
   if (
     ["owner", "admin"].includes(role) &&

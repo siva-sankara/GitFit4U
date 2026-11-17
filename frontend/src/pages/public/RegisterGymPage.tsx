@@ -166,6 +166,7 @@ function Registration({
   onOpenWorkspace: () => void;
   openingWorkspace: boolean;
 }) {
+  const navigate = useNavigate();
   const client = useQueryClient();
   const [dirty, setDirty] = useState(false),
     [formBusy, setFormBusy] = useState(false),
@@ -346,10 +347,11 @@ function Registration({
                       planId: chosen._id,
                     }}
                     onBusyChange={setCheckoutBusy}
-                    onComplete={() => {
+                    onComplete={(paymentId) => {
                       void client.invalidateQueries({ queryKey: ["api"] });
                       void client.invalidateQueries({ queryKey: ["me"] });
                       onRefresh();
+                      navigate(`/payment-return?paymentId=${encodeURIComponent(paymentId)}`);
                     }}
                   />
                 )

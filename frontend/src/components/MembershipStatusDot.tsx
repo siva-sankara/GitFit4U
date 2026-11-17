@@ -17,6 +17,7 @@ export function membershipPresentation(
   now = new Date(),
 ) {
   const subscription = member.currentSubscriptionId;
+  const start = subscription?.startsAt ? new Date(subscription.startsAt) : null;
   const end = subscription?.endsAt ? new Date(subscription.endsAt) : null;
   const dateKey = (date: Date) =>
     new Intl.DateTimeFormat("en-CA", {
@@ -36,10 +37,13 @@ export function membershipPresentation(
   else if (["INACTIVE", "SUSPENDED"].includes(member.status)) state = "DEACTIVATED";
   else if (end && end < now && ["ACTIVE", "GRACE"].includes(state))
     state = "EXPIRED";
+  else if (state === "ACTIVE" && start && start > now)
+    state = "SCHEDULED";
   else if (state === "ACTIVE" && days !== null && days >= 0 && days <= 7)
     state = "EXPIRING";
   const labels: Record<string, string> = {
     ACTIVE: "Active",
+    SCHEDULED: "Scheduled",
     EXPIRING: "Expiring soon",
     FROZEN: "Frozen",
     EXPIRED: "Expired",
@@ -111,7 +115,7 @@ export function MembershipStatusDot({
               <dd>{view.label}</dd>
               <dt>Plan</dt>
               <dd>{view.plan}</dd>
-              <dt>Started</dt>
+              <dt>{view.state === "SCHEDULED" ? "Starts" : "Started"}</dt>
               <dd>
                 {gymDate(member.currentSubscriptionId?.startsAt, timezone)}
               </dd>

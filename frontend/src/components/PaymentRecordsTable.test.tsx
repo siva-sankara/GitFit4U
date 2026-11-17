@@ -41,6 +41,10 @@ it("retains notification links and server status filtering with the dedicated pa
   await flush();
   expect(host.querySelector('[aria-label="Payments"]')).not.toBeNull();
   expect(new URL(mock.request.mock.calls[0][0], "http://localhost").searchParams.get("selected")).toBe(payment.publicId);
+  // A deep link must show its exact record independently of list filters.
+  expect(host.querySelector('[aria-label="Status"]')).toBeNull();
+  await act(async () => [...host.querySelectorAll("button")].find(button => button.textContent === "Show all")!.click());
+  await flush();
   await act(async () => {
     const select = host.querySelector<HTMLSelectElement>('[aria-label="Status"]')!;
     select.value = "FAILED"; select.dispatchEvent(new Event("change", { bubbles: true }));
@@ -48,10 +52,5 @@ it("retains notification links and server status filtering with the dedicated pa
   await flush();
   const filtered = new URL(mock.request.mock.calls.at(-1)![0], "http://localhost");
   expect(filtered.searchParams.get("status")).toBe("FAILED");
-  expect(filtered.searchParams.get("selected")).toBe(payment.publicId);
-  await act(async () => [...host.querySelectorAll("button")].find(button => button.textContent === "Show all")!.click());
-  await flush();
-  const all = new URL(mock.request.mock.calls.at(-1)![0], "http://localhost");
-  expect(all.searchParams.has("selected")).toBe(false);
-  expect(all.searchParams.get("status")).toBe("FAILED");
+  expect(filtered.searchParams.has("selected")).toBe(false);
 });

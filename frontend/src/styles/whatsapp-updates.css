@@ -1,0 +1,22 @@
+.membership-whatsapp-updates { display: grid; gap: .6rem; min-width: 0; padding: .9rem; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); text-align: left; }
+.membership-whatsapp-updates :is(h3, p) { margin: 0; overflow-wrap: anywhere; }
+.membership-whatsapp-updates .heading-actions { flex-wrap: wrap; }
+.membership-whatsapp-updates details { font-size: .85rem; }
+.membership-whatsapp-updates summary { cursor: pointer; }
+.payment-return-page { width: min(100% - 2rem, 720px); margin: 2rem auto; padding-bottom: calc(5rem + env(safe-area-inset-bottom)); }
+.payment-return-page .gym-identity { text-align: left; }
+@media (max-width: 540px) { .membership-whatsapp-updates .heading-actions { display: grid; } .membership-whatsapp-updates .btn { width: 100%; } }
+.invitation-qr { display: block; width: min(100%, 260px); height: auto; object-fit: contain; padding: 12px; margin: 8px 0; background: #fff; border-radius: 8px; filter: none; }
+.invitation-qr-large { width: min(100%, 480px); margin-inline: auto; }
+.invitation-settings-grid, .member-success-details { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 20px; }
+.member-success-details { margin: 0; }
+.member-success-details dt { font-size: .8rem; color: var(--text-muted); margin-bottom: 4px; }
+.member-success-details dd { margin: 0; overflow-wrap: anywhere; }
+.member-bootstrap { padding: 14px; border: 1px solid var(--border); border-radius: 10px; }
+.member-bootstrap input { flex: 1 1 180px; min-width: 0; }
+.welcome-preview { font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; padding: 12px; border: 1px solid var(--border); border-radius: 8px; }
+.member-invitation-status { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 14px; }
+.member-invitation-status [role="status"], .member-invitation-status [role="alert"] { flex-basis: 100%; }
+.member-success-content h2, .member-success-content h3 { margin: 0; }
+.invitation-detected { white-space: normal; overflow-wrap: anywhere; text-align: left; }
+@media (max-width: 600px) { .invitation-settings-grid, .member-success-details { grid-template-columns: 1fr; } }

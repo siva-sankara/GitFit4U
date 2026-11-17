@@ -21,7 +21,7 @@ type ReminderResult = {
 };
 
 export function memberReminderReason(member: Record<string, any>): ReminderReason {
-  if (member.invitation?.status === "PENDING") return "activation_invitation";
+  if (member.invitation?.status === "PENDING") return member.offlineAccessGranted ? "general_followup" : "activation_invitation";
   const subscription = member.currentSubscriptionId;
   if (member.directAccess && !subscription) return "general_followup";
   const payment = subscription?.latestPaymentId;

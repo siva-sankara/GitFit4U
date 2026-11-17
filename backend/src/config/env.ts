@@ -9,6 +9,7 @@ const schema = z
       .enum(["development", "test", "production"])
       .default("development"),
     PORT: z.coerce.number().int().positive().default(5000),
+    MEMBER_TEMP_PASSWORD_HOURS: z.coerce.number().int().min(1).max(72).default(24),
     OTP_MODE: z.enum(["whatsapp", "development_preview"]).default("whatsapp"),
     OTP_DEV_PREVIEW_ENABLED: z.enum(["true", "false"]).default("false").transform(value => value === "true"),
     OTP_PREVIEW_TIER: z.enum(["local"]).optional(),

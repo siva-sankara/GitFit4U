@@ -199,6 +199,7 @@ export interface DomainEventInput {
   actionUrl?: string;
   actionLabel?: string;
   source?: string;
+  skipWhatsApp?: boolean;
   details?: {
     title?: string;
     message?: string;
@@ -285,7 +286,7 @@ export async function emitDomainEvents(inputs: DomainEventInput[]) {
     await Promise.all(
       batch.map((input) => {
         const user = byId.get(String(input.userId));
-        return user ? enqueueWhatsAppDomainEvent(input, user) : undefined;
+        return user && !input.skipWhatsApp ? enqueueWhatsAppDomainEvent(input, user) : undefined;
       }),
     );
   }
@@ -306,6 +307,6 @@ export async function emitDomainEvent(input: DomainEventInput) {
     },
     { upsert: true, ...(input.session ? { session: input.session } : {}) },
   );
-  await enqueueWhatsAppDomainEvent(input, user);
+  if (!input.skipWhatsApp) await enqueueWhatsAppDomainEvent(input, user);
   return result;
 }

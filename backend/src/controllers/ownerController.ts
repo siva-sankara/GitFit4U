@@ -514,6 +514,7 @@ export async function listMembers(req: Request, res: Response) {
       isDeleted: { $ne: true },
       status: { $ne: "ARCHIVED" },
       "invitation.status": "PENDING",
+      offlineAccessGranted: { $ne: true },
     }),
     Subscription.distinct("_id", {
       ...subscriptionScope,

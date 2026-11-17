@@ -1,4 +1,5 @@
 import type { Request, Response } from "express";
+import { platformOwnersInvitation } from "../services/whatsappUpdatesService.js";
 import mongoose from "mongoose";
 import { nanoid } from "nanoid";
 import { redeemPaymentOffer, platformQuotePricing } from "../services/promotionService.js";
@@ -220,7 +221,12 @@ export async function paymentStatus(req: Request, res: Response) {
       await reconcileGatewayPayment(claimed, claimed.providerPaymentId);
     payment = await Payment.findById(payment._id).lean();
   }
-  res.json({ success: true, data: payment });
+  const membership = payment?.purpose === "MEMBERSHIP" && payment.status === "CAPTURED" && payment.fulfillmentStatus === "APPLIED"
+    ? await Subscription.findOne({ _id: payment.subscriptionId, userId: req.auth!.userId, gymId: payment.gymId, type: "GYM_MEMBERSHIP" }).select("publicId").lean()
+    : null;
+  const ownersInvitation = payment?.purpose === "PLATFORM_PLAN" && payment.status === "CAPTURED" && payment.fulfillmentStatus === "APPLIED"
+    ? await platformOwnersInvitation(req.auth!.userId, String(payment.gymId)) : null;
+  res.set("Cache-Control", "private, no-store").json({ success: true, data: { ...payment, membershipPublicId: membership?.publicId || null, ownersInvitation } });
 }
 
 async function reconcileGatewayPayment(
@@ -902,6 +908,7 @@ async function processProviderEvent(
             gymId: quote.gymId,
             entityId: subscription.publicId,
             actionUrl: `/app/subscriptions/${subscription.publicId}`,
+            details: { metadata: { membershipPurchaseConfirmed: true } },
             session: dbSession,
           });
           await emitDomainEvent({
